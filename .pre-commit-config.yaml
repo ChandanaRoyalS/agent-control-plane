@@ -16,12 +16,22 @@ repos:
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.4
+  # ruff from the *project* environment, for the same reason as mypy below:
+  # ruff-pre-commit pins its own version, which drifts from the one uv
+  # resolves, and two rulesets disagreeing means the hook rejects what CI
+  # accepts. One ruff, one ruleset.
+  - repo: local
     hooks:
       - id: ruff
-        args: [--fix]
+        name: ruff (project environment)
+        entry: .venv/bin/ruff check --fix
+        language: system
+        types: [python]
       - id: ruff-format
+        name: ruff-format (project environment)
+        entry: .venv/bin/ruff format
+        language: system
+        types: [python]
 
   # mypy runs from the *project* environment, not an isolated one.
   # The mirrors-mypy hook builds its own venv containing only whatever is

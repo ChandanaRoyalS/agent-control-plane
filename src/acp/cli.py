@@ -137,7 +137,7 @@ def _serve_command(args: argparse.Namespace) -> int:
     # Imported here, not at module scope: `acp probe` and `acp call` are
     # diagnostic commands that must start instantly, and uvicorn pulls in a
     # noticeable amount of machinery only the server needs.
-    import uvicorn
+    import uvicorn  # noqa: PLC0415
 
     async def run() -> int:
         async with gateway_from_settings(settings) as app:

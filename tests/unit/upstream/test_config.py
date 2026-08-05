@@ -1,0 +1,74 @@
+"""Unit tests for upstream configuration validation.
+
+The name rule is the interesting one: it enforces ADR 0003 structurally rather
+than by convention, so an ambiguous qualified tool name becomes impossible to
+construct instead of merely discouraged.
+"""
+
+from __future__ import annotations
+
+import pytest
+from pydantic import ValidationError
+
+from acp.upstream import UpstreamConfig
+
+
+def test_minimal_config_gets_sensible_defaults() -> None:
+    config = UpstreamConfig(name="mock-a", url="http://localhost:9101/mcp")
+
+    assert config.connect_timeout < config.read_timeout, (
+        "connect must fail faster than read: an unreachable host should not "
+        "occupy a worker for as long as a legitimately slow tool call"
+    )
+    assert config.max_keepalive_connections <= config.max_connections
+
+
+@pytest.mark.parametrize("name", ["mock-a", "mockb", "a1", "one-two-three"])
+def test_valid_names_are_accepted(name: str) -> None:
+    assert UpstreamConfig(name=name, url="http://x/mcp").name == name
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("mock_a", id="underscore-would-make-__-ambiguous"),
+        pytest.param("Mock-A", id="uppercase"),
+        pytest.param("-leading", id="leading-hyphen"),
+        pytest.param("trailing-", id="trailing-hyphen"),
+        pytest.param("double--hyphen", id="double-hyphen"),
+        pytest.param("", id="empty"),
+        pytest.param("has space", id="space"),
+    ],
+)
+def test_invalid_names_are_rejected(name: str) -> None:
+    with pytest.raises(ValidationError, match="lowercase alphanumeric"):
+        UpstreamConfig(name=name, url="http://x/mcp")
+
+
+@pytest.mark.parametrize("url", ["ftp://x/mcp", "mock-a/mcp", "//x/mcp", ""])
+def test_non_http_urls_are_rejected(url: str) -> None:
+    with pytest.raises(ValidationError, match="http"):
+        UpstreamConfig(name="mock-a", url=url)
+
+
+@pytest.mark.parametrize(
+    "field", ["connect_timeout", "read_timeout", "write_timeout", "pool_timeout"]
+)
+def test_non_positive_timeouts_are_rejected(field: str) -> None:
+    """A zero or negative timeout is a configuration bug, not a way to disable one."""
+    with pytest.raises(ValidationError):
+        UpstreamConfig(name="mock-a", url="http://x/mcp", **{field: 0})
+
+
+def test_unknown_fields_are_rejected() -> None:
+    """A typo in a config key must fail loudly rather than silently do nothing."""
+    with pytest.raises(ValidationError):
+        UpstreamConfig(name="mock-a", url="http://x/mcp", read_timout=5)  # type: ignore[call-arg]
+
+
+def test_config_is_frozen() -> None:
+    """Config is read at startup and shared across tasks; mutation would be a race."""
+    config = UpstreamConfig(name="mock-a", url="http://x/mcp")
+
+    with pytest.raises(ValidationError):
+        config.name = "other"

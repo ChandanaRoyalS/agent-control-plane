@@ -1,0 +1,20 @@
+# Upstream MCP servers the gateway brokers for.
+#
+# Names must be lowercase alphanumerics with single hyphens, at most 24
+# characters, and unique — tool names are qualified as `<name>__<tool>`
+# (ADR 0003), so an ambiguous name makes routing ambiguous.
+#
+# No secrets here. Credentials are read from the secrets directory
+# (/run/secrets by default), the way container runtimes mount them.
+
+upstreams:
+  - name: mock-a
+    url: http://127.0.0.1:9101/mcp
+
+  - name: mock-b
+    url: http://127.0.0.1:9102/mcp
+    # Per-upstream timeouts. Connect is deliberately much shorter than read:
+    # an unreachable host should fail in milliseconds, while a legitimate tool
+    # call may take tens of seconds.
+    connect_timeout: 3.0
+    read_timeout: 30.0

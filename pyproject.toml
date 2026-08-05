@@ -7,6 +7,9 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 
 dependencies = [
+    # The gateway's inbound half is built on the MCP SDK (ADR 0005). 2.0.0 is a
+    # stable release, not a beta — ADR 0002 was written before it shipped.
+    "mcp>=2.0.0",
     "httpx>=0.28",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",

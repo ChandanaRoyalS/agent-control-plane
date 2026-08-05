@@ -6,6 +6,10 @@
 > **Amendment (2026-08-05):** this decision was too coarse. The gateway's
 > outbound and inbound halves have different requirements, and only the inbound
 > half uses the SDK. See ADR 0005.
+>
+> **Correction (2026-08-05):** the SDK's v2 line reached a stable **2.0.0**
+> release. The beta-risk argument recorded below no longer applies, and was
+> never the real reason for the split — see ADR 0005 for the reason that is.
 
 ## Context
 

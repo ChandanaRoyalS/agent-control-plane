@@ -8,6 +8,8 @@ help:  ## Show this help
 install:  ## Install dependencies and git hooks
 	uv sync --all-groups
 	uv run pre-commit install
+	# Windows-hosted downloads arrive marked executable; ignore the bit entirely.
+	git config core.fileMode false
 
 check: lint types test  ## Everything CI runs, in the same order
 

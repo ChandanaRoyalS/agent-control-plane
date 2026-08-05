@@ -7,14 +7,11 @@ Built on the SDK's low-level ``Server`` rather than the high-level
 request, merged from live upstreams and (from task 37) filtered by what the
 calling principal is entitled to see. ``Server`` takes ``on_list_tools`` and
 ``on_call_tool`` as per-request async handlers, which is exactly that shape.
-
-Scope: this is task 9 — a single upstream, straight through, no namespacing.
-Task 10 adds catalogue merging across several upstreams and the
-``<upstream>__<tool>`` qualification from ADR 0003.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from typing import Any
 
@@ -27,9 +24,20 @@ from starlette.applications import Starlette
 from acp import __version__
 from acp.exceptions import ACPError
 from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
-from acp.upstream import UpstreamClient
+from acp.gateway.registry import UpstreamRegistry
+
+logger = logging.getLogger(__name__)
 
 SERVER_NAME = "agent-control-plane"
+
+DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost")
+"""Hosts accepted when nothing else is configured.
+
+The SDK enables DNS-rebinding protection by default and its allow-list has *no*
+default value, so an unconfigured server rejects every request. That is the
+right default for a security control — deny until told otherwise — but it means
+the allow-list is a required decision rather than an optional one.
+"""
 
 
 def to_mcp_error(exc: ACPError) -> MCPError:
@@ -46,13 +54,13 @@ def to_mcp_error(exc: ACPError) -> MCPError:
     return MCPError(rendered["code"], rendered["message"], rendered["data"])
 
 
-def build_server(upstream: UpstreamClient) -> Server[None]:
-    """Build an MCP server that brokers for a single upstream.
+def build_server(registry: UpstreamRegistry) -> Server[None]:
+    """Build an MCP server that brokers for the registry's upstreams.
 
-    The handlers are closures over ``upstream`` rather than methods on a class
+    The handlers are closures over ``registry`` rather than methods on a class
     because the SDK wants plain callables, and because there is no per-server
-    mutable state to hold — every request is answered from the upstream as it
-    is *now*, which is the property that makes health-driven catalogue
+    mutable state to hold — every request is answered from the upstreams as they
+    are *now*, which is the property that makes health-driven catalogue
     withdrawal (task 18) possible later.
     """
 
@@ -64,18 +72,29 @@ def build_server(upstream: UpstreamClient) -> Server[None]:
         _ctx: ServerRequestContext[None, Any],
         _params: types.PaginatedRequestParams | None,
     ) -> types.ListToolsResult:
-        try:
-            tools = await upstream.list_tools()
-        except ACPError as exc:
-            raise to_mcp_error(exc) from exc
-        return types.ListToolsResult(tools=[to_mcp_tool(tool) for tool in tools])
+        catalogue = await registry.list_tools()
+
+        if catalogue.is_total_failure:
+            # Nothing answered. Returning an empty catalogue would tell the
+            # agent it has no tools, which is indistinguishable from a correctly
+            # configured gateway with nothing attached — and would send it off
+            # to attempt the task without them. An error says "ask again later".
+            first = next(iter(catalogue.failures.values()))
+            raise to_mcp_error(first)
+
+        for name, exc in catalogue.failures.items():
+            # Partial failure is served, not raised — see UpstreamRegistry.
+            # Structured logging replaces this in task 15.
+            logger.warning("upstream %s failed during tools/list: %s", name, exc.message)
+
+        return types.ListToolsResult(tools=[to_mcp_tool(tool) for tool in catalogue.tools])
 
     async def on_call_tool(
         _ctx: ServerRequestContext[None, Any],
         params: types.CallToolRequestParams,
     ) -> types.CallToolResult:
         try:
-            result = await upstream.call_tool(params.name, params.arguments or {})
+            result = await registry.call_tool(params.name, params.arguments or {})
         except ACPError as exc:
             raise to_mcp_error(exc) from exc
         return to_mcp_call_tool_result(result)
@@ -88,18 +107,8 @@ def build_server(upstream: UpstreamClient) -> Server[None]:
     )
 
 
-DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost")
-"""Hosts accepted when nothing else is configured.
-
-The SDK enables DNS-rebinding protection by default and its allow-list has *no*
-default value, so an unconfigured server rejects every request. That is the
-right default for a security control — deny until told otherwise — but it means
-the allow-list is a required decision rather than an optional one.
-"""
-
-
 def build_app(
-    upstream: UpstreamClient,
+    registry: UpstreamRegistry,
     *,
     allowed_hosts: Sequence[str] = DEFAULT_ALLOWED_HOSTS,
     allowed_origins: Sequence[str] = (),
@@ -124,7 +133,7 @@ def build_app(
         allowed_hosts=list(allowed_hosts),
         allowed_origins=list(allowed_origins),
     )
-    return build_server(upstream).streamable_http_app(
+    return build_server(registry).streamable_http_app(
         stateless_http=True,
         json_response=True,
         transport_security=security,

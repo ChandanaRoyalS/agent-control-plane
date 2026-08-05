@@ -1,7 +1,33 @@
 # ADR 0003 — Namespace upstream tools with a double underscore
 
-**Status:** accepted
+**Status:** amended 2026-08-05
 **Date:** 2026-08-10
+
+> **Amendment (2026-08-05):** the truncation rule below is kept, with two
+> corrections learned from implementing it.
+>
+> **Truncate the tool half, never the upstream half.** The original text said
+> "truncate the upstream segment", which would make routing impossible — the
+> upstream name is the one part that must survive intact. Combined with the
+> config rule forbidding underscores in upstream names, splitting on the first
+> `__` now recovers the upstream exactly, always, even from a truncated name.
+>
+> **Cap upstream names at 24 characters** (`MAX_UPSTREAM_NAME_LENGTH`). This
+> leaves 38 for the tool half within the 64-character budget, making truncation
+> rare rather than routine. Without it, a long upstream name would force a
+> catalogue lookup on every single call.
+>
+> **Truncation cannot be detected from the name — only ruled out.** Truncated
+> names are always exactly 64 characters by construction, so anything shorter is
+> certainly intact and resolves with no lookup at all. Names at exactly the limit
+> are genuinely ambiguous (a tool may legitimately be named that long) and are
+> resolved through the upstream's catalogue rather than guessed at, because a
+> wrong guess invokes a different tool than the caller asked for.
+>
+> An earlier attempt detected truncation by re-qualifying the suffix and
+> comparing. That is always false — a truncated name is itself under the limit,
+> so re-qualifying it is a no-op. A randomised check over 200,000 name pairs
+> caught it; the idea is recorded here because it is superficially convincing.
 
 ## Context
 

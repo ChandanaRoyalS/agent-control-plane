@@ -19,14 +19,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # rather than by convention.
 _UPSTREAM_NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
+MAX_UPSTREAM_NAME_LENGTH = 24
+"""Leaves 38 characters for the tool half within the 64-character budget.
+
+Enough that truncation is rare in practice rather than routine — see ADR 0003.
+"""
+
 
 class UpstreamConfig(BaseModel):
     """Everything needed to talk to one upstream MCP server."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    name: str
-    """Short identifier. Used to qualify tool names and to label logs and spans."""
+    name: str = Field(max_length=MAX_UPSTREAM_NAME_LENGTH)
+    """Short identifier. Used to qualify tool names and to label logs and spans.
+
+    Capped so that `<upstream>__<tool>` has room for a useful tool name inside
+    the 64-character budget (ADR 0003). Without the cap a long upstream name
+    would force truncation on every tool, and truncated names need a catalogue
+    lookup to route — turning a rare cost into a constant one.
+    """
 
     url: str
     """Full URL of the upstream's MCP endpoint, e.g. ``http://mock-a:9101/mcp``."""

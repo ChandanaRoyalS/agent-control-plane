@@ -114,6 +114,30 @@ class UpstreamProtocolError(UpstreamError):
     recoverable = False
 
 
+class UnknownUpstreamError(UpstreamError):
+    """A qualified tool name referenced an upstream that is not configured.
+
+    Not recoverable: the agent cannot conjure the upstream into existence, and
+    the tool catalogue it was given never contained this name. Almost always
+    means a stale catalogue or a hand-written tool name.
+    """
+
+    code = -32015
+    recoverable = False
+
+
+class UnknownToolError(UpstreamError):
+    """A qualified name could not be resolved to a tool on its upstream.
+
+    Reached only for names that may have been truncated, after re-reading the
+    upstream's catalogue. Usually means the upstream removed the tool between
+    the agent listing it and calling it.
+    """
+
+    code = -32016
+    recoverable = False
+
+
 class UpstreamRejectedError(UpstreamError):
     """The upstream returned a well-formed JSON-RPC error.
 

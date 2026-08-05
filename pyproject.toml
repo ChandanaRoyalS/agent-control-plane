@@ -29,6 +29,13 @@ dev = [
     "ruff>=0.9",
     "hypothesis>=6.123",
     "types-pyyaml>=6.0",
+    "pre-commit>=4.0",
+    # The mock upstream fleet (src/acp/mocks) is development-only test
+    # infrastructure — see ADR 0004. It lives under src/ so it can be run
+    # standalone via docker-compose, but nothing in the gateway's runtime path
+    # imports it, so these stay out of the main dependency list.
+    "starlette>=0.45",
+    "uvicorn>=0.34",
 ]
 
 [build-system]
@@ -121,7 +128,7 @@ addopts = [
     "--cov-fail-under=80",
 ]
 markers = [
-    "integration: talks to a mock upstream over a real socket",
+    "integration: drives a mock upstream ASGI app in-process",
     "slow: takes more than a second",
 ]
 filterwarnings = ["error"]

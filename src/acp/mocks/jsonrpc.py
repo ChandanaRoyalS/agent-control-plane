@@ -32,14 +32,26 @@ JsonRpcId = int | str | None
 
 
 class JsonRpcRequest(BaseModel):
-    """An inbound JSON-RPC 2.0 request."""
+    """An inbound JSON-RPC 2.0 request.
 
-    model_config = ConfigDict(extra="forbid")
+    ``extra="forbid"`` is deliberate: a strict mock catches gateway bugs that a
+    permissive one would silently accept. That makes ``_meta`` an explicit field
+    rather than something waved through — under the 2026-07-28 revision there is
+    no ``initialize`` handshake, so every request carries its own protocol
+    version and client identity in ``_meta``, and a server that rejected it
+    would be rejecting valid traffic.
+
+    The field is named ``meta`` with an alias because Pydantic treats
+    leading-underscore attribute names as private and would not bind them.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     jsonrpc: Literal["2.0"] = "2.0"
     id: JsonRpcId = None
     method: str
     params: dict[str, Any] | None = None
+    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
 
 
 class JsonRpcErrorObject(BaseModel):

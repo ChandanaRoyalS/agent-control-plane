@@ -11,6 +11,10 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
       - id: detect-private-key        # secrets hygiene, cheaply
+      # Windows-hosted downloads arrive marked executable; catch it loudly
+      # if it ever survives core.fileMode=false (a fresh clone, another machine).
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.4
@@ -19,11 +23,18 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.1
+  # mypy runs from the *project* environment, not an isolated one.
+  # The mirrors-mypy hook builds its own venv containing only whatever is
+  # listed in additional_dependencies, so it cannot see httpx, starlette,
+  # anyio or pytest and reports import errors that CI does not. Keeping a
+  # second hand-maintained copy of the dependency list is the alternative,
+  # and it drifts the first time someone adds a package. This runs the exact
+  # command CI runs, against the exact environment CI uses.
+  - repo: local
     hooks:
       - id: mypy
-        additional_dependencies:
-          - pydantic>=2.10
-          - types-pyyaml
-        args: [--strict]
+        name: mypy (project environment)
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false

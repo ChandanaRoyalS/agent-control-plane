@@ -1,0 +1,138 @@
+[project]
+name = "agent-control-plane"
+version = "0.1.0"
+description = "A policy-enforcing, injection-screening MCP gateway for AI agents."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+dependencies = [
+    "httpx>=0.28",
+    "pydantic>=2.10",
+    "pydantic-settings>=2.7",
+    "structlog>=25.1",
+    "pyyaml>=6.0",
+    "opentelemetry-api>=1.30",
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
+]
+
+[project.scripts]
+acp = "acp.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "mypy>=1.14",
+    "ruff>=0.9",
+    "hypothesis>=6.123",
+    "types-pyyaml>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/acp"]
+
+# ---------------------------------------------------------------------------
+# Ruff — lint and format. Rules are strict on purpose; loosen deliberately,
+# never by accident. Each ignore below has a reason.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "A",         # builtin shadowing
+    "C4",        # comprehensions
+    "DTZ",       # naive datetimes
+    "T20",       # no print()
+    "PT",        # pytest style
+    "RET",       # return simplification
+    "SIM",       # simplify
+    "ARG",       # unused arguments
+    "PTH",       # use pathlib
+    "ERA",       # commented-out code
+    "PL",        # pylint subset
+    "TRY",       # exception antipatterns
+    "RUF",
+    "ASYNC",     # async antipatterns — matters a lot in this project
+    "S",         # bandit security rules
+]
+ignore = [
+    "TRY003",    # long messages in raises: we want descriptive errors for agents
+    "PLR0913",   # many arguments: config objects legitimately have many
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101",      # assert is the point of a test
+    "PLR2004",   # magic numbers are fine in assertions
+    "ARG",       # fixtures are often unused-by-name
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+# ---------------------------------------------------------------------------
+# Mypy — strict from day one, while the codebase is empty and it is free.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+warn_no_return = true
+disallow_any_explicit = false      # Pydantic and JSON-RPC need some Any
+show_error_codes = true
+pretty = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = true       # tests get typed too; they are code
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--cov=acp",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+    "--cov-fail-under=80",
+]
+markers = [
+    "integration: talks to a mock upstream over a real socket",
+    "slow: takes more than a second",
+]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/acp"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@overload",
+]

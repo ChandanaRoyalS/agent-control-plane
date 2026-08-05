@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Environments
+.venv/
+venv/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+
+# Type checking
+.mypy_cache/
+.ruff_cache/
+
+# Secrets — never commit these. See docs/decisions/0004 for the config approach.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store

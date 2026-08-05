@@ -19,7 +19,9 @@ from collections.abc import Sequence
 from typing import Any
 
 from acp import __version__
+from acp.config import load_settings
 from acp.exceptions import ACPError
+from acp.runtime import configure_logging, gateway_from_settings
 from acp.upstream import UpstreamClient, UpstreamConfig
 
 
@@ -46,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="{}",
         help='tool arguments as a JSON object, e.g. \'{"path": "runbooks/deploy.md"}\'',
     )
+
+    serve = subparsers.add_parser("serve", help="run the gateway")
+    serve.add_argument("--host", help="override ACP_HOST")
+    serve.add_argument("--port", type=int, help="override ACP_PORT")
+    serve.add_argument("--upstreams-file", help="override ACP_UPSTREAMS_FILE")
 
     return parser
 
@@ -83,6 +90,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help(sys.stderr)
         return USAGE_ERROR
 
+    if args.command == "serve":
+        return _serve_command(args)
+
     try:
         config = UpstreamConfig(
             name=args.name,
@@ -98,6 +108,55 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "call":
         return _call_command(config, args)
     return _usage_error(f"unknown command: {args.command}")
+
+
+def _serve_command(args: argparse.Namespace) -> int:
+    """Run the gateway until interrupted.
+
+    Configuration is read and validated before uvicorn is even imported, so a
+    bad config fails in milliseconds with a readable message rather than after
+    a port has been bound.
+    """
+    overrides = {
+        key: value
+        for key, value in (
+            ("host", args.host),
+            ("port", args.port),
+            ("upstreams_file", args.upstreams_file),
+        )
+        if value is not None
+    }
+
+    try:
+        settings = load_settings(**overrides)
+    except ACPError as exc:
+        return _usage_error(exc.message)
+
+    configure_logging(settings.log_level)
+
+    # Imported here, not at module scope: `acp probe` and `acp call` are
+    # diagnostic commands that must start instantly, and uvicorn pulls in a
+    # noticeable amount of machinery only the server needs.
+    import uvicorn  # noqa: PLC0415
+
+    async def run() -> int:
+        async with gateway_from_settings(settings) as app:
+            server = uvicorn.Server(
+                uvicorn.Config(
+                    app,
+                    host=settings.host,
+                    port=settings.port,
+                    log_level=settings.log_level.lower(),
+                )
+            )
+            # uvicorn installs its own SIGTERM/SIGINT handling: it stops
+            # accepting, drains in-flight requests, then returns — after which
+            # this context manager closes the upstream pools. That ordering is
+            # why the clients are managed around the server, not inside it.
+            await server.serve()
+        return 0
+
+    return _run(run())
 
 
 def _call_command(config: UpstreamConfig, args: argparse.Namespace) -> int:

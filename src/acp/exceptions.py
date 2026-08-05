@@ -56,3 +56,88 @@ class ConfigurationError(ACPError):
 
     code = -32001
     recoverable = False
+
+
+# ---------------------------------------------------------------------------
+# Upstream failures
+#
+# The `recoverable` flag on each of these is not decoration. It is forwarded to
+# the agent in the JSON-RPC `data` payload, and it is the signal the agent uses
+# to decide whether to try again, try a different tool, or give up. Setting it
+# wrongly produces either a stuck agent or an infinite retry loop.
+# ---------------------------------------------------------------------------
+
+
+class UpstreamError(ACPError):
+    """Base for anything that went wrong talking to an upstream MCP server."""
+
+    code = -32010
+
+    def __init__(
+        self, message: str, *, upstream: str, details: dict[str, Any] | None = None
+    ) -> None:
+        super().__init__(message, details={"upstream": upstream, **(details or {})})
+        self.upstream = upstream
+
+
+class UpstreamTimeoutError(UpstreamError):
+    """The upstream did not answer within its configured budget.
+
+    Recoverable: a timeout says nothing about whether the request was valid, and
+    the same call may well succeed on a retry.
+    """
+
+    code = -32011
+    recoverable = True
+
+
+class UpstreamUnavailableError(UpstreamError):
+    """The upstream could not be reached at all — connection refused, DNS, TLS.
+
+    Recoverable in the sense that matters to an agent: the tool is not broken,
+    it is temporarily unreachable, so routing around it is the right response.
+    """
+
+    code = -32012
+    recoverable = True
+
+
+class UpstreamProtocolError(UpstreamError):
+    """The upstream answered, but not with valid JSON-RPC.
+
+    Deliberately *not* recoverable. A malformed response means the upstream is
+    broken or is not an MCP server at all, and retrying will produce the same
+    garbage while burning the agent's budget.
+    """
+
+    code = -32013
+    recoverable = False
+
+
+class UpstreamRejectedError(UpstreamError):
+    """The upstream returned a well-formed JSON-RPC error.
+
+    This is the upstream working correctly and saying no — unknown method,
+    unknown tool, bad parameters. It carries the upstream's own error code so
+    the gateway can map it rather than flattening every rejection into one.
+
+    Note this is a *protocol* rejection. A tool that ran and failed is not an
+    error at all at this layer: MCP reports that as ``isError`` inside a normal
+    result, and it is returned to the caller as data.
+    """
+
+    code = -32014
+    recoverable = False
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        upstream: str,
+        upstream_code: int,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            message, upstream=upstream, details={"upstream_code": upstream_code, **(details or {})}
+        )
+        self.upstream_code = upstream_code

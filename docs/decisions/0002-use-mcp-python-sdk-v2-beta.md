@@ -1,7 +1,11 @@
 # ADR 0002 — Use the MCP Python SDK v2 beta, pinned exactly
 
-**Status:** accepted
+**Status:** amended by [ADR 0005](0005-hybrid-protocol-layer.md)
 **Date:** 2026-08-10
+
+> **Amendment (2026-08-05):** this decision was too coarse. The gateway's
+> outbound and inbound halves have different requirements, and only the inbound
+> half uses the SDK. See ADR 0005.
 
 ## Context
 

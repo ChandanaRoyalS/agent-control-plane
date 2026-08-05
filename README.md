@@ -3,7 +3,7 @@
 A policy-enforcing, injection-screening MCP gateway that sits between AI agents
 and the systems they are allowed to touch.
 
-[![CI](https://github.com/USERNAME/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/USERNAME/agent-control-plane/actions/workflows/ci.yml)
+[![CI](https://github.com/chandanaroyal719-bot/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/chandanaroyal719-bot/agent-control-plane/actions/workflows/ci.yml)
 
 > **Status:** in development. Phase 1 of 10 — foundation.
 

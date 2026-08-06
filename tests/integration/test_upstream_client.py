@@ -25,6 +25,13 @@ from acp.exceptions import (
 from acp.mocks import mock_a, mock_b
 from acp.mocks.chaos import CHAOS_MODE_HEADER, CHAOS_PARAM_HEADER
 from acp.upstream import UpstreamClient, UpstreamConfig
+from acp.upstream.envelope import (
+    CLIENT_CAPABILITIES_META_KEY,
+    CLIENT_INFO_META_KEY,
+    PROTOCOL_VERSION_META_KEY,
+    decode_header_value,
+    encode_header_value,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -293,23 +300,86 @@ def test_outbound_requests_carry_the_routable_headers() -> None:
     assert captured[1].headers["mcp-name"] == "read_document"
 
 
-def test_outbound_requests_carry_protocol_version_in_meta() -> None:
-    """The stateless revision has no handshake, so every request declares itself."""
-    captured: list[dict[str, Any]] = []
+def capture_request(
+    call: Any, response: httpx.Response | None = None
+) -> tuple[dict[str, Any], httpx.Headers]:
+    """Run one client call and return the request body and headers it sent."""
+    bodies: list[dict[str, Any]] = []
+    headers: list[httpx.Headers] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        captured.append(json.loads(request.content))
-        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {"tools": []}})
+        bodies.append(json.loads(request.content))
+        headers.append(request.headers)
+        return response or httpx.Response(
+            200, json={"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
+        )
 
     async def _run() -> None:
         http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         async with UpstreamClient(UpstreamConfig(name="mock-a", url="http://mock/mcp"), http) as c:
-            await c.list_tools()
+            await call(c)
 
     run(_run)
+    return bodies[0], headers[0]
 
-    assert captured[0]["_meta"]["protocolVersion"] == "2026-07-28"
-    assert captured[0]["_meta"]["client"]["name"] == "agent-control-plane"
+
+def test_outbound_requests_carry_the_envelope_in_params_meta() -> None:
+    """The stateless revision has no handshake, so every request declares itself
+    — in ``params._meta``, under namespaced keys.
+
+    This test previously asserted a top-level ``_meta`` with bare key names,
+    which is an envelope this project invented. The mocks agreed with it, so
+    297 tests passed while no real MCP server would have accepted a single
+    request the gateway made. Found by pointing the gateway at itself.
+    """
+    body, _ = capture_request(lambda c: c.list_tools())
+    meta = body["params"]["_meta"]
+
+    assert "_meta" not in body, "the envelope belongs inside params, not beside them"
+    assert meta[PROTOCOL_VERSION_META_KEY] == "2026-07-28"
+    assert CLIENT_CAPABILITIES_META_KEY in meta, "required, even when empty"
+    assert meta[CLIENT_INFO_META_KEY]["name"] == "agent-control-plane"
+
+
+def test_params_are_always_present_even_when_the_method_takes_none() -> None:
+    """``tools/list`` has no arguments, but the envelope lives in params, so a
+    request without them is rejected before the method is ever dispatched."""
+    body, _ = capture_request(lambda c: c.list_tools())
+
+    assert "params" in body
+
+
+def test_routing_headers_mirror_the_body() -> None:
+    """A server checks these against the body rather than trusting them. The
+    check exists so a proxy cannot authorize one method while the server runs
+    another."""
+    body, headers = capture_request(lambda c: c.list_tools())
+
+    assert headers["Mcp-Method"] == body["method"] == "tools/list"
+    assert headers["Mcp-Protocol-Version"] == body["params"]["_meta"][PROTOCOL_VERSION_META_KEY]
+    assert "Mcp-Name" not in headers, "tools/list has no subject to name"
+
+
+def test_a_tool_call_names_its_subject() -> None:
+    call_result = httpx.Response(
+        200, json={"jsonrpc": "2.0", "id": 1, "result": {"content": [], "isError": False}}
+    )
+    body, headers = capture_request(lambda c: c.call_tool("search", {"q": "x"}), call_result)
+
+    assert headers["Mcp-Name"] == "search" == body["params"]["name"]
+
+
+def test_a_tool_name_that_cannot_travel_in_a_header_is_encoded() -> None:
+    """Tool names come from upstreams the gateway does not control, so this is
+    an input someone else chooses. Sending it raw produces a header a server
+    cannot compare, and in the worst case one it misparses."""
+    call_result = httpx.Response(
+        200, json={"jsonrpc": "2.0", "id": 1, "result": {"content": [], "isError": False}}
+    )
+    body, headers = capture_request(lambda c: c.call_tool("recherche-naïve", {}), call_result)
+
+    assert headers["Mcp-Name"].startswith("=?base64?")
+    assert decode_header_value(headers["Mcp-Name"]) == body["params"]["name"] == "recherche-naïve"
 
 
 def test_request_ids_increment() -> None:
@@ -388,3 +458,26 @@ def test_tools_list_without_a_tools_array_raises_protocol_error() -> None:
 
     with pytest.raises(UpstreamProtocolError, match="tools"):
         run(_run)
+
+
+def test_a_malformed_sentinel_decodes_to_nothing() -> None:
+    """Security-relevant, and the reason decoding is not just "strip the
+    wrapper". A value that opens the sentinel but is not valid base64 is not a
+    value at all. Returning the raw string would let a caller smuggle a literal
+    ``=?base64?...?=`` past a comparison the server makes against the body.
+    """
+    assert decode_header_value("=?base64?not-base64!?=") is None
+
+
+def test_a_sentinel_shaped_name_survives_a_round_trip() -> None:
+    """Tool names come from upstreams the gateway does not control, so a tool
+    genuinely named like the codec's own wrapper is an input someone else
+    chooses, not a hypothetical."""
+    name = "=?base64?xxx?="
+
+    assert decode_header_value(encode_header_value(name)) == name
+
+
+def test_decoding_passes_through_a_plain_value() -> None:
+    assert decode_header_value("search") == "search"
+    assert decode_header_value(None) is None

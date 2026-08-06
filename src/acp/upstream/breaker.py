@@ -240,14 +240,22 @@ class CircuitBreaker:
                 self._probes_in_flight = max(0, self._probes_in_flight - 1)
 
             if exc is None:
-                if self._state is not BreakerState.CLOSED:
-                    # Only the transition is logged, not every success. A line
-                    # per healthy call would bury the three events that matter
-                    # under the traffic they are meant to describe.
-                    self._log("breaker.closed")
+                recovered = self._state is not BreakerState.CLOSED
                 self._consecutive_failures = 0
                 self._state = BreakerState.CLOSED
                 self._opened_at = None
+                if recovered:
+                    # Logged *after* the reset, so the line announcing recovery
+                    # reports zero consecutive failures rather than the count
+                    # that caused the outage. Logging it first read as though
+                    # the upstream were still failing at the moment it
+                    # recovered — how many failures preceded this is already on
+                    # the `breaker.opened` line.
+                    #
+                    # Only transitions are logged, not every success: a line per
+                    # healthy call would bury the three events that matter under
+                    # the traffic they are meant to describe.
+                    self._log("breaker.closed")
                 return
 
             if not counts_as_failure(exc):

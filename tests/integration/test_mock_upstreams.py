@@ -18,7 +18,7 @@ import pytest
 from acp.mocks import mock_a, mock_b
 from acp.mocks.chaos import CHAOS_MODE_HEADER, CHAOS_PARAM_HEADER, CHAOS_SIMULATED_ERROR
 from acp.mocks.jsonrpc import INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND, PARSE_ERROR
-from tests.integration.helpers import MCP_URL, asgi_client, rpc
+from tests.integration.helpers import MCP_URL, asgi_client, headers_for, rpc
 
 pytestmark = pytest.mark.integration
 
@@ -28,7 +28,8 @@ def post(app: Any, body: Any, headers: dict[str, str] | None = None) -> Any:
 
     async def _run() -> Any:
         async with asgi_client(app) as client:
-            response = await client.post(MCP_URL, json=body, headers=headers or {})
+            merged = {**headers_for(body), **(headers or {})}
+            response = await client.post(MCP_URL, json=body, headers=merged)
             return response.json()
 
     return anyio.run(_run)
@@ -252,12 +253,21 @@ def test_chaos_hang_mode_outlives_a_deadline() -> None:
     """
 
     async def _run() -> bool:
+        body = rpc("tools/list")
         async with asgi_client(mock_a.app) as client:
             with anyio.move_on_after(0.2) as scope:
                 await client.post(
                     MCP_URL,
-                    json=rpc("tools/list"),
-                    headers={CHAOS_MODE_HEADER: "hang", CHAOS_PARAM_HEADER: "5"},
+                    json=body,
+                    # Routing headers included deliberately: envelope validation
+                    # runs before the hang, so an invalid request now fails fast
+                    # instead of hanging — and this test would pass for entirely
+                    # the wrong reason.
+                    headers={
+                        **headers_for(body),
+                        CHAOS_MODE_HEADER: "hang",
+                        CHAOS_PARAM_HEADER: "5",
+                    },
                 )
             return bool(scope.cancelled_caught)
 

@@ -18,3 +18,17 @@ upstreams:
     # call may take tens of seconds.
     connect_timeout: 3.0
     read_timeout: 30.0
+
+# Retrying is deliberately conservative. `tools/list` is always retried — it is
+# a read. Tool *calls* are retried only for tools named here, because a timeout
+# means the gateway got no answer, not that nothing happened: a retried
+# `create_ticket` may file a second ticket with nobody able to tell.
+#
+# Only read-only tools belong in `idempotent_tools`.
+#
+#   - name: mock-a
+#     url: http://127.0.0.1:9101/mcp
+#     idempotent_tools: ["read_document", "search"]   # NOT create_ticket
+#     max_attempts: 3
+#     initial_backoff: 0.1
+#     max_backoff: 5.0

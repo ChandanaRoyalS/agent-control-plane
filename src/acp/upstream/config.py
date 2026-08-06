@@ -66,6 +66,28 @@ class UpstreamConfig(BaseModel):
     max_keepalive_connections: int = Field(default=10, ge=0)
     """Idle connections kept warm between requests."""
 
+    max_attempts: int = Field(default=3, ge=1)
+    """Total attempts per operation, including the first. 1 disables retrying."""
+
+    initial_backoff: float = Field(default=0.1, gt=0)
+    """Seconds before the first retry, before jitter is applied."""
+
+    max_backoff: float = Field(default=5.0, gt=0)
+    """Ceiling on the backoff, so exponential growth cannot exceed a deadline."""
+
+    idempotent_tools: tuple[str, ...] = ()
+    """Tools that are safe to call more than once, and so safe to retry.
+
+    Empty by default, which means **no tool call is ever retried** unless
+    someone explicitly said it was safe. That default is the conservative
+    direction on purpose: a timeout means *no answer*, not *no effect*, so a
+    retried ``create_ticket`` may well file a second ticket while the client
+    believes the first one failed. Read-only tools — search, get, list — are
+    the ones that belong here.
+
+    ``tools/list`` is retried regardless; it is a read by definition.
+    """
+
     @field_validator("name")
     @classmethod
     def _validate_name(cls, value: str) -> str:

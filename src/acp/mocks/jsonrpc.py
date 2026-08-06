@@ -35,14 +35,14 @@ class JsonRpcRequest(BaseModel):
     """An inbound JSON-RPC 2.0 request.
 
     ``extra="forbid"`` is deliberate: a strict mock catches gateway bugs that a
-    permissive one would silently accept. That makes ``_meta`` an explicit field
-    rather than something waved through — under the 2026-07-28 revision there is
-    no ``initialize`` handshake, so every request carries its own protocol
-    version and client identity in ``_meta``, and a server that rejected it
-    would be rejecting valid traffic.
+    permissive one would silently accept.
 
-    The field is named ``meta`` with an alias because Pydantic treats
-    leading-underscore attribute names as private and would not bind them.
+    There is deliberately **no top-level** ``_meta`` field. This model used to
+    have one, because the gateway used to send one — and because both sides
+    agreed, the whole suite passed against a request shape no real MCP server
+    accepts. The 2026-07-28 envelope lives in ``params._meta``. Forbidding
+    extras now means the old shape is rejected here, so that particular
+    regression cannot come back quietly.
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -51,7 +51,6 @@ class JsonRpcRequest(BaseModel):
     id: JsonRpcId = None
     method: str
     params: dict[str, Any] | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
 
 
 class JsonRpcErrorObject(BaseModel):
@@ -98,6 +97,13 @@ INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
+HEADER_MISMATCH = -32020
+"""A routing header disagrees with the body it claims to describe.
+
+Its own code rather than a generic bad request, because the failure is
+specific and the fix is specific: whoever built the request mirrored one of
+`Mcp-Method` / `Mcp-Name` / `Mcp-Protocol-Version` incorrectly.
+"""
 # The implementation-defined range is -32000 to -32099. Chaos-specific codes
 # live in `chaos.py` so this module stays purely about the real protocol.
 

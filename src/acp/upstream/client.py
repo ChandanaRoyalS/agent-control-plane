@@ -30,21 +30,14 @@ from acp.exceptions import (
     UpstreamUnavailableError,
 )
 from acp.upstream.config import UpstreamConfig
-from acp.upstream.models import PROTOCOL_VERSION, CallToolResult, ToolDefinition
+from acp.upstream.envelope import routing_headers, with_envelope
+from acp.upstream.models import CallToolResult, ToolDefinition
 
 logger = logging.getLogger(__name__)
 
-MCP_METHOD_HEADER = "Mcp-Method"
-"""Routable header added by the 2026-07-28 revision.
-
-Carries the JSON-RPC method alongside the body so a gateway, rate limiter or WAF
-can route and meter without parsing the request. The gateway sets it on outbound
-requests for the same reason it will *read* it on inbound ones in task 35:
-authorization decisions should not require deserialising a body first.
-"""
-
-MCP_NAME_HEADER = "Mcp-Name"
-"""Routable header carrying the tool name on a ``tools/call``."""
+CLIENT_NAME = "agent-control-plane"
+"""Identity sent in every request's envelope, since there is no handshake to
+introduce ourselves in."""
 
 
 class UpstreamClient:
@@ -144,23 +137,20 @@ class UpstreamClient:
         Every failure path out of this method raises a member of the exception
         taxonomy. Nothing else escapes.
         """
+        # The envelope lives in `params._meta`, so `params` is always present
+        # — even for a method that takes no arguments. A `tools/list` with no
+        # params is not a valid 2026-07-28 request, and a real server rejects
+        # it with -32602 before the method is ever dispatched.
         body: dict[str, Any] = {
             "jsonrpc": "2.0",
             "id": next(self._ids),
             "method": method,
-            # The stateless revision removed the initialize handshake, so
-            # identity and protocol version travel with each request.
-            "_meta": {
-                "protocolVersion": PROTOCOL_VERSION,
-                "client": {"name": "agent-control-plane", "version": __version__},
-            },
+            "params": with_envelope(params, CLIENT_NAME, __version__),
         }
-        if params is not None:
-            body["params"] = dict(params)
-
-        headers = {MCP_METHOD_HEADER: method}
-        if tool_name is not None:
-            headers[MCP_NAME_HEADER] = tool_name
+        # Derived from the body rather than assembled alongside it, so the
+        # headers cannot drift from what they are asserting about. A server
+        # rejects a request whose header and body disagree.
+        headers = routing_headers(method, body["params"])
 
         started = time.perf_counter()
         try:

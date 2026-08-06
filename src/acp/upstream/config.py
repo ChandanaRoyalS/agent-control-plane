@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Upstream names must not contain the `__` separator used to qualify tool names
 # (ADR 0003), or `mock-a__search` would be ambiguous. Restricting to lowercase
@@ -60,8 +60,13 @@ class UpstreamConfig(BaseModel):
     and worth being able to tell apart in metrics."""
 
     max_connections: int = Field(default=20, gt=0)
-    """Ceiling on concurrent connections. This is the bulkhead: one saturated
-    upstream must not be able to consume the whole event loop."""
+    """Ceiling on concurrent *sockets* to this upstream.
+
+    Not the bulkhead — that is ``max_concurrency``, which bounds calls and
+    refuses rather than waits. This is the pool behind it, and configuration
+    keeps it at or above the bulkhead so it can never be the thing that
+    saturates first.
+    """
 
     max_keepalive_connections: int = Field(default=10, ge=0)
     """Idle connections kept warm between requests."""
@@ -87,6 +92,53 @@ class UpstreamConfig(BaseModel):
 
     ``tools/list`` is retried regardless; it is a read by definition.
     """
+
+    max_concurrency: int = Field(default=20, gt=0)
+    """The bulkhead: concurrent in-flight calls allowed to this upstream.
+
+    Call number ``max_concurrency + 1`` is refused immediately rather than
+    queued, so one slow upstream cannot occupy the whole gateway while the
+    healthy ones go unanswered. Must not exceed ``max_connections``; see
+    :meth:`_bulkhead_fits_the_pool`.
+    """
+
+    failure_threshold: int = Field(default=5, ge=1)
+    """Consecutive failures that open this upstream's circuit breaker.
+
+    Counted per attempt, not per logical call — a call that fails three retries
+    contributes three. Set to a very large number to effectively disable the
+    breaker for an upstream that must never be withdrawn.
+    """
+
+    reset_timeout: float = Field(default=30.0, gt=0)
+    """Seconds an open circuit waits before letting a trial call through."""
+
+    half_open_max_calls: int = Field(default=1, ge=1)
+    """Concurrent trial calls allowed while the circuit is half-open.
+
+    One by default: a service that has just come back up is the last thing that
+    should receive a burst.
+    """
+
+    @model_validator(mode="after")
+    def _bulkhead_fits_the_pool(self) -> UpstreamConfig:
+        """The bulkhead must be the narrower of the two limits.
+
+        If it were wider, the connection pool would saturate first and calls
+        would queue for ``pool_timeout`` — silently reintroducing exactly the
+        unbounded waiting the bulkhead exists to prevent, and reporting it as a
+        timeout rather than as overload. Enforcing the ordering here means a
+        pool timeout in production is unambiguously a bug rather than routine
+        backpressure.
+        """
+        if self.max_concurrency > self.max_connections:
+            msg = (
+                f"max_concurrency ({self.max_concurrency}) must not exceed "
+                f"max_connections ({self.max_connections}): the bulkhead has to "
+                f"refuse before the connection pool starts queueing"
+            )
+            raise ValueError(msg)
+        return self
 
     @field_validator("name")
     @classmethod

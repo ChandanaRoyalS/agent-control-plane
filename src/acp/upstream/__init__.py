@@ -11,11 +11,18 @@ requirements and uses the SDK.
 from acp.upstream.client import UpstreamClient
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.models import CallToolResult, ContentBlock, ToolDefinition
+from acp.upstream.protocol import Upstream
+from acp.upstream.resilient import RetryingUpstreamClient, policy_for
+from acp.upstream.retry import RetryPolicy
 
 __all__ = [
     "CallToolResult",
     "ContentBlock",
+    "RetryPolicy",
+    "RetryingUpstreamClient",
     "ToolDefinition",
+    "Upstream",
     "UpstreamClient",
     "UpstreamConfig",
+    "policy_for",
 ]

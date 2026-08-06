@@ -7,6 +7,8 @@ construct instead of merely discouraged.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -56,8 +58,12 @@ def test_non_http_urls_are_rejected(url: str) -> None:
 )
 def test_non_positive_timeouts_are_rejected(field: str) -> None:
     """A zero or negative timeout is a configuration bug, not a way to disable one."""
+    # Typed explicitly: an untyped literal makes mypy infer dict[str, int],
+    # which cannot satisfy the tuple-valued fields on the model.
+    overrides: dict[str, Any] = {field: 0}
+
     with pytest.raises(ValidationError):
-        UpstreamConfig(name="mock-a", url="http://x/mcp", **{field: 0})
+        UpstreamConfig(name="mock-a", url="http://x/mcp", **overrides)
 
 
 def test_unknown_fields_are_rejected() -> None:

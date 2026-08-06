@@ -18,9 +18,9 @@ from collections.abc import Mapping
 from types import TracebackType
 from typing import Any, Self
 
-from acp.upstream.client import UpstreamClient
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.models import CallToolResult, ToolDefinition
+from acp.upstream.protocol import Upstream
 from acp.upstream.retry import RetryPolicy, with_retry
 
 logger = logging.getLogger(__name__)
@@ -36,24 +36,22 @@ def policy_for(config: UpstreamConfig) -> RetryPolicy:
 
 
 class RetryingUpstreamClient:
-    """Wraps an ``UpstreamClient``, retrying only what is safe to retry.
+    """Wraps any ``Upstream``, retrying only what is safe to retry.
 
-    Structurally compatible with ``UpstreamClient`` — same ``config``,
-    ``list_tools``, ``call_tool`` and lifecycle — so the registry can hold
-    either without knowing which it has.
+    Typed against the protocol rather than the concrete client so it can sit on
+    top of the guard layer as well as directly on a client. It satisfies the
+    same protocol itself, which is what makes the layers stack in the first
+    place — see ``acp.upstream.factory`` for the order they are built in and
+    why that order is load-bearing.
     """
 
-    def __init__(self, inner: UpstreamClient, policy: RetryPolicy | None = None) -> None:
+    def __init__(self, inner: Upstream, policy: RetryPolicy | None = None) -> None:
         self._inner = inner
         self._policy = policy or policy_for(inner.config)
 
     @property
     def config(self) -> UpstreamConfig:
         return self._inner.config
-
-    @classmethod
-    async def connect(cls, config: UpstreamConfig) -> Self:
-        return cls(await UpstreamClient.connect(config))
 
     async def aclose(self) -> None:
         await self._inner.aclose()

@@ -94,23 +94,30 @@ class RetryingUpstreamClient:
             return await self._inner.call_tool(name, arguments)
 
         return await with_retry(
-            operation, self._policy, on_retry=self._log_retry(f"tools/call {name}")
+            operation, self._policy, on_retry=self._log_retry("tools/call", tool=name)
         )
 
-    def _log_retry(self, label: str) -> Any:
+    def _log_retry(self, operation: str, tool: str | None = None) -> Any:
         """A retry nobody can see turns a degraded upstream into mystery latency.
 
-        Structured logging replaces this in task 15 and a metric in task 17.
+        An event with fields rather than a sentence: `upstream.retry` can be
+        counted per upstream and per error type without anyone writing a regular
+        expression against a message that will eventually be reworded. Task 17
+        turns exactly these fields into a metric.
         """
 
         def observe(attempt: int, delay: float, exc: BaseException) -> None:
             logger.warning(
-                "retrying %s on %s after attempt %d (%s), waiting %.3fs",
-                label,
-                self.config.name,
-                attempt,
-                type(exc).__name__,
-                delay,
+                "upstream.retry",
+                extra={
+                    "upstream": self.config.name,
+                    "operation": operation,
+                    "tool": tool,
+                    "attempt": attempt,
+                    "max_attempts": self._policy.max_attempts,
+                    "delay_ms": round(delay * 1000, 2),
+                    "error": type(exc).__name__,
+                },
             )
 
         return observe

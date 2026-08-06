@@ -14,6 +14,8 @@ from contextlib import asynccontextmanager
 import httpx
 from starlette.applications import Starlette
 
+from acp.upstream.envelope import routing_headers, with_envelope
+
 MCP_URL = "/mcp"
 
 
@@ -34,8 +36,29 @@ def rpc(
     invariant in its value type, so a caller holding a ``dict[str, list[str]]``
     could not pass it to a ``dict[str, object]`` parameter. ``Mapping`` is
     covariant in its value type, which is what makes ordinary call sites work.
+
+    Always carries the 2026-07-28 envelope in ``params._meta``, because a
+    request without one is not a valid request and a test that builds one is
+    testing a shape no server accepts. This helper is the single place that
+    knows the envelope, so the tests could not drift from the client even if
+    someone wanted them to.
     """
-    body: dict[str, object] = {"jsonrpc": "2.0", "id": request_id, "method": method}
-    if params is not None:
-        body["params"] = dict(params)
-    return body
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": method,
+        "params": with_envelope(params, "acp-tests", "0"),
+    }
+
+
+def headers_for(body: Mapping[str, object]) -> dict[str, str]:
+    """The routing headers a server will check this body against.
+
+    Derived from the body rather than passed alongside it, so a test cannot
+    accidentally assert agreement between two things it wrote separately.
+    """
+    method = body.get("method")
+    if not isinstance(method, str):
+        return {}
+    params = body.get("params")
+    return routing_headers(method, params if isinstance(params, Mapping) else None)

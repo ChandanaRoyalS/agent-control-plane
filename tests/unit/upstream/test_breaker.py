@@ -7,6 +7,7 @@ and the timing rules are the part most worth testing carefully.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import anyio
@@ -456,3 +457,29 @@ def test_policy_is_derived_from_upstream_config() -> None:
 def test_the_snapshot_names_the_upstream() -> None:
     """Health output and metrics both need to say *which* upstream is out."""
     assert breaker().snapshot().upstream == "mock-a"
+
+
+def test_the_recovery_event_reports_no_outstanding_failures(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A line announcing recovery that still shows five consecutive failures
+    reads as though the upstream were failing at the moment it recovered. How
+    many failures caused the outage is already on the `breaker.opened` line.
+    """
+    clock = FakeClock()
+    cb = breaker(clock, failure_threshold=2, reset_timeout=5.0)
+
+    async def _run() -> None:
+        await fail(cb)
+        await fail(cb)
+        clock.advance(5.0)
+        await succeed(cb)
+
+    with caplog.at_level(logging.WARNING, logger="acp.upstream.breaker"):
+        run(_run)
+
+    opened = next(r for r in caplog.records if r.getMessage() == "breaker.opened")
+    closed = next(r for r in caplog.records if r.getMessage() == "breaker.closed")
+
+    assert opened.consecutive_failures == 2  # type: ignore[attr-defined]
+    assert closed.consecutive_failures == 0  # type: ignore[attr-defined]

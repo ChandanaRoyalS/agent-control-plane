@@ -25,6 +25,7 @@ from acp import __version__
 from acp.exceptions import ACPError
 from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.registry import UpstreamRegistry
+from acp.observability import RequestContextMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +85,16 @@ def build_server(registry: UpstreamRegistry) -> Server[None]:
 
         for name, exc in catalogue.failures.items():
             # Partial failure is served, not raised — see UpstreamRegistry.
-            # Structured logging replaces this in task 15.
-            logger.warning("upstream %s failed during tools/list: %s", name, exc.message)
+            logger.warning(
+                "gateway.upstream_degraded",
+                extra={
+                    "upstream": name,
+                    "operation": "tools/list",
+                    "error": type(exc).__name__,
+                    "reason": exc.message,
+                    "served_tools": len(catalogue.tools),
+                },
+            )
 
         return types.ListToolsResult(tools=[to_mcp_tool(tool) for tool in catalogue.tools])
 
@@ -133,8 +142,15 @@ def build_app(
         allowed_hosts=list(allowed_hosts),
         allowed_origins=list(allowed_origins),
     )
-    return build_server(registry).streamable_http_app(
+    app = build_server(registry).streamable_http_app(
         stateless_http=True,
         json_response=True,
         transport_security=security,
     )
+    # Added to Starlette's own stack rather than by wrapping the app, so the
+    # returned object is still a Starlette instance — `app.router` and the
+    # lifespan context are part of this function's contract and the tests use
+    # them. Safe to call here because Starlette builds its middleware stack
+    # lazily, on the first request rather than at construction.
+    app.add_middleware(RequestContextMiddleware)
+    return app

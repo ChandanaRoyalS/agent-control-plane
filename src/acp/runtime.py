@@ -28,14 +28,6 @@ from acp.upstream import Upstream, UpstreamConfig, connect_upstream
 logger = logging.getLogger(__name__)
 
 
-def configure_logging(level: str) -> None:
-    """Minimal logging setup. Structured JSON logging replaces this in task 15."""
-    logging.basicConfig(
-        level=level.upper(),
-        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-    )
-
-
 @asynccontextmanager
 async def gateway_from_configs(
     upstreams: Sequence[UpstreamConfig],
@@ -54,9 +46,11 @@ async def gateway_from_configs(
         for config in upstreams:
             clients.append(await connect_upstream(config))
         logger.info(
-            "gateway ready with %d upstream(s): %s",
-            len(clients),
-            ", ".join(c.config.name for c in clients) or "none",
+            "gateway.ready",
+            extra={
+                "upstream_count": len(clients),
+                "upstreams": [c.config.name for c in clients],
+            },
         )
 
         app = build_app(
@@ -72,8 +66,10 @@ async def gateway_from_configs(
             try:
                 await client.aclose()
             except Exception:
-                logger.exception("error closing upstream %s", client.config.name)
-        logger.info("gateway shut down, %d upstream pool(s) closed", len(clients))
+                logger.exception(
+                    "gateway.upstream_close_failed", extra={"upstream": client.config.name}
+                )
+        logger.info("gateway.stopped", extra={"upstream_count": len(clients)})
 
 
 @asynccontextmanager

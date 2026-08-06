@@ -74,6 +74,11 @@ class GatewaySettings(BaseSettings):
 
     log_level: str = "INFO"
 
+    log_format: str = "auto"
+    """``json``, ``console``, or ``auto`` to pick by whether stderr is a
+    terminal. Production gets JSON without anyone having to remember to ask for
+    it, and a developer at a terminal gets something readable."""
+
     upstreams_file: Path = Path("config/upstreams.yaml")
     """Path to the upstream definitions, resolved relative to the process's
     working directory."""
@@ -99,10 +104,11 @@ def allowed_hosts_for(hosts: list[str], port: int) -> list[str]:
     — which does not match a bare ``127.0.0.1`` in the allow-list, and the SDK
     answers 421 Misdirected Request.
 
-    The entire test suite missed this because those tests connect on the default
-    port, where the Host header has no port suffix at all. It surfaced the first
-    time a real MCP client connected on :8080. Entries that already specify a
-    port are left alone, so an explicit ``gateway.internal:443`` is not mangled.
+    This was missed by the entire test suite because those tests connect on the
+    default port, where the Host header has no port suffix at all. It surfaced
+    the first time a real MCP client connected on :8080. Entries that already
+    specify a port are left alone, so an explicit ``gateway.internal:443`` is
+    not mangled.
     """
     expanded: list[str] = []
 

@@ -34,6 +34,7 @@ of evidence that the upstream is down, not one.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from types import TracebackType
@@ -46,6 +47,8 @@ from acp.upstream.breaker import BreakerSnapshot, CircuitBreaker
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.models import CallToolResult, ToolDefinition
 from acp.upstream.protocol import Upstream
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -82,6 +85,13 @@ class Bulkhead:
         try:
             self._semaphore.acquire_nowait()
         except anyio.WouldBlock as exc:
+            # At WARNING, not INFO: refusing a call is a real event with a real
+            # consequence for the agent, and a burst of these is the earliest
+            # signal that an upstream has started to slow down.
+            logger.warning(
+                "upstream.overloaded",
+                extra={"upstream": self._upstream, "capacity": self._capacity},
+            )
             raise UpstreamOverloadedError(
                 f"{self._upstream} already has {self._capacity} calls in flight",
                 upstream=self._upstream,

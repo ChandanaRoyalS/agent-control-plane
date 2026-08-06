@@ -37,6 +37,7 @@ getting it wrong is how a breaker takes a healthy upstream offline. See
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -51,6 +52,8 @@ from acp.exceptions import (
     UpstreamOverloadedError,
 )
 from acp.upstream.config import UpstreamConfig
+
+logger = logging.getLogger(__name__)
 
 Clock = Callable[[], float]
 """Injected so tests can move time without spending it. Monotonic by default —
@@ -218,6 +221,7 @@ class CircuitBreaker:
                 # The timeout has elapsed: this caller becomes the probe.
                 self._state = BreakerState.HALF_OPEN
                 self._probes_in_flight = 0
+                self._log("breaker.half_open")
 
             if (
                 self._state is BreakerState.HALF_OPEN
@@ -236,6 +240,11 @@ class CircuitBreaker:
                 self._probes_in_flight = max(0, self._probes_in_flight - 1)
 
             if exc is None:
+                if self._state is not BreakerState.CLOSED:
+                    # Only the transition is logged, not every success. A line
+                    # per healthy call would bury the three events that matter
+                    # under the traffic they are meant to describe.
+                    self._log("breaker.closed")
                 self._consecutive_failures = 0
                 self._state = BreakerState.CLOSED
                 self._opened_at = None
@@ -271,8 +280,28 @@ class CircuitBreaker:
                 # breaker has already made that call.
                 self._state = BreakerState.OPEN
                 self._opened_at = self._clock()
+                self._log("breaker.opened", level=logging.ERROR, error=type(exc).__name__)
 
     # -- internals ---------------------------------------------------------
+
+    def _log(self, event: str, *, level: int = logging.WARNING, **fields: object) -> None:
+        """One line per state change.
+
+        A breaker opening is the single most important thing this module can
+        say: it means a whole upstream has just left the gateway's catalogue as
+        far as callers are concerned. ERROR for that, WARNING for the recovery
+        steps, and nothing at all for the calls in between.
+        """
+        logger.log(
+            level,
+            event,
+            extra={
+                "upstream": self._upstream,
+                "consecutive_failures": self._consecutive_failures,
+                "reset_timeout_s": self._policy.reset_timeout,
+                **fields,
+            },
+        )
 
     def _seconds_until_reset(self) -> float | None:
         if self._state is not BreakerState.OPEN or self._opened_at is None:

@@ -34,7 +34,7 @@ from acp.gateway.naming import (
     suffix_of,
     upstream_of,
 )
-from acp.upstream import CallToolResult, ToolDefinition, UpstreamClient
+from acp.upstream import CallToolResult, ToolDefinition, Upstream
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,8 +59,8 @@ class Catalogue:
 class UpstreamRegistry:
     """Holds the configured upstreams and brokers between them."""
 
-    def __init__(self, clients: Iterable[UpstreamClient]) -> None:
-        self._clients: dict[str, UpstreamClient] = {c.config.name: c for c in clients}
+    def __init__(self, clients: Iterable[Upstream]) -> None:
+        self._clients: dict[str, Upstream] = {c.config.name: c for c in clients}
         # qualified name -> real tool name, populated as catalogues are read.
         # Only ever consulted for names that may have been truncated.
         self._resolved: dict[str, str] = {}
@@ -81,7 +81,7 @@ class UpstreamRegistry:
         tools: dict[str, list[ToolDefinition]] = {}
         failures: dict[str, ACPError] = {}
 
-        async def fetch(name: str, client: UpstreamClient) -> None:
+        async def fetch(name: str, client: Upstream) -> None:
             try:
                 tools[name] = await client.list_tools()
             except ACPError as exc:
@@ -120,7 +120,7 @@ class UpstreamRegistry:
         tool = await self._resolve(qualified, client)
         return await client.call_tool(tool, arguments)
 
-    async def _resolve(self, qualified: str, client: UpstreamClient) -> str:
+    async def _resolve(self, qualified: str, client: Upstream) -> str:
         """Find the upstream's real name for a qualified tool.
 
         The fast path is the common one and costs nothing: a name shorter than

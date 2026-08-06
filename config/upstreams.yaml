@@ -32,3 +32,29 @@ upstreams:
 #     max_attempts: 3
 #     initial_backoff: 0.1
 #     max_backoff: 5.0
+
+# Circuit breaker and bulkhead (ADR 0006).
+#
+# `failure_threshold` consecutive failures open the circuit, after which calls
+# are refused immediately instead of each one waiting out a full timeout. Once
+# `reset_timeout` has passed, `half_open_max_calls` trial calls are let through:
+# one success closes the circuit, one failure re-opens it. Failures are counted
+# per *attempt*, so a retried call contributes more than one.
+#
+# Only timeouts and unreachability count. An upstream that answers — even to
+# reject the request — is alive, and opening the circuit on that would let an
+# agent sending bad arguments withdraw a healthy upstream for everybody.
+#
+# `max_concurrency` is the bulkhead: in-flight calls allowed to this upstream
+# before further calls are refused rather than queued. It must not exceed
+# `max_connections`, so the bulkhead refuses before the connection pool starts
+# queueing. Lower it for an upstream that is slow or that you do not trust to
+# stay responsive.
+#
+#   - name: mock-b
+#     url: http://127.0.0.1:9102/mcp
+#     failure_threshold: 5
+#     reset_timeout: 30.0
+#     half_open_max_calls: 1
+#     max_concurrency: 20
+#     max_connections: 20

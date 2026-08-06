@@ -67,14 +67,21 @@ class RetryPolicy:
 
 
 def is_retryable(exc: BaseException) -> bool:
-    """Whether this failure could plausibly succeed on another attempt.
+    """Whether this failure could plausibly succeed on another attempt *here*.
 
-    Delegates entirely to the taxonomy's ``recoverable`` flag rather than
-    matching on exception types here. That flag is already the thing forwarded
-    to the agent to tell it whether to try again, and having two places decide
-    "is this worth retrying" is how they drift apart.
+    Delegates entirely to the taxonomy rather than matching on exception types,
+    because having two places decide "is this worth retrying" is how they drift
+    apart. Two flags, not one, and both must hold.
+
+    ``recoverable`` is the advice already forwarded to the agent: this failure
+    is not permanent. ``retry_locally`` narrows it to the current request: an
+    attempt in the next few hundred milliseconds could change the outcome. They
+    differ exactly where the gateway itself refused the call — an open circuit
+    or a full bulkhead is recoverable on the agent's timescale and immovable on
+    this one, and retrying it would spend the whole attempt budget waiting for a
+    gate that has not had time to open.
     """
-    return isinstance(exc, ACPError) and exc.recoverable
+    return isinstance(exc, ACPError) and exc.recoverable and exc.retry_locally
 
 
 # and this project targets 3.12+, but a plain TypeVar parses under every

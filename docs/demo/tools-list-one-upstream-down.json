@@ -1,0 +1,49 @@
+{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+        "tools": [
+            {
+                "description": "Search chat messages, optionally scoped to a channel.",
+                "inputSchema": {
+                    "properties": {
+                        "query": {
+                            "type": "string"
+                        },
+                        "channel": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "query"
+                    ],
+                    "type": "object"
+                },
+                "name": "mock-b__search"
+            },
+            {
+                "description": "Summarize all messages in a channel.",
+                "inputSchema": {
+                    "properties": {
+                        "channel": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "channel"
+                    ],
+                    "type": "object"
+                },
+                "name": "mock-b__summarize"
+            },
+            {
+                "description": "List all known channels.",
+                "inputSchema": {
+                    "properties": {},
+                    "type": "object"
+                },
+                "name": "mock-b__list_channels"
+            }
+        ]
+    }
+}

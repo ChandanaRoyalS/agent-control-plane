@@ -74,6 +74,9 @@ USAGE_ERROR = 2
 FAILURE = 1
 """Exit code for a request that was well-formed but did not succeed."""
 
+SIGINT_EXIT = 130
+"""Conventional exit code for a process terminated by SIGINT (128 + 2)."""
+
 
 def _usage_error(message: str) -> int:
     """Report a user mistake on stderr and return the usage exit code."""
@@ -179,6 +182,13 @@ def _run(coro: Any) -> int:
     """
     try:
         return int(asyncio.run(coro))
+    except KeyboardInterrupt:
+        # Ctrl+C on a long-running server is a deliberate stop, not a crash.
+        # uvicorn has already drained in-flight requests and the upstream pools
+        # are closed by the time this propagates, so there is nothing left to
+        # report — a stack trace here would only obscure a clean shutdown.
+        # 130 is the conventional exit code for termination by SIGINT (128 + 2).
+        return SIGINT_EXIT
     except ACPError as exc:
         print(f"acp: {exc.message}", file=sys.stderr)  # noqa: T201
         print(json.dumps(exc.to_jsonrpc_error(), indent=2), file=sys.stderr)  # noqa: T201

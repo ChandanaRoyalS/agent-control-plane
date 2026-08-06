@@ -12,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from acp.config import GatewaySettings, load_settings, load_upstreams
+from acp.config import (
+    GatewaySettings,
+    allowed_hosts_for,
+    load_settings,
+    load_upstreams,
+)
 from acp.exceptions import ConfigurationError
 
 VALID = """
@@ -178,3 +183,35 @@ def test_out_of_range_port_fails_at_startup(monkeypatch: pytest.MonkeyPatch) -> 
 def test_unknown_setting_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ConfigurationError):
         load_settings(_env_file=None, nonsense=True)
+
+
+# ---------------------------------------------------------------------------
+# Host allow-list expansion
+# ---------------------------------------------------------------------------
+
+
+def test_allow_list_gains_the_port_qualified_form() -> None:
+    """The bug the whole test suite missed until a real client connected.
+
+    A client reaching `http://127.0.0.1:8080/mcp` sends `Host: 127.0.0.1:8080`.
+    A bare `127.0.0.1` does not match it, and the SDK answers 421 Misdirected
+    Request. The tests never caught this because they connect on the default
+    port, where the Host header carries no port suffix.
+    """
+    assert allowed_hosts_for(["127.0.0.1", "localhost"], 8080) == [
+        "127.0.0.1",
+        "127.0.0.1:8080",
+        "localhost",
+        "localhost:8080",
+    ]
+
+
+def test_explicit_ports_are_left_alone() -> None:
+    """An operator who wrote `gateway.internal:443` meant exactly that."""
+    assert allowed_hosts_for(["gateway.internal:443"], 8080) == ["gateway.internal:443"]
+
+
+def test_expansion_is_idempotent() -> None:
+    once = allowed_hosts_for(["localhost"], 8080)
+
+    assert allowed_hosts_for(once, 8080) == once

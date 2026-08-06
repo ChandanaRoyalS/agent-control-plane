@@ -91,6 +91,34 @@ class GatewaySettings(BaseSettings):
     """Browser origins accepted. Empty is correct for non-browser clients."""
 
 
+def allowed_hosts_for(hosts: list[str], port: int) -> list[str]:
+    """Expand an allow-list to cover the port-qualified form of each host.
+
+    The HTTP ``Host`` header carries the port for any non-default port, so a
+    client reaching ``http://127.0.0.1:8080/mcp`` sends ``Host: 127.0.0.1:8080``
+    — which does not match a bare ``127.0.0.1`` in the allow-list, and the SDK
+    answers 421 Misdirected Request.
+
+    The entire test suite missed this because those tests connect on the default
+    port, where the Host header has no port suffix at all. It surfaced the first
+    time a real MCP client connected on :8080. Entries that already specify a
+    port are left alone, so an explicit ``gateway.internal:443`` is not mangled.
+    """
+    expanded: list[str] = []
+
+    def add(value: str) -> None:
+        # Order-preserving dedup, so applying this twice is a no-op. Duplicates
+        # in an allow-list are harmless but make a config dump confusing to read.
+        if value not in expanded:
+            expanded.append(value)
+
+    for host in hosts:
+        add(host)
+        if ":" not in host:
+            add(f"{host}:{port}")
+    return expanded
+
+
 def load_upstreams(path: Path) -> list[UpstreamConfig]:
     """Read and validate the upstream definitions.
 

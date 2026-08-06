@@ -44,3 +44,27 @@ Note the asymmetry: if *every* upstream fails the gateway raises instead of
 returning an empty list. An empty catalogue is indistinguishable from a
 correctly configured gateway with nothing attached, and would send the agent
 off to attempt its task with no tools at all.
+
+## `logging-breaker-lifecycle.jsonl`
+
+A real run, captured from `ACP_LOG_FORMAT=json uv run acp serve` while an
+upstream was killed and restarted. Two mock upstreams, six tools merged; then
+`mock-a` is killed, four catalogue fetches follow, `mock-a` comes back, and one
+final fetch happens after the breaker's 30-second reset.
+
+Read it by following the `outcome` field. Four fetches against a dead upstream
+at three attempts each would be twelve connection attempts. There are **five**:
+the circuit opened on the fifth consecutive failure and the remaining seven
+never happened. That ratio is the whole point of the breaker, and this file is
+the evidence rather than the claim.
+
+Two other things are visible in it. `gateway.upstream_degraded` carries
+`served_tools: 3` on every line during the outage — the partial-failure policy
+holding, so an agent connected at the time lost three tools instead of all six.
+And the `error` field on those same lines changes from `UpstreamUnavailableError`
+to `UpstreamCircuitOpenError`, which is the exact moment the gateway stopped
+trying and started knowing.
+
+Recovery is `breaker.opened` → `breaker.half_open` → `breaker.closed`, with a
+single probe request deciding it. Every line carries the `request_id` the client
+sent, so any one request can be followed end to end.

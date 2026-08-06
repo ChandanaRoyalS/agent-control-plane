@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 
 from starlette.applications import Starlette
 
-from acp.config import GatewaySettings, load_upstreams
+from acp.config import GatewaySettings, allowed_hosts_for, load_upstreams
 from acp.gateway import UpstreamRegistry, build_app
 from acp.upstream import UpstreamClient, UpstreamConfig
 
@@ -86,7 +86,9 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     upstreams = load_upstreams(settings.upstreams_file)
     async with gateway_from_configs(
         upstreams,
-        allowed_hosts=settings.allowed_hosts,
+        # Expanded to include `host:port`, because that is what a client
+        # actually sends in the Host header on a non-default port.
+        allowed_hosts=allowed_hosts_for(settings.allowed_hosts, settings.port),
         allowed_origins=settings.allowed_origins,
     ) as app:
         yield app

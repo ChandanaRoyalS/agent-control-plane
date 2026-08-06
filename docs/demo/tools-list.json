@@ -1,0 +1,106 @@
+{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+        "tools": [
+            {
+                "description": "Read a document by its path.",
+                "inputSchema": {
+                    "properties": {
+                        "path": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "path"
+                    ],
+                    "type": "object"
+                },
+                "name": "mock-a__read_document"
+            },
+            {
+                "description": "Search documents by keyword.",
+                "inputSchema": {
+                    "properties": {
+                        "query": {
+                            "type": "string"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 10
+                        }
+                    },
+                    "required": [
+                        "query"
+                    ],
+                    "type": "object"
+                },
+                "name": "mock-a__search"
+            },
+            {
+                "description": "File a ticket. NOT idempotent to retry blindly \u2014 see ADR 0003.",
+                "inputSchema": {
+                    "properties": {
+                        "title": {
+                            "type": "string"
+                        },
+                        "priority": {
+                            "type": "string",
+                            "enum": [
+                                "low",
+                                "normal",
+                                "high"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "title"
+                    ],
+                    "type": "object"
+                },
+                "name": "mock-a__create_ticket"
+            },
+            {
+                "description": "Search chat messages, optionally scoped to a channel.",
+                "inputSchema": {
+                    "properties": {
+                        "query": {
+                            "type": "string"
+                        },
+                        "channel": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "query"
+                    ],
+                    "type": "object"
+                },
+                "name": "mock-b__search"
+            },
+            {
+                "description": "Summarize all messages in a channel.",
+                "inputSchema": {
+                    "properties": {
+                        "channel": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "channel"
+                    ],
+                    "type": "object"
+                },
+                "name": "mock-b__summarize"
+            },
+            {
+                "description": "List all known channels.",
+                "inputSchema": {
+                    "properties": {},
+                    "type": "object"
+                },
+                "name": "mock-b__list_channels"
+            }
+        ]
+    }
+}

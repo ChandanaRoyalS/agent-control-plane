@@ -23,7 +23,7 @@ from starlette.applications import Starlette
 
 from acp.config import GatewaySettings, allowed_hosts_for, load_upstreams
 from acp.gateway import UpstreamRegistry, build_app
-from acp.upstream import RetryingUpstreamClient, Upstream, UpstreamConfig
+from acp.upstream import Upstream, UpstreamConfig, connect_upstream
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ async def gateway_from_configs(
     clients: list[Upstream] = []
     try:
         for config in upstreams:
-            clients.append(await RetryingUpstreamClient.connect(config))
+            clients.append(await connect_upstream(config))
         logger.info(
             "gateway ready with %d upstream(s): %s",
             len(clients),

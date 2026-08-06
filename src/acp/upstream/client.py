@@ -13,6 +13,8 @@ possible failure into a member of the exception taxonomy.
 from __future__ import annotations
 
 import itertools
+import logging
+import time
 from collections.abc import Mapping
 from types import TracebackType
 from typing import Any, Self
@@ -21,6 +23,7 @@ import httpx
 
 from acp import __version__
 from acp.exceptions import (
+    ACPError,
     UpstreamProtocolError,
     UpstreamRejectedError,
     UpstreamTimeoutError,
@@ -28,6 +31,8 @@ from acp.exceptions import (
 )
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.models import PROTOCOL_VERSION, CallToolResult, ToolDefinition
+
+logger = logging.getLogger(__name__)
 
 MCP_METHOD_HEADER = "Mcp-Method"
 """Routable header added by the 2026-07-28 revision.
@@ -157,9 +162,11 @@ class UpstreamClient:
         if tool_name is not None:
             headers[MCP_NAME_HEADER] = tool_name
 
+        started = time.perf_counter()
         try:
             response = await self._http.post(self.config.url, json=body, headers=headers)
         except httpx.TimeoutException as exc:
+            self._observe(method, tool_name, started, "timeout")
             raise UpstreamTimeoutError(
                 f"{self.config.name} did not respond within its timeout budget",
                 upstream=self.config.name,
@@ -169,13 +176,49 @@ class UpstreamClient:
             # Covers connection refused, DNS failure, TLS errors, and a
             # connection dropped mid-response. All mean "could not complete the
             # exchange", which is a different thing from "answered badly".
+            self._observe(method, tool_name, started, "unavailable")
             raise UpstreamUnavailableError(
                 f"{self.config.name} is unreachable: {exc}",
                 upstream=self.config.name,
                 details={"method": method},
             ) from exc
 
-        return self._parse(response, method)
+        try:
+            result = self._parse(response, method)
+        except ACPError as exc:
+            self._observe(method, tool_name, started, "rejected", error=type(exc).__name__)
+            raise
+
+        self._observe(method, tool_name, started, "ok", status=response.status_code)
+        return result
+
+    def _observe(
+        self,
+        method: str,
+        tool_name: str | None,
+        started: float,
+        outcome: str,
+        **fields: object,
+    ) -> None:
+        """One event per upstream call, whatever happened.
+
+        This is the layer that actually touches the network, so it is the only
+        place that can time it honestly — a wrapper further out would be timing
+        its own retries and backoff as well. It is also why `httpx` itself is
+        turned down to WARNING: an INFO line per request from the library would
+        say the same thing with less context.
+        """
+        logger.info(
+            "upstream.call",
+            extra={
+                "upstream": self.config.name,
+                "operation": method,
+                "tool": tool_name,
+                "outcome": outcome,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                **fields,
+            },
+        )
 
     def _parse(self, response: httpx.Response, method: str) -> dict[str, Any]:
         """Turn an HTTP response into a JSON-RPC result, or raise."""

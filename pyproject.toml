@@ -18,6 +18,15 @@ dependencies = [
     "opentelemetry-sdk>=1.30",
     "opentelemetry-exporter-otlp-proto-http>=1.30",
     "prometheus-client>=0.21",
+    # Declared here, not in `dev`, because the gateway *imports* both on its
+    # runtime path: `acp.admin`, `acp.runtime` and `acp.gateway.server` build
+    # Starlette apps, and `acp serve` imports uvicorn. They sat in `dev` until
+    # task 21, and nothing caught it — the test suite installs with
+    # `--all-groups`, so the only build that would have failed was one nobody
+    # was running yet. If you import it, declare it: arriving transitively
+    # through `mcp` is a fact about today's resolution, not a contract.
+    "starlette>=0.45",
+    "uvicorn>=0.34",
 ]
 
 [project.scripts]
@@ -33,12 +42,6 @@ dev = [
     "hypothesis>=6.123",
     "types-pyyaml>=6.0",
     "pre-commit>=4.0",
-    # The mock upstream fleet (src/acp/mocks) is development-only test
-    # infrastructure — see ADR 0004. It lives under src/ so it can be run
-    # standalone via docker-compose, but nothing in the gateway's runtime path
-    # imports it, so these stay out of the main dependency list.
-    "starlette>=0.45",
-    "uvicorn>=0.34",
 ]
 
 [build-system]
@@ -87,6 +90,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# A script whose entire output is a report has no business being told not to
+# print, and it is not part of the shipped package — see .dockerignore.
+"scripts/**" = ["T20"]
 "tests/**" = [
     "S101",      # assert is the point of a test
     "PLR2004",   # magic numbers are fine in assertions

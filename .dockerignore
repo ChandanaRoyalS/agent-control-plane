@@ -1,0 +1,54 @@
+# Everything here is excluded from the build *context* — the tarball sent to
+# the daemon before the first instruction runs. Two reasons to care.
+#
+# Speed: `.venv/` alone is hundreds of megabytes, and it is uploaded on every
+# build whether or not a COPY ever mentions it.
+#
+# Correctness: a stray `.env` or `.venv` in the context is one careless
+# `COPY . .` away from being in the image. Excluding it here means the mistake
+# cannot be made, rather than being one somebody has to remember not to make.
+
+.git/
+.github/
+.gitignore
+
+# A virtualenv built for the host, useless in the image and enormous.
+.venv/
+venv/
+
+# Secrets. Nothing in this repository copies them, and that is exactly the kind
+# of guarantee that quietly stops being true.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Not needed to build or run the application. Tests deliberately do not ship:
+# an image that contains its own test suite is one somebody will eventually run
+# tests in, against production configuration.
+tests/
+docs/
+Makefile
+docker-compose.yml
+Dockerfile
+.pre-commit-config.yaml
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store

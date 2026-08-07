@@ -68,3 +68,28 @@ trying and started knowing.
 Recovery is `breaker.opened` → `breaker.half_open` → `breaker.closed`, with a
 single probe request deciding it. Every line carries the `request_id` the client
 sent, so any one request can be followed end to end.
+
+## `trace-fanout.txt`
+
+One `tools/list` request, traced. A `SERVER` span at the root — created by the
+MCP SDK's own middleware, which extracts its parent from `params._meta` — and
+beneath it two `CLIENT` spans, one per upstream, created by this project's
+hand-rolled outbound client.
+
+The shape is the point. The two client spans are siblings, not a chain, because
+the catalogue fan-out is concurrent; a reader can see at a glance which upstream
+was slow. Each carries `acp.upstream`, `server.address` and `server.port`, so a
+trace answers "which upstream" without anyone having to know which host is
+which.
+
+What is deliberately *absent* is as considered as what is present. No tool
+arguments and no results: those attributes are opt-in in the GenAI conventions
+because they routinely carry queries, identifiers and occasionally credentials,
+and a span goes somewhere with a different audience and retention policy than
+the gateway's logs. Failures record `error.type` and a fixed description rather
+than the exception message, for the same reason.
+
+The trace context reaches upstreams in `params._meta` under a bare `traceparent`
+key — a documented exception to MCP's namespacing rule (SEP-414), made
+explicitly so traces do not break between implementations that disagree about a
+prefix.

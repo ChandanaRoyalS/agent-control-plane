@@ -81,7 +81,7 @@ def test_a_transient_failure_on_list_is_retried_and_recovers() -> None:
 
     async def _run() -> list[str]:
         async with client(transport, max_attempts=3) as c:
-            return [t.name for t in await c.list_tools()]
+            return [t.name for t in (await c.list_tools()).tools]
 
     assert run(_run) == ["search"]
     assert transport.count == 3

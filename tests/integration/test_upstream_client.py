@@ -71,7 +71,7 @@ def run(coro_fn: Any) -> Any:
 def test_list_tools_parses_the_catalogue() -> None:
     async def _run() -> list[str]:
         async with make_client(mock_a.app) as client:
-            return [t.name for t in await client.list_tools()]
+            return [t.name for t in (await client.list_tools()).tools]
 
     assert run(_run) == ["read_document", "search", "create_ticket"]
 
@@ -86,7 +86,7 @@ def test_list_tools_parses_the_input_schema_alias() -> None:
 
     async def _run() -> dict[str, Any]:
         async with make_client(mock_a.app) as client:
-            tools = await client.list_tools()
+            tools = (await client.list_tools()).tools
             return next(t for t in tools if t.name == "read_document").input_schema
 
     schema = run(_run)
@@ -262,7 +262,7 @@ def test_oversized_response_still_parses() -> None:
 
     async def _run() -> list[str]:
         async with make_client(mock_a.app, chaos="oversized", chaos_param="20000") as client:
-            return [t.name for t in await client.list_tools()]
+            return [t.name for t in (await client.list_tools()).tools]
 
     assert len(run(_run)) == 3
 

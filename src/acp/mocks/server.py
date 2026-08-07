@@ -55,6 +55,14 @@ from acp.upstream.envelope import (
     decode_header_value,
 )
 
+CATALOGUE_TTL_MS = 60_000
+"""What these mocks advertise on `tools/list`, so caching is observable.
+
+A real upstream picks this from how often its catalogue actually changes. Sixty
+seconds is short enough that a demo does not have to wait around and long enough
+that the second request in a burst is obviously a cache hit.
+"""
+
 ToolHandler = Callable[[dict[str, Any]], CallToolResult]
 """A deterministic function from tool arguments to a result.
 
@@ -259,7 +267,10 @@ def _dispatch(rpc_request: JsonRpcRequest, tools_by_name: dict[str, MockTool]) -
     match rpc_request.method:
         case "tools/list":
             definitions = [t.definition() for t in tools_by_name.values()]
-            return JsonRpcResponse(id=rpc_request.id, result=tool_definitions_result(definitions))
+            return JsonRpcResponse(
+                id=rpc_request.id,
+                result=tool_definitions_result(definitions, ttl_ms=CATALOGUE_TTL_MS),
+            )
         case "tools/call":
             return _dispatch_tools_call(rpc_request, tools_by_name)
         case _:

@@ -20,7 +20,7 @@ from typing import Any, Self
 
 from acp.observability import metrics
 from acp.upstream.config import UpstreamConfig
-from acp.upstream.models import CallToolResult, ToolDefinition
+from acp.upstream.models import CallToolResult, ListToolsResult
 from acp.upstream.protocol import Upstream
 from acp.upstream.retry import RetryPolicy, with_retry
 
@@ -57,6 +57,9 @@ class RetryingUpstreamClient:
     async def aclose(self) -> None:
         await self._inner.aclose()
 
+    async def invalidate(self) -> None:
+        await self._inner.invalidate()
+
     async def __aenter__(self) -> Self:
         return self
 
@@ -70,7 +73,7 @@ class RetryingUpstreamClient:
 
     # -- operations --------------------------------------------------------
 
-    async def list_tools(self) -> list[ToolDefinition]:
+    async def list_tools(self) -> ListToolsResult:
         """Always retryable: listing tools is a read with no side effects."""
         return await with_retry(
             self._inner.list_tools,

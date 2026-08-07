@@ -11,7 +11,7 @@ Field names come from the real MCP SDK's ``mcp.types`` — ``inputSchema``,
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,6 +54,34 @@ class ToolDefinition(BaseModel):
     def qualified_name_suffix(self) -> str:
         """The tool half of the ``<upstream>__<tool>`` qualified name (ADR 0003)."""
         return self.name
+
+
+class ListToolsResult(BaseModel):
+    """An upstream's ``tools/list`` response, freshness hints included.
+
+    The 2026-07-28 revision puts ``ttlMs`` and ``cacheScope`` at the **top
+    level** of a list result rather than inside ``_meta``, and both default to
+    the conservative answer: ``ttlMs`` of zero means do not cache at all, and
+    ``cacheScope`` of ``private`` means the response is specific to the caller
+    and must not be shared. Caching is something an upstream opts *into*.
+
+    ``cacheScope`` is not a performance hint, it is an authorization boundary.
+    The SDK's own client cache states the rule directly: only ``public``
+    entries may be shared across authorization contexts. A ``private``
+    catalogue served from a shared cache would hand one principal the tool list
+    computed for another.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    tools: list[ToolDefinition] = Field(default_factory=list)
+    ttl_ms: int = Field(default=0, ge=0, alias="ttlMs")
+    cache_scope: Literal["public", "private"] = Field(default="private", alias="cacheScope")
+
+    @property
+    def is_shareable(self) -> bool:
+        """Whether this response may be held in a cache shared between callers."""
+        return self.cache_scope == "public" and self.ttl_ms > 0
 
 
 class CallToolResult(BaseModel):

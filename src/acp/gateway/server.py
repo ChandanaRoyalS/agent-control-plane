@@ -25,6 +25,7 @@ from acp import __version__
 from acp.exceptions import ACPError
 from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.registry import UpstreamRegistry
+from acp.identity import AuthenticationMiddleware, TokenValidator
 from acp.observability import RequestContextMiddleware
 
 logger = logging.getLogger(__name__)
@@ -135,6 +136,7 @@ def build_app(
     *,
     allowed_hosts: Sequence[str] = DEFAULT_ALLOWED_HOSTS,
     allowed_origins: Sequence[str] = (),
+    validator: TokenValidator | None = None,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -166,5 +168,13 @@ def build_app(
     # lifespan context are part of this function's contract and the tests use
     # them. Safe to call here because Starlette builds its middleware stack
     # lazily, on the first request rather than at construction.
+    #
+    # Order matters, and Starlette's is the reverse of the reading order:
+    # `add_middleware` inserts at the front, so the *last* one added runs
+    # outermost. Authentication is added first and therefore runs *inside* the
+    # request-context middleware — which is what makes a rejected request still
+    # carry a request ID in its log line. A 401 nobody can correlate is a 401
+    # nobody can investigate.
+    app.add_middleware(AuthenticationMiddleware, validator=validator)
     app.add_middleware(RequestContextMiddleware)
     return app

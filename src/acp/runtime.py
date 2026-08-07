@@ -26,6 +26,7 @@ from acp.config import GatewaySettings, allowed_hosts_for, load_upstreams
 from acp.exceptions import ConfigurationError
 from acp.gateway import UpstreamRegistry, build_app
 from acp.health import DEFAULT_INTERVAL, HealthMonitor
+from acp.identity import JwksCache, TokenPolicy, TokenValidator
 from acp.schema import DEFAULT_BASELINE_PATH, DriftDetector, SchemaSnapshot
 from acp.upstream import Upstream, UpstreamConfig, connect_upstream
 
@@ -70,6 +71,7 @@ async def gateway_from_configs(
     probe_interval: float = DEFAULT_INTERVAL,
     detect_drift: bool = False,
     baseline_file: Path | None = None,
+    validator: TokenValidator | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -111,10 +113,20 @@ async def gateway_from_configs(
             if probe_health
             else None
         )
+        if validator is None:
+            # Said once, at startup, at WARNING. The other half of making this
+            # impossible to miss is that every request then logs
+            # `principal: anonymous` — see `acp.identity.asgi`.
+            logger.warning(
+                "auth.disabled",
+                extra={"reason": "no identity provider configured", "principal": "anonymous"},
+            )
+
         app = build_app(
             UpstreamRegistry(clients, monitor),
             allowed_hosts=allowed_hosts or ("127.0.0.1", "localhost"),
             allowed_origins=allowed_origins,
+            validator=validator,
         )
         # Attached rather than yielded, so the signature every existing caller
         # and test depends on is unchanged. The probe loop itself is started by
@@ -138,6 +150,45 @@ async def gateway_from_configs(
         logger.info("gateway.stopped", extra={"upstream_count": len(clients)})
 
 
+def build_token_validator(settings: GatewaySettings) -> TokenValidator | None:
+    """Assemble token validation, or ``None`` when no provider is configured.
+
+    Note what is *not* here: a flag. Authentication is on when an identity
+    provider is configured and off when one is not — see ``acp.config`` for why
+    a boolean is the wrong control for this. A partially configured provider is
+    already a startup failure by then, so reaching this function with some
+    settings and not others is impossible.
+
+    ``TokenPolicy`` refuses a symmetric algorithm in its constructor, so a
+    configuration that would accept forged tokens fails here, before a port is
+    bound, rather than on the first request that exploits it.
+    """
+    if not settings.authentication_configured:
+        return None
+
+    policy = TokenPolicy(
+        issuer=settings.auth_issuer,
+        audience=settings.auth_audience,
+        algorithms=tuple(settings.auth_algorithms),
+        leeway=settings.auth_leeway,
+    )
+    keys = JwksCache(
+        settings.auth_jwks_url,
+        ttl=settings.auth_jwks_cache_ttl,
+        min_refresh_interval=settings.auth_jwks_min_refresh_interval,
+    )
+    logger.info(
+        "auth.enabled",
+        extra={
+            "issuer": settings.auth_issuer,
+            "audience": settings.auth_audience,
+            "jwks_url": settings.auth_jwks_url,
+            "algorithms": list(settings.auth_algorithms),
+        },
+    )
+    return TokenValidator(policy=policy, keys=keys)
+
+
 @asynccontextmanager
 async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Starlette]:
     """Build the gateway described by ``settings``.
@@ -146,15 +197,23 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     malformed config fails without side effects.
     """
     upstreams = load_upstreams(settings.upstreams_file)
-    async with gateway_from_configs(
-        upstreams,
-        probe_health=settings.health_probing_enabled,
-        probe_interval=settings.health_probe_interval,
-        detect_drift=settings.schema_drift_detection_enabled,
-        baseline_file=settings.schema_baseline_file,
-        # Expanded to include `host:port`, because that is what a client
-        # actually sends in the Host header on a non-default port.
-        allowed_hosts=allowed_hosts_for(settings.allowed_hosts, settings.port),
-        allowed_origins=settings.allowed_origins,
-    ) as app:
-        yield app
+    validator = build_token_validator(settings)
+    try:
+        async with gateway_from_configs(
+            upstreams,
+            probe_health=settings.health_probing_enabled,
+            probe_interval=settings.health_probe_interval,
+            detect_drift=settings.schema_drift_detection_enabled,
+            baseline_file=settings.schema_baseline_file,
+            # Expanded to include `host:port`, because that is what a client
+            # actually sends in the Host header on a non-default port.
+            allowed_hosts=allowed_hosts_for(settings.allowed_hosts, settings.port),
+            allowed_origins=settings.allowed_origins,
+            validator=validator,
+        ) as app:
+            yield app
+    finally:
+        # The key cache owns an HTTP connection pool, for the same reason the
+        # upstream clients do and with the same consequence for leaking it.
+        if validator is not None:
+            await validator.keys.aclose()

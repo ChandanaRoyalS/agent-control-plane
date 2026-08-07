@@ -76,6 +76,44 @@ class ConfigurationError(ACPError):
     recoverable = False
 
 
+class AuthenticationError(ACPError):
+    """The caller did not prove who they are.
+
+    ``recoverable`` is **true**, and that is a statement about the agent rather
+    than about the request: a token that has expired can be exchanged for a new
+    one and the call retried, which is a genuinely different instruction from
+    "this will never work". It is not, however, a suggestion to retry the same
+    token — the agent is expected to re-authenticate first.
+
+    Carries a ``reason`` in ``details`` for the log. That reason is stripped
+    before anything is written to the caller (see ``acp.identity.asgi``): a
+    validator that distinguishes "expired" from "wrong audience" from "bad
+    signature" is an oracle an attacker can query one request at a time.
+    """
+
+    code = -32030
+    recoverable = True
+
+
+class IdentityProviderUnavailableError(ACPError):
+    """The authorization server could not be reached, or answered nonsense.
+
+    Deliberately **not** a subclass of ``AuthenticationError``, and the
+    distinction is the whole reason it exists. "Your token is bad" and "I cannot
+    currently check your token" are different statements with different correct
+    responses: the first says get a new token, the second says try again. Report
+    the second as the first and every agent in the fleet goes off to
+    re-authenticate against an identity provider that is already down — a
+    dependency outage converted into a login storm.
+
+    Discovered by a test asserting the status code rather than by design: the
+    key cache originally raised ``AuthenticationError`` for both.
+    """
+
+    code = -32031
+    recoverable = True
+
+
 # ---------------------------------------------------------------------------
 # Upstream failures
 #

@@ -1,0 +1,49 @@
+=== the gateway, mid-drift ===
+{
+    "detecting": true,
+    "baseline": true,
+    "drift": true,
+    "events": [
+        {
+            "upstream": "mock-a",
+            "tool": "read_document",
+            "kind": "description_changed",
+            "before": "e26103d9b32e",
+            "after": "281ca86497bf"
+        }
+    ],
+    "counts": {
+        "description_changed": 1
+    }
+}
+
+=== the log line it emitted, once ===
+Extra data: line 2 column 1 (char 322)
+
+=== what every other signal says about mock-a ===
+            "upstream": "mock-a",
+            "state": "healthy",
+            "checked_at": 41814.172524616,
+            "error": null,
+            "tools": 3
+        },
+acp_upstream_calls_total{method="tools/list",outcome="ok",tool="none",upstream="mock-a"} 93.0
+acp_upstream_calls_total{method="tools/list",outcome="unavailable",tool="none",upstream="mock-a"} 6.0
+# HELP acp_schema_drift_events_total Catalogue changes detected against the committed baseline, by kind.
+# TYPE acp_schema_drift_events_total counter
+acp_schema_drift_events_total{kind="description_changed",upstream="mock-a"} 2.0
+# HELP acp_schema_drift_events_created Catalogue changes detected against the committed baseline, by kind.
+# TYPE acp_schema_drift_events_created gauge
+acp_schema_drift_events_created{kind="description_changed",upstream="mock-a"} 1.7860998169590044e+09
+# HELP acp_schema_drift_outstanding Changes not yet acknowledged by re-capturing the baseline.
+# TYPE acp_schema_drift_outstanding gauge
+acp_schema_drift_outstanding{upstream="mock-a"} 1.0
+acp_schema_drift_outstanding{upstream="mock-b"} 0.0
+
+=== the CI gate ===
+drift detected: 1 change(s)
+
+  mock-a__read_document: description changed (e26103d9b32e -> 281ca86497bf)
+
+review the change, then run `acp schemas capture` to acknowledge it.
+exit: 1

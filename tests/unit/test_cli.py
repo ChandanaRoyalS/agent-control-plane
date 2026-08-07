@@ -154,3 +154,31 @@ def test_capture_writes_a_baseline_it_can_then_check(
     capsys.readouterr()
     assert main(["schemas", "check", *argv]) == 0
     assert "no drift" in capsys.readouterr().out
+
+
+def test_check_output_survives_being_merged_into_one_stream(
+    tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The drift list must reach the reader before the advice about it.
+
+    Python block-buffers stdout when it is not a terminal and never buffers
+    stderr, so without an explicit flush at the boundary `acp schemas check
+    2>&1 | tee` prints the advice above the drift it refers to. Found by
+    capturing a demo run to a file — which is the only way anyone finds it.
+    """
+    upstreams = tmp_path / "upstreams.yaml"
+    upstreams.write_text("upstreams: []\n", encoding="utf-8")
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(
+        '{"version": 1, "upstreams": {"gone": {"tools": {}}}}',
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        ["schemas", "check", "--upstreams-file", str(upstreams), "--baseline", str(baseline)]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "drift detected" in captured.out
+    assert "acp schemas capture" in captured.err

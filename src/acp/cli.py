@@ -319,11 +319,10 @@ async def _capture(upstreams: Sequence[UpstreamConfig], path: Path, *, allow_par
     for name, error in sorted(failures.items()):
         print(f"  ! {name}: {error}", file=sys.stderr)  # noqa: T201
     if failures and not allow_partial:
-        print(  # noqa: T201
+        _advise(
             "acp: refusing to capture with upstreams unreachable — a baseline taken "
             "during an outage records their tools as deleted. Fix them, or pass "
-            "--allow-partial if you mean it.",
-            file=sys.stderr,
+            "--allow-partial if you mean it."
         )
         return FAILURE
 
@@ -361,11 +360,22 @@ async def _check(upstreams: Sequence[UpstreamConfig], baseline: SchemaSnapshot) 
     print(f"drift detected: {report.outstanding} change(s)\n")  # noqa: T201
     for event in report.events:
         print(f"  {event.describe()}")  # noqa: T201
-    print(  # noqa: T201
-        "\nreview the change, then run `acp schemas capture` to acknowledge it.",
-        file=sys.stderr,
-    )
+    _advise("review the change, then run `acp schemas capture` to acknowledge it.")
     return FAILURE
+
+
+def _advise(message: str) -> None:
+    """Write guidance to stderr, after everything already on stdout has landed.
+
+    The flush is not decoration. Python block-buffers stdout when it is not a
+    terminal and never buffers stderr, so `acp schemas check 2>&1 | tee` prints
+    the advice *before* the drift it refers to — the two streams interleave by
+    whichever happens to flush first. Any CLI that writes to both has this, and
+    the fix is to make the boundary explicit rather than to hope. Found by
+    capturing a demo to a file, which is the only way anyone ever finds it.
+    """
+    sys.stdout.flush()
+    print(f"\n{message}", file=sys.stderr)  # noqa: T201
 
 
 def _call_command(config: UpstreamConfig, args: argparse.Namespace) -> int:

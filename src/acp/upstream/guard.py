@@ -43,6 +43,7 @@ from typing import Any, Self, TypeVar
 import anyio
 
 from acp.exceptions import UpstreamOverloadedError
+from acp.observability import metrics
 from acp.upstream.breaker import BreakerSnapshot, CircuitBreaker
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.models import CallToolResult, ToolDefinition
@@ -97,12 +98,19 @@ class Bulkhead:
                 upstream=self._upstream,
                 details={"capacity": self._capacity},
             ) from exc
+        self._publish()
         try:
             yield
         finally:
             # In a `finally`, so a cancelled or failing call cannot leak the
             # slot. A leaked slot is permanent: capacity only ever goes down.
             self._semaphore.release()
+            self._publish()
+
+    def _publish(self) -> None:
+        metrics.observe_bulkhead(
+            upstream=self._upstream, in_flight=self.in_flight, capacity=self._capacity
+        )
 
 
 class GuardedUpstreamClient:

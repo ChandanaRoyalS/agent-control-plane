@@ -51,6 +51,7 @@ from acp.exceptions import (
     UpstreamCircuitOpenError,
     UpstreamOverloadedError,
 )
+from acp.observability import metrics
 from acp.upstream.config import UpstreamConfig
 
 logger = logging.getLogger(__name__)
@@ -300,6 +301,7 @@ class CircuitBreaker:
         far as callers are concerned. ERROR for that, WARNING for the recovery
         steps, and nothing at all for the calls in between.
         """
+        metrics.observe_breaker(upstream=self._upstream, state=str(self._state))
         logger.log(
             level,
             event,

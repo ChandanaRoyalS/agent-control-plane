@@ -29,7 +29,7 @@ from acp.exceptions import (
     UpstreamTimeoutError,
     UpstreamUnavailableError,
 )
-from acp.observability import semconv, tracing
+from acp.observability import metrics, semconv, tracing
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.envelope import routing_headers, with_envelope
 from acp.upstream.models import PROTOCOL_VERSION, CallToolResult, ToolDefinition
@@ -236,6 +236,7 @@ class UpstreamClient:
         turned down to WARNING: an INFO line per request from the library would
         say the same thing with less context.
         """
+        elapsed = time.perf_counter() - started
         logger.info(
             "upstream.call",
             extra={
@@ -243,9 +244,21 @@ class UpstreamClient:
                 "operation": method,
                 "tool": tool_name,
                 "outcome": outcome,
-                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                # Milliseconds in the log because a human reads it; seconds in
+                # the histogram because Prometheus convention is base units.
+                "duration_ms": round(elapsed * 1000, 2),
                 **fields,
             },
+        )
+        metrics.record_upstream_call(
+            upstream=self.config.name,
+            method=method,
+            # Already resolved against this upstream's catalogue by the registry
+            # before it reached here, so it is a bounded value rather than
+            # whatever the agent typed.
+            tool=metrics.tool_label(tool_name),
+            outcome=outcome,
+            duration_seconds=elapsed,
         )
 
     def _parse(self, response: httpx.Response, method: str) -> dict[str, Any]:

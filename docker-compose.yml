@@ -1,0 +1,44 @@
+# Development dependencies the gateway talks to, but does not contain.
+#
+# Only Jaeger for now. Task 21 adds the gateway and both mock upstreams here as
+# well, so that a clone becomes a running, traced system in one command. Kept as
+# a separate concern from the application image on purpose: a trace backend is
+# something you point at, not something you ship.
+#
+#   docker compose up -d
+#   OTEL_TRACES_EXPORTER=otlp uv run acp serve --port 8080
+#   open http://localhost:16686
+#
+# The gateway needs no compose-specific configuration to find this. It reads
+# OpenTelemetry's standard variables, and 4318 on localhost is already the
+# default OTLP/HTTP endpoint — so exporting `OTEL_TRACES_EXPORTER=otlp` is the
+# whole of the setup.
+
+services:
+  jaeger:
+    # Pinned rather than `latest`: a trace backend that silently changes its
+    # OTLP behaviour between runs turns "no spans appeared" into a question
+    # with two possible causes instead of one.
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: acp-jaeger
+    restart: unless-stopped
+    ports:
+      # The UI. This is the port you actually open.
+      - "16686:16686"
+      # OTLP receivers — HTTP on 4318, gRPC on 4317. The gateway uses HTTP:
+      # one fewer dependency, and it survives proxies that gRPC does not.
+      # Enabled by default from Jaeger 1.35 onward; no COLLECTOR_OTLP_ENABLED
+      # needed on this version.
+      - "4318:4318"
+      - "4317:4317"
+    healthcheck:
+      # 14269 is the admin port, which answers before the UI does. Without a
+      # healthcheck, `compose up -d` returns while the collector is still
+      # binding, and the first few spans are dropped by a backend that is not
+      # listening yet — which reads exactly like instrumentation that does not
+      # work.
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:14269/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s

@@ -120,6 +120,16 @@ def decode_header_value(value: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+TRACE_CONTEXT_KEYS: Final = ("traceparent", "tracestate", "baggage")
+"""W3C trace-context keys, carried in ``_meta`` **unprefixed**.
+
+A documented exception to the namespacing rule every other key here follows —
+MCP's SEP-414 states it explicitly, because an implementation that namespaced
+these as ``io.modelcontextprotocol/traceparent`` would break traces and log
+correlation against every implementation that did not.
+"""
+
+
 def build_meta(client_name: str, client_version: str) -> dict[str, Any]:
     """The ``params._meta`` envelope for one outbound request.
 
@@ -157,12 +167,27 @@ def routing_headers(method: str, params: Mapping[str, Any] | None = None) -> dic
 
 
 def with_envelope(
-    params: Mapping[str, Any] | None, client_name: str, client_version: str
+    params: Mapping[str, Any] | None,
+    client_name: str,
+    client_version: str,
+    trace_context: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Attach the envelope to a request's params.
 
     ``params`` is always present on the wire now, even for a method that takes
     no arguments, because the envelope lives inside it. ``tools/list`` with no
     params is not a valid 2026-07-28 request.
+
+    ``trace_context`` is a W3C carrier — whatever the propagator produced —
+    merged in unprefixed alongside the namespaced envelope keys. Passed in
+    rather than fetched here so this module stays free of any OpenTelemetry
+    import and remains testable without one, which is the same reason the
+    protocol constants are declared locally rather than imported from the SDK.
     """
-    return {**(params or {}), "_meta": build_meta(client_name, client_version)}
+    meta = build_meta(client_name, client_version)
+    if trace_context:
+        # Only the keys the spec reserves. A propagator can be configured to
+        # emit others, and `_meta` is a shared namespace where an unexpected
+        # bare key is somebody else's bug to trip over.
+        meta.update({k: v for k, v in trace_context.items() if k in TRACE_CONTEXT_KEYS})
+    return {**(params or {}), "_meta": meta}

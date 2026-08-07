@@ -1,0 +1,33 @@
+One `tools/list` from an agent, traced through the gateway to two upstreams.
+Captured from `OTEL_TRACES_EXPORTER=console uv run acp serve`.
+
+trace_id: 0x235727a26cdd650b03a62447808e6474
+
+tools/list  [SERVER]  0xc79ad6eae491f7e8
+        jsonrpc.request.id = 1
+        mcp.method.name = tools/list
+        mcp.protocol.version = 2026-07-28
+    └── tools/list  [CLIENT]  0xfe01a90461ec225d
+            acp.upstream = mock-a
+            jsonrpc.protocol.version = 2.0
+            jsonrpc.request.id = 1
+            mcp.method.name = tools/list
+            mcp.protocol.version = 2026-07-28
+            network.transport = tcp
+            server.address = 127.0.0.1
+            server.port = 9101
+    └── tools/list  [CLIENT]  0x78cae4056906e44f
+            acp.upstream = mock-b
+            jsonrpc.protocol.version = 2.0
+            jsonrpc.request.id = 1
+            mcp.method.name = tools/list
+            mcp.protocol.version = 2026-07-28
+            network.transport = tcp
+            server.address = 127.0.0.1
+            server.port = 9102
+
+Every span shares one trace_id, and both CLIENT spans name the SERVER
+span as their parent. The gateway did not start a new trace; it continued
+the one it was given, and the W3C context it injected into each upstream
+request's `params._meta` means an instrumented upstream would extend it
+further still.

@@ -21,16 +21,20 @@ The cost is a second server in the process. It is about ten lines in
 
 from __future__ import annotations
 
+from typing import Any
+
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, Response
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
 from acp import __version__
+from acp.health import HealthMonitor
 from acp.observability import metrics
 
 METRICS_PATH = "/metrics"
 HEALTH_PATH = "/healthz"
+READY_PATH = "/readyz"
 
 
 async def _metrics(_request: Request) -> Response:
@@ -57,11 +61,49 @@ async def _healthz(_request: Request) -> Response:
     return PlainTextResponse(f"ok {__version__}\n")
 
 
-def build_admin_app() -> Starlette:
+def build_readyz(health: HealthMonitor | None) -> Any:
+    """Readiness: can this gateway currently serve a useful request?
+
+    503 when upstreams are configured and *none* of them can serve, because at
+    that point every ``tools/list`` raises anyway (the total-failure policy) and
+    reporting ready would be a lie a load balancer believes.
+
+    Two consequences worth stating rather than discovering.
+
+    Every replica shares the same upstreams, so a total upstream outage fails
+    readiness on all of them at once. That is accepted deliberately: the
+    alternative is a fleet that reports ready while erroring every request,
+    which is worse for anyone reading a dashboard at the time.
+
+    A gateway with **no** upstreams configured is ready. Nothing is wrong with
+    it; it simply has nothing attached yet, which is a legitimate way to bring
+    one up — the same distinction ``Catalogue.is_total_failure`` draws.
+    """
+
+    async def readyz(_request: Request) -> Response:
+        if health is None:
+            return JSONResponse({"ready": True, "probing": False, "upstreams": []})
+
+        records = health.snapshot()
+        ready = not health.is_serving_nothing
+        return JSONResponse(
+            {
+                "ready": ready,
+                "probing": True,
+                "upstreams": [records[name].as_dict() for name in sorted(records)],
+            },
+            status_code=200 if ready else 503,
+        )
+
+    return readyz
+
+
+def build_admin_app(health: HealthMonitor | None = None) -> Starlette:
     """The admin ASGI app. Small on purpose — it must not be able to fail."""
     return Starlette(
         routes=[
             Route(METRICS_PATH, _metrics, methods=["GET"]),
             Route(HEALTH_PATH, _healthz, methods=["GET"]),
+            Route(READY_PATH, build_readyz(health), methods=["GET"]),
         ]
     )

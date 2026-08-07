@@ -31,6 +31,7 @@ from acp.mocks.chaos import (
     resolve_mode,
     resolve_param,
 )
+from acp.mocks.drift import apply_drift
 from acp.mocks.jsonrpc import (
     HEADER_MISMATCH,
     INVALID_PARAMS,
@@ -266,7 +267,11 @@ def _dispatch(rpc_request: JsonRpcRequest, tools_by_name: dict[str, MockTool]) -
     """Route a validated request to the right MCP method handler."""
     match rpc_request.method:
         case "tools/list":
-            definitions = [t.definition() for t in tools_by_name.values()]
+            # `apply_drift` is a no-op unless MOCK_SCHEMA_DRIFT is set, and is
+            # applied here rather than at startup so the catalogue can be
+            # changed under a running gateway — which is the situation task 20
+            # exists for and the only honest way to demonstrate it.
+            definitions = apply_drift([t.definition() for t in tools_by_name.values()])
             return JsonRpcResponse(
                 id=rpc_request.id,
                 result=tool_definitions_result(definitions, ttl_ms=CATALOGUE_TTL_MS),

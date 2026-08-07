@@ -48,12 +48,22 @@ from enum import StrEnum
 import anyio
 
 from acp.exceptions import ACPError, UpstreamCircuitOpenError
-from acp.upstream import Upstream
+from acp.upstream import ListToolsResult, Upstream
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL = 15.0
 DEFAULT_JITTER = 0.3
+
+CatalogueObserver = Callable[[str, ListToolsResult], object]
+"""Something that wants to see each catalogue the prober fetches.
+
+Schema drift detection (task 20) is the first such observer, and the reason this
+hook exists rather than the prober importing it directly: health has no business
+knowing what drift is. The return value is ignored — typed as ``object`` so an
+observer that returns something useful to its own callers does not have to
+pretend otherwise here.
+"""
 
 
 class UpstreamHealth(StrEnum):
@@ -108,12 +118,14 @@ class HealthMonitor:
         jitter: float = DEFAULT_JITTER,
         clock: Callable[[], float] | None = None,
         uniform: Callable[[float, float], float] | None = None,
+        on_catalogue: CatalogueObserver | None = None,
     ) -> None:
         self._upstreams = list(upstreams)
         self._interval = interval
         self._jitter = jitter
         self._clock = clock or time.monotonic
         self._uniform = uniform or random.uniform
+        self._on_catalogue = on_catalogue
         self._records: dict[str, HealthRecord] = {
             u.config.name: HealthRecord(u.config.name) for u in self._upstreams
         }
@@ -205,6 +217,22 @@ class HealthMonitor:
             self._update(
                 name, UpstreamHealth.HEALTHY, tool_count=len(result.tools), previous=previous
             )
+            self._offer(name, result)
+
+    def _offer(self, name: str, result: ListToolsResult) -> None:
+        """Hand a freshly fetched catalogue to the observer, if there is one.
+
+        Wrapped, for the same reason the probe itself is: an observer that
+        raises would otherwise take down health monitoring for every upstream,
+        which is a monitoring bug escalated into an outage — the failure mode
+        this whole module's docstring is about avoiding.
+        """
+        if self._on_catalogue is None:
+            return
+        try:
+            self._on_catalogue(name, result)
+        except Exception:
+            logger.exception("health.observer_failed", extra={"upstream": name})
 
     def _update(
         self,

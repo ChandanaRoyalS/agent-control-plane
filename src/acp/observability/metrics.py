@@ -106,6 +106,8 @@ class _Collectors:
     breaker_state: Any
     bulkhead_in_flight: Any
     bulkhead_capacity: Any
+    schema_drift: Any
+    schema_drift_outstanding: Any
 
 
 def _build() -> _Collectors | None:
@@ -165,6 +167,24 @@ def _build() -> _Collectors | None:
         bulkhead_capacity=Gauge(
             "upstream_bulkhead_capacity",
             "Configured concurrency limit, so saturation is a ratio not a guess.",
+            ["upstream"],
+            namespace=NAMESPACE,
+            registry=registry,
+        ),
+        schema_drift=Counter(
+            "schema_drift_events_total",
+            "Catalogue changes detected against the committed baseline, by kind.",
+            # Both labels are closed sets: upstream names come from the config
+            # file and `kind` is a StrEnum. Deliberately *not* labelled by tool
+            # — a hostile upstream chooses its own tool names, and a label value
+            # chosen by the thing being monitored is unbounded by construction.
+            ["upstream", "kind"],
+            namespace=NAMESPACE,
+            registry=registry,
+        ),
+        schema_drift_outstanding=Gauge(
+            "schema_drift_outstanding",
+            "Changes not yet acknowledged by re-capturing the baseline.",
             ["upstream"],
             namespace=NAMESPACE,
             registry=registry,
@@ -244,6 +264,33 @@ def observe_bulkhead(*, upstream: str, in_flight: int, capacity: int) -> None:
         return
     _C.bulkhead_in_flight.labels(upstream).set(in_flight)
     _C.bulkhead_capacity.labels(upstream).set(capacity)
+
+
+def record_schema_drift(*, upstream: str, kind: str) -> None:
+    """One newly observed catalogue change (task 20).
+
+    A counter rather than only a gauge, because the two answer different
+    questions. The gauge says how much is outstanding right now; the counter
+    says how often this upstream changes at all — and an upstream whose
+    catalogue moves several times a week is a different kind of dependency from
+    one that has not moved in a year, regardless of whether anything is
+    outstanding at the moment you look.
+    """
+    if _C is None:
+        return
+    _C.schema_drift.labels(upstream, kind).inc()
+
+
+def observe_schema_drift(*, upstream: str, outstanding: int) -> None:
+    """How far this upstream currently sits from the acknowledged baseline.
+
+    Zero is written explicitly for clean upstreams. A gauge only ever set when
+    something is wrong holds its last bad value forever, which is how a
+    dashboard ends up displaying an incident that ended yesterday.
+    """
+    if _C is None:
+        return
+    _C.schema_drift_outstanding.labels(upstream).set(outstanding)
 
 
 # ---------------------------------------------------------------------------

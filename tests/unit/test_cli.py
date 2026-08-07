@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from acp import __version__
@@ -76,3 +78,107 @@ def test_unreachable_upstream_exits_1_with_a_structured_error(
     err = capsys.readouterr().err
     assert "Traceback" not in err
     assert '"recoverable": true' in err
+
+
+# ---------------------------------------------------------------------------
+# `acp schemas` (task 20)
+# ---------------------------------------------------------------------------
+
+
+def test_schemas_has_two_verbs() -> None:
+    """Two, not one. A command that both reports drift and records it as the
+    new normal can only ever tell you something once, and tells the next person
+    nothing at all — see ADR 0013."""
+    parser = build_parser()
+
+    captured = parser.parse_args(["schemas", "capture"])
+    checked = parser.parse_args(["schemas", "check"])
+
+    assert (captured.command, captured.schemas_command) == ("schemas", "capture")
+    assert (checked.command, checked.schemas_command) == ("schemas", "check")
+
+
+def test_only_capture_can_be_told_to_ignore_a_dead_upstream() -> None:
+    """`check` has no --allow-partial on purpose. "I could not tell" and
+    "nothing changed" are different answers, and a checker that returns the
+    second when it means the first is worse than no checker."""
+    parser = build_parser()
+
+    assert parser.parse_args(["schemas", "capture"]).allow_partial is False
+    assert not hasattr(parser.parse_args(["schemas", "check"]), "allow_partial")
+
+
+def test_schemas_without_a_verb_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        main(["schemas"])
+
+    assert "capture" in capsys.readouterr().out
+
+
+def test_check_without_a_baseline_says_what_to_run(
+    tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Read before any network call, so a missing baseline costs no round
+    trips and the message names the command that fixes it."""
+    upstreams = tmp_path / "upstreams.yaml"
+    upstreams.write_text("upstreams: []\n", encoding="utf-8")
+
+    exit_code = main(
+        [
+            "schemas",
+            "check",
+            "--upstreams-file",
+            str(upstreams),
+            "--baseline",
+            str(tmp_path / "absent.json"),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "acp schemas capture" in capsys.readouterr().err
+
+
+def test_capture_writes_a_baseline_it_can_then_check(
+    tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The round trip, with no upstreams configured — enough to exercise
+    writing, reading back and reporting no drift."""
+    upstreams = tmp_path / "upstreams.yaml"
+    upstreams.write_text("upstreams: []\n", encoding="utf-8")
+    baseline = tmp_path / "baseline.json"
+    argv = ["--upstreams-file", str(upstreams), "--baseline", str(baseline)]
+
+    assert main(["schemas", "capture", *argv]) == 0
+    assert baseline.exists()
+
+    capsys.readouterr()
+    assert main(["schemas", "check", *argv]) == 0
+    assert "no drift" in capsys.readouterr().out
+
+
+def test_check_output_survives_being_merged_into_one_stream(
+    tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The drift list must reach the reader before the advice about it.
+
+    Python block-buffers stdout when it is not a terminal and never buffers
+    stderr, so without an explicit flush at the boundary `acp schemas check
+    2>&1 | tee` prints the advice above the drift it refers to. Found by
+    capturing a demo run to a file — which is the only way anyone finds it.
+    """
+    upstreams = tmp_path / "upstreams.yaml"
+    upstreams.write_text("upstreams: []\n", encoding="utf-8")
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(
+        '{"version": 1, "upstreams": {"gone": {"tools": {}}}}',
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        ["schemas", "check", "--upstreams-file", str(upstreams), "--baseline", str(baseline)]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "drift detected" in captured.out
+    assert "acp schemas capture" in captured.err

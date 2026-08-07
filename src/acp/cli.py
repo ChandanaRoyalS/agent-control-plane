@@ -17,17 +17,19 @@ import json
 import logging
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import anyio
 
 from acp import __version__
 from acp.admin import build_admin_app
-from acp.config import load_settings
+from acp.config import load_settings, load_upstreams
 from acp.exceptions import ACPError
 from acp.observability import configure_logging, configure_tracing
 from acp.runtime import gateway_from_settings
-from acp.upstream import UpstreamClient, UpstreamConfig
+from acp.schema import SchemaSnapshot, diff
+from acp.upstream import ListToolsResult, UpstreamClient, UpstreamConfig
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +63,43 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, help="override ACP_PORT")
     serve.add_argument("--upstreams-file", help="override ACP_UPSTREAMS_FILE")
 
+    _add_schemas_commands(subparsers)
+
     return parser
+
+
+def _add_schemas_commands(subparsers: Any) -> None:
+    """``acp schemas capture`` and ``acp schemas check`` (task 20).
+
+    Two verbs because the workflow has two halves and conflating them is the
+    failure mode: a command that both reports drift *and* records it as the new
+    normal can only ever tell you something once, and never tells the next
+    person anything at all. ``capture`` is the act of acknowledgement, performed
+    by a human and reviewed as a diff. ``check`` only ever reads.
+    """
+    schemas = subparsers.add_parser(
+        "schemas", help="capture and check upstream tool schemas for drift"
+    )
+    verbs = schemas.add_subparsers(dest="schemas_command", metavar="<verb>")
+
+    capture = verbs.add_parser("capture", help="record every catalogue as the new baseline")
+    _add_baseline_arguments(capture)
+    capture.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help=(
+            "capture even if an upstream is unreachable; its tools are dropped "
+            "from the baseline, so use this only when you mean it"
+        ),
+    )
+
+    check = verbs.add_parser("check", help="compare against the baseline; exit 1 on drift")
+    _add_baseline_arguments(check)
+
+
+def _add_baseline_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--upstreams-file", help="override ACP_UPSTREAMS_FILE")
+    parser.add_argument("--baseline", help="override ACP_SCHEMA_BASELINE_FILE")
 
 
 def _add_upstream_arguments(parser: argparse.ArgumentParser) -> None:
@@ -100,6 +138,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "serve":
         return _serve_command(args)
 
+    if args.command == "schemas":
+        return _schemas_command(parser, args)
+
+    return _upstream_command(args)
+
+
+def _upstream_command(args: argparse.Namespace) -> int:
+    """``probe`` and ``call``: the two that point at one upstream directly."""
     try:
         config = UpstreamConfig(
             name=args.name,
@@ -169,7 +215,11 @@ def _serve_command(args: argparse.Namespace) -> int:
                 return 0
 
             monitor = getattr(app.state, "health", None)
-            admin = _server(build_admin_app(monitor), settings.admin_host, settings.admin_port)
+            admin = _server(
+                build_admin_app(monitor, getattr(app.state, "schema_drift", None)),
+                settings.admin_host,
+                settings.admin_port,
+            )
             logger.info(
                 "admin.listening",
                 extra={"host": settings.admin_host, "port": settings.admin_port},
@@ -194,6 +244,138 @@ def _serve_command(args: argparse.Namespace) -> int:
         return 0
 
     return _run(run())
+
+
+def _schemas_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    """Dispatch ``acp schemas <verb>``."""
+    if args.schemas_command is None:
+        parser.parse_args(["schemas", "--help"])
+        return USAGE_ERROR  # pragma: no cover — argparse exits inside --help
+
+    overrides = {"upstreams_file": args.upstreams_file} if args.upstreams_file else {}
+    try:
+        settings = load_settings(**overrides)
+        upstreams = load_upstreams(settings.upstreams_file)
+    except ACPError as exc:
+        return _usage_error(exc.message)
+
+    baseline_path = Path(args.baseline) if args.baseline else settings.schema_baseline_file
+
+    if args.schemas_command == "capture":
+        return _run(_capture(upstreams, baseline_path, allow_partial=args.allow_partial))
+    return _check_command(upstreams, baseline_path)
+
+
+def _check_command(upstreams: list[UpstreamConfig], baseline_path: Path) -> int:
+    """Loaded before any network call, so a missing baseline costs no round trips."""
+    try:
+        baseline = SchemaSnapshot.load(baseline_path)
+    except ACPError as exc:
+        return _usage_error(exc.message)
+
+    if baseline is None:
+        return _usage_error(
+            f"no schema baseline at {str(baseline_path)!r}; run `acp schemas capture` first"
+        )
+    return _run(_check(upstreams, baseline))
+
+
+async def _fetch_catalogues(
+    upstreams: Sequence[UpstreamConfig],
+) -> tuple[dict[str, ListToolsResult], dict[str, str]]:
+    """Read every configured upstream's catalogue, remembering what failed.
+
+    A plain ``UpstreamClient`` rather than the assembled stack from
+    ``build_upstream``: this must see what the server is saying *now*, and a
+    cached catalogue (task 19) would let ``check`` certify a response from
+    minutes ago as current.
+
+    Sequential rather than concurrent, deliberately. This is a command a person
+    runs at a terminal, where a readable failure that names one upstream beats
+    shaving a few hundred milliseconds off a fan-out.
+    """
+    catalogues: dict[str, ListToolsResult] = {}
+    failures: dict[str, str] = {}
+    for config in upstreams:
+        try:
+            async with await UpstreamClient.connect(config) as client:
+                catalogues[config.name] = await client.list_tools()
+        except ACPError as exc:
+            failures[config.name] = f"{type(exc).__name__}: {exc.message}"
+    return catalogues, failures
+
+
+async def _capture(upstreams: Sequence[UpstreamConfig], path: Path, *, allow_partial: bool) -> int:
+    """Record the current catalogues as the acknowledged baseline.
+
+    Refuses by default when any upstream failed, and that guard is the whole
+    reason this is not a one-liner. Capturing while a server is down records it
+    as having no tools, which turns a transient outage into a permanent, quietly
+    committed deletion — and the next time it comes back, every tool it ever had
+    is reported as newly added by an upstream nobody was suspicious of.
+    """
+    catalogues, failures = await _fetch_catalogues(upstreams)
+
+    for name, error in sorted(failures.items()):
+        print(f"  ! {name}: {error}", file=sys.stderr)  # noqa: T201
+    if failures and not allow_partial:
+        _advise(
+            "acp: refusing to capture with upstreams unreachable — a baseline taken "
+            "during an outage records their tools as deleted. Fix them, or pass "
+            "--allow-partial if you mean it."
+        )
+        return FAILURE
+
+    snapshot = SchemaSnapshot.from_catalogues(catalogues)
+    changed = snapshot.save(path)
+    total = sum(len(entry.tools) for entry in snapshot.upstreams.values())
+    verb = "wrote" if changed else "unchanged"
+    print(f"{verb} {path}: {len(snapshot.upstreams)} upstream(s), {total} tool(s)")  # noqa: T201
+    return 0
+
+
+async def _check(upstreams: Sequence[UpstreamConfig], baseline: SchemaSnapshot) -> int:
+    """Compare live catalogues against the baseline. Exit 1 means drift.
+
+    The exit code is the point: this is the shape of a CI gate. Run it against
+    the mock fleet on every build and a change to what those servers expose
+    cannot merge without somebody re-capturing the baseline in the same commit,
+    which is exactly the review step the whole design is arranged around.
+
+    An unreachable upstream fails the check rather than being skipped. "I could
+    not tell" and "nothing changed" are different answers, and a checker that
+    returns the second when it means the first is worse than no checker.
+    """
+    catalogues, failures = await _fetch_catalogues(upstreams)
+    observed = SchemaSnapshot.from_catalogues(catalogues)
+    report = diff(baseline, observed, known=[c.name for c in upstreams])
+
+    for name, error in sorted(failures.items()):
+        print(f"  ! {name} unreachable: {error}", file=sys.stderr)  # noqa: T201
+
+    if not report.has_drift:
+        print(f"no drift: {len(observed.upstreams)} upstream(s) match the baseline")  # noqa: T201
+        return FAILURE if failures else 0
+
+    print(f"drift detected: {report.outstanding} change(s)\n")  # noqa: T201
+    for event in report.events:
+        print(f"  {event.describe()}")  # noqa: T201
+    _advise("review the change, then run `acp schemas capture` to acknowledge it.")
+    return FAILURE
+
+
+def _advise(message: str) -> None:
+    """Write guidance to stderr, after everything already on stdout has landed.
+
+    The flush is not decoration. Python block-buffers stdout when it is not a
+    terminal and never buffers stderr, so `acp schemas check 2>&1 | tee` prints
+    the advice *before* the drift it refers to — the two streams interleave by
+    whichever happens to flush first. Any CLI that writes to both has this, and
+    the fix is to make the boundary explicit rather than to hope. Found by
+    capturing a demo to a file, which is the only way anyone ever finds it.
+    """
+    sys.stdout.flush()
+    print(f"\n{message}", file=sys.stderr)  # noqa: T201
 
 
 def _call_command(config: UpstreamConfig, args: argparse.Namespace) -> int:

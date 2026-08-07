@@ -402,7 +402,7 @@ def test_the_stack_still_looks_like_a_plain_upstream() -> None:
 
     async def _run() -> tuple[str, list[str]]:
         async with stack(transport, cfg) as client:
-            return client.config.name, [t.name for t in await client.list_tools()]
+            return client.config.name, [t.name for t in (await client.list_tools()).tools]
 
     assert run(_run) == ("mock-a", ["search"])
 

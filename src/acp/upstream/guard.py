@@ -46,7 +46,7 @@ from acp.exceptions import UpstreamOverloadedError
 from acp.observability import metrics
 from acp.upstream.breaker import BreakerSnapshot, CircuitBreaker
 from acp.upstream.config import UpstreamConfig
-from acp.upstream.models import CallToolResult, ToolDefinition
+from acp.upstream.models import CallToolResult, ListToolsResult
 from acp.upstream.protocol import Upstream
 
 logger = logging.getLogger(__name__)
@@ -153,6 +153,11 @@ class GuardedUpstreamClient:
     async def aclose(self) -> None:
         await self._inner.aclose()
 
+    async def invalidate(self) -> None:
+        """Not guarded: forgetting a cache entry makes no network call, so
+        putting it behind a breaker would only make recovery harder."""
+        await self._inner.invalidate()
+
     async def __aenter__(self) -> Self:
         return self
 
@@ -166,7 +171,7 @@ class GuardedUpstreamClient:
 
     # -- operations --------------------------------------------------------
 
-    async def list_tools(self) -> list[ToolDefinition]:
+    async def list_tools(self) -> ListToolsResult:
         return await self._guarded(self._inner.list_tools)
 
     async def call_tool(

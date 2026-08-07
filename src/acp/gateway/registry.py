@@ -35,7 +35,7 @@ from acp.gateway.naming import (
     upstream_of,
 )
 from acp.health import HealthMonitor
-from acp.upstream import CallToolResult, ToolDefinition, Upstream
+from acp.upstream import CallToolResult, ListToolsResult, ToolDefinition, Upstream
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +45,22 @@ class Catalogue:
     tools: list[ToolDefinition]
     failures: dict[str, ACPError] = field(default_factory=dict)
     """Upstream name to the error it raised. Empty when every upstream answered."""
+
+    ttl_ms: int = 0
+    """How long an agent may cache *this* merged catalogue.
+
+    The minimum of the contributing upstreams' TTLs: a merged answer is only as
+    durable as its least durable part. Zero whenever anything failed or was
+    withdrawn, because the thing most likely to change in the next minute is
+    precisely the upstream that is currently broken.
+    """
+
+    cache_scope: str = "private"
+    """``public`` only when every contributing upstream said ``public``.
+
+    One private component makes the whole merge private. Scope is an
+    authorization boundary, not a performance dial, and it does not average.
+    """
 
     withdrawn: dict[str, str] = field(default_factory=dict)
     """Upstreams not even attempted, because health probing found them down.
@@ -67,6 +83,28 @@ class Catalogue:
         them, which is exactly the outcome the total-failure error prevents.
         """
         return not self.tools and bool(self.failures or self.withdrawn)
+
+
+def _compose_hints(results: Iterable[ListToolsResult], *, degraded: bool) -> tuple[int, str]:
+    """Combine several upstreams' freshness hints into one for the merge.
+
+    Conservative in both directions, and deliberately so. The TTL is the
+    *minimum*, because a merged catalogue stops being accurate the moment its
+    shortest-lived component does. The scope is ``public`` only if every
+    contributor said ``public``, because one private component makes the whole
+    answer caller-specific — scope is a boundary, and boundaries do not average.
+
+    A degraded catalogue is not cacheable at all. The upstream most likely to
+    change in the next minute is the one that is currently broken, and freezing
+    a reduced tool list into an agent's prompt is how a recovered upstream stays
+    invisible long after it came back.
+    """
+    collected = list(results)
+    if degraded or not collected:
+        return 0, "private"
+    if any(r.cache_scope != "public" or r.ttl_ms <= 0 for r in collected):
+        return 0, "private"
+    return min(r.ttl_ms for r in collected), "public"
 
 
 class UpstreamRegistry:
@@ -95,13 +133,13 @@ class UpstreamRegistry:
         round trips otherwise, and an agent waits for this before it can do
         anything at all.
         """
-        tools: dict[str, list[ToolDefinition]] = {}
+        results: dict[str, ListToolsResult] = {}
         failures: dict[str, ACPError] = {}
         withdrawn: dict[str, str] = {}
 
         async def fetch(name: str, client: Upstream) -> None:
             try:
-                tools[name] = await client.list_tools()
+                results[name] = await client.list_tools()
             except ACPError as exc:
                 # Deliberately caught, not propagated: one bad upstream must not
                 # take down the catalogue. The caller sees it in `failures`.
@@ -118,13 +156,20 @@ class UpstreamRegistry:
                 group.start_soon(fetch, name, client)
 
         merged: list[ToolDefinition] = []
-        for name in sorted(tools):
-            for tool in tools[name]:
+        for name in sorted(results):
+            for tool in results[name].tools:
                 qualified = qualify(name, tool.name)
                 self._resolved[qualified] = tool.name
                 merged.append(tool.model_copy(update={"name": qualified}))
 
-        return Catalogue(tools=merged, failures=failures, withdrawn=withdrawn)
+        ttl_ms, scope = _compose_hints(results.values(), degraded=bool(failures or withdrawn))
+        return Catalogue(
+            tools=merged,
+            failures=failures,
+            withdrawn=withdrawn,
+            ttl_ms=ttl_ms,
+            cache_scope=scope,
+        )
 
     # -- routing -----------------------------------------------------------
 
@@ -165,7 +210,7 @@ class UpstreamRegistry:
             return known
 
         # Cold or stale memo: rebuild this upstream's entries and try once more.
-        for tool in await client.list_tools():
+        for tool in (await client.list_tools()).tools:
             self._resolved[qualify(client.config.name, tool.name)] = tool.name
 
         known = self._resolved.get(qualified)

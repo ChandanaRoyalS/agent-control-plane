@@ -48,6 +48,39 @@ only — see [ADR 0001](docs/decisions/0001-target-2026-07-28-spec-only.md).
 
 ## Quickstart
 
+The whole system — gateway, two mock upstreams and a trace backend — in one
+command:
+
+```bash
+docker compose up -d --wait
+uv run python scripts/compose_smoke.py     # asserts it actually works
+```
+
+```
+  ok   liveness
+  ok   both upstreams healthy over the compose network
+  ok   schema baseline loaded and clean
+  ok   tools/list returns 6 qualified tools
+  ok   traces reached Jaeger
+```
+
+Then look at it: the MCP endpoint on `:8080`, metrics, health and schema drift
+on `:9090`, and traces at <http://localhost:16686>.
+
+![One tools/list request fanning out to two upstreams concurrently](docs/demo/jaeger-fanout.png)
+
+One inbound request becoming two concurrent outbound calls, across container
+boundaries, with the trace context carried in `params._meta` per SEP-414. The
+gateway's own span is the parent; each upstream gets a child named for it.
+
+```bash
+curl -s localhost:9090/readyz  | jq
+curl -s localhost:9090/schemas | jq
+docker compose down
+```
+
+To work on it instead:
+
 ```bash
 uv sync --all-groups
 uv run pre-commit install
@@ -79,6 +112,11 @@ tool…" produces no timeout, no error and no failed call. See
 make check      # lint, format check, types, tests — the same checks CI runs
 make fmt        # apply formatting and autofixes
 make test       # tests with coverage
+
+make up         # gateway, mocks and Jaeger, waited until healthy
+make smoke      # assert the composed stack works end to end
+make logs       # follow the gateway
+make down       # tear it all down
 ```
 
 Every change goes through a pull request against a protected `main`, including
@@ -96,7 +134,7 @@ naming.
 
 | Phase | Status | Scope |
 |---|---|---|
-| 1 · Foundation | in progress | Resilient, observable, aggregating passthrough |
+| 1 · Foundation | **complete** | Resilient, observable, aggregating passthrough |
 | 2 · Identity | planned | Delegated auth, scoped per-upstream token exchange |
 | 3 · Policy | planned | Deny-by-default engine, catalog filtering, simulator |
 | 4 · Budgets | planned | Quotas, rate limits, cost accounting, result caching |

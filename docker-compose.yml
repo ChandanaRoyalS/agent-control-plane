@@ -1,20 +1,148 @@
-# Development dependencies the gateway talks to, but does not contain.
+# A clone to a running, traced, drift-monitored gateway in one command.
 #
-# Only Jaeger for now. Task 21 adds the gateway and both mock upstreams here as
-# well, so that a clone becomes a running, traced system in one command. Kept as
-# a separate concern from the application image on purpose: a trace backend is
-# something you point at, not something you ship.
+#   docker compose up -d --wait
+#   curl -s localhost:9090/readyz  | jq
+#   curl -s localhost:9090/schemas | jq
+#   open http://localhost:16686        # Jaeger
+#   docker compose down
 #
-#   docker compose up -d
-#   OTEL_TRACES_EXPORTER=otlp uv run acp serve --port 8080
-#   open http://localhost:16686
+# `--wait` is doing real work here rather than being decoration: it blocks until
+# every service reports *healthy*, so the first request after it returns is not
+# racing a collector that has not bound its port yet. Without it, "no spans
+# appeared" has two possible causes instead of one.
 #
-# The gateway needs no compose-specific configuration to find this. It reads
-# OpenTelemetry's standard variables, and 4318 on localhost is already the
-# default OTLP/HTTP endpoint — so exporting `OTEL_TRACES_EXPORTER=otlp` is the
-# whole of the setup.
+# Everything the gateway needs to find its dependencies is set here rather than
+# baked into the image. The image is the artifact; where it points is
+# deployment, and an image that only works in one topology is not an artifact.
+
+name: acp
 
 services:
+  # -------------------------------------------------------------------------
+  # The gateway
+  # -------------------------------------------------------------------------
+  gateway:
+    build:
+      context: .
+      target: runtime
+      # WITH_MOCKS is left at its default of false, so the mock upstream fleet
+      # is not present in this image at all — see the Dockerfile.
+    image: acp/gateway:dev
+    container_name: acp-gateway
+    restart: unless-stopped
+    depends_on:
+      mock-a:
+        condition: service_healthy
+      mock-b:
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
+    environment:
+      # 0.0.0.0 inside a container, and only inside a container. The default is
+      # loopback precisely so that a gateway bound to every interface is a
+      # decision somebody made rather than one they inherited — and here it is
+      # made, in the one place where loopback would mean "reachable by nothing".
+      ACP_HOST: "0.0.0.0"
+      ACP_ADMIN_HOST: "0.0.0.0"
+      ACP_PORT: "8080"
+      ACP_ADMIN_PORT: "9090"
+      ACP_LOG_FORMAT: json
+      # DNS-rebinding protection rejects any Host it has not been told about,
+      # and a browser or client reaching this on :8080 sends the port too — the
+      # bug found in task 9. JSON because pydantic-settings parses list-typed
+      # settings as JSON, not as comma-separated text.
+      ACP_ALLOWED_HOSTS: '["localhost","127.0.0.1","gateway","acp-gateway"]'
+      ACP_UPSTREAMS_FILE: /app/config/upstreams.compose.yaml
+      ACP_SCHEMA_BASELINE_FILE: /app/config/schema-baseline.json
+      ACP_HEALTH_PROBE_INTERVAL: "5.0"
+      # Interpolated so probing can be turned off from the shell without
+      # editing this file. Worth having beyond the demo: with the prober
+      # running, it invalidates and refetches every catalogue every five
+      # seconds, so the cache (task 19) is permanently warm and *no*
+      # `tools/list` request ever reaches an upstream. That is correct, and
+      # it means the request path's upstream fan-out is invisible until
+      # something lets the cache actually expire.
+      ACP_HEALTH_PROBING_ENABLED: "${ACP_HEALTH_PROBING_ENABLED:-true}"
+      # OpenTelemetry's own variables, not ACP_ ones. `jaeger` is the service
+      # name below; on the host this same gateway finds Jaeger on localhost
+      # with no configuration at all, because 4318 is already the OTLP/HTTP
+      # default.
+      OTEL_SERVICE_NAME: agent-control-plane
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    volumes:
+      # Read-only, and that is a security property rather than tidiness. The
+      # schema baseline is the record a drift alert is measured against
+      # (ADR 0013), so a gateway that can write to it is a gateway that can
+      # silence its own alarm. Nothing in the runtime path writes here;
+      # `acp schemas capture` is a human act performed on the host and reviewed
+      # as a diff.
+      - ./config:/app/config:ro
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+
+  # -------------------------------------------------------------------------
+  # Mock upstreams — ADR 0004
+  # -------------------------------------------------------------------------
+  #
+  # Same image, built with WITH_MOCKS=true so the fleet is actually present.
+  # A separate tag, so it is impossible to deploy the mock-bearing build by
+  # reaching for `acp/gateway:dev` and getting the wrong one.
+  mock-a: &mock
+    build:
+      context: .
+      target: runtime
+      args:
+        WITH_MOCKS: "true"
+    image: acp/mocks:dev
+    container_name: acp-mock-a
+    restart: unless-stopped
+    entrypoint: ["uvicorn"]
+    command: ["acp.mocks.mock_a:app", "--host", "0.0.0.0", "--port", "9101"]
+    # Overrides the image's own healthcheck, which probes the gateway's admin
+    # listener — a port these containers do not serve.
+    #
+    # A TCP connect, and worth being precise about what that does and does not
+    # prove: that the listener is bound, not that the protocol works. MCP has
+    # no health method and inventing one for the mocks would test the invention.
+    # Proving the protocol works is the gateway's health prober's job (task 18),
+    # which is the layer that should be doing it — so this check stays honest
+    # about being a liveness check and leaves readiness to the thing that can
+    # actually judge it.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; socket.create_connection(("127.0.0.1", 9101), 2).close()
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    ports:
+      - "9101:9101"
+
+  mock-b:
+    <<: *mock
+    container_name: acp-mock-b
+    command: ["acp.mocks.mock_b:app", "--host", "0.0.0.0", "--port", "9102"]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; socket.create_connection(("127.0.0.1", 9102), 2).close()
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    ports:
+      - "9102:9102"
+
+  # -------------------------------------------------------------------------
+  # Trace backend
+  # -------------------------------------------------------------------------
   jaeger:
     # Pinned rather than `latest`: a trace backend that silently changes its
     # OTLP behaviour between runs turns "no spans appeared" into a question

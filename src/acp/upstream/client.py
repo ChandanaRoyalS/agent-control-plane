@@ -155,7 +155,8 @@ class UpstreamClient:
         # the point: the trace context injected below is this span's, so the
         # upstream's own server span nests underneath this client span rather
         # than beside it. Open it afterwards and the trace loses its shape.
-        with tracing.client_span(semconv.span_name(method, tool_name), attributes) as span:
+        span_name = semconv.span_name(method, semconv.client_target(self.config.name, tool_name))
+        with tracing.client_span(span_name, attributes) as span:
             return await self._send(method, params, tool_name, request_id, span)
 
     async def _send(

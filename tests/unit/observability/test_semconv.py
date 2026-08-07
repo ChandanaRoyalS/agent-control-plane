@@ -161,3 +161,54 @@ def test_a_failure_with_no_protocol_code_omits_it() -> None:
     """A timeout never reached the upstream, so there is no response code to
     report and inventing one would be a lie a dashboard would believe."""
     assert semconv.RPC_RESPONSE_STATUS_CODE not in semconv.error_attributes(TimeoutError())
+
+
+# ---------------------------------------------------------------------------
+# Naming an outbound span so a fan-out can be read (task 21)
+# ---------------------------------------------------------------------------
+
+
+def test_a_fan_out_produces_distinguishable_span_names() -> None:
+    """The failure this exists to prevent, stated as the thing it prevents.
+
+    One `tools/list` becomes a concurrent call to every upstream. Named by
+    method alone, all of those spans read identically, and the trace that is
+    supposed to show *which upstream was slow* shows three bars nobody can tell
+    apart. Found by looking at a real trace in Jaeger — "the labels are
+    ambiguous" is not a property a test knows to assert on its own.
+    """
+    names = {
+        semconv.span_name("tools/list", semconv.client_target(upstream))
+        for upstream in ("mock-a", "mock-b")
+    }
+
+    assert names == {"tools/list mock-a", "tools/list mock-b"}
+
+
+def test_the_same_tool_on_two_upstreams_is_still_distinguishable() -> None:
+    """`search` exists on both mocks (ADR 0003 is why qualification exists at
+    all). Naming a client span by tool alone would collapse them too."""
+    names = {
+        semconv.span_name("tools/call", semconv.client_target(upstream, "search"))
+        for upstream in ("mock-a", "mock-b")
+    }
+
+    assert names == {"tools/call mock-a/search", "tools/call mock-b/search"}
+
+
+def test_the_client_span_names_the_tool_that_actually_went_upstream() -> None:
+    """Not the qualified name. The agent asked for `mock-a__read_document`; what
+    crossed the wire was `read_document`, and a span claiming otherwise would
+    describe a request that was never made."""
+    name = semconv.span_name("tools/call", semconv.client_target("mock-a", "read_document"))
+
+    assert name == "tools/call mock-a/read_document"
+    assert "__" not in name
+
+
+def test_span_names_stay_bounded() -> None:
+    """Both halves come from things the gateway controls — the config file and a
+    catalogue — never from the caller. A span name built from caller input is
+    how a tracing backend's index gets destroyed."""
+    assert semconv.client_target("mock-a") == "mock-a"
+    assert semconv.client_target("mock-a", None) == "mock-a"

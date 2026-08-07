@@ -53,3 +53,63 @@ jobs:
           name: coverage
           path: coverage.xml
           if-no-files-found: ignore
+
+  image:
+    name: image · compose · smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Runs alongside `quality` rather than after it. They fail for unrelated
+    # reasons — a type error and a broken Dockerfile are different problems —
+    # and chaining them would mean a packaging bug hides behind a lint failure
+    # until somebody fixes the lint.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate the compose file
+        # Before building anything. A typo in compose is a ten-second failure
+        # here and a ten-minute one after two images have been built.
+        run: docker compose config --quiet
+
+      - name: Build the images
+        # `--pull` so a stale cached base image cannot make a broken build look
+        # fine, and both targets because the mock build takes a different path
+        # through the Dockerfile than the gateway build does.
+        run: docker compose build --pull
+
+      - name: Confirm the gateway image contains no mock upstreams
+        # The claim the WITH_MOCKS argument makes, checked rather than trusted.
+        # Two servers with deliberately controllable failure modes have no
+        # business inside an artifact whose purpose is to be a security
+        # boundary, and "we removed it" is the kind of statement that quietly
+        # stops being true.
+        run: |
+          if docker run --rm --entrypoint python acp/gateway:dev \
+               -c "import acp.mocks" 2>/dev/null; then
+            echo "::error::acp.mocks is importable in the gateway image"
+            exit 1
+          fi
+          echo "acp.mocks is absent, as intended"
+
+      - name: Confirm the gateway does not run as root
+        run: |
+          uid=$(docker run --rm --entrypoint id acp/gateway:dev -u)
+          echo "container uid: $uid"
+          [ "$uid" = "10001" ]
+
+      - name: Bring the stack up
+        run: docker compose up -d --wait
+
+      - name: Smoke test
+        run: python scripts/compose_smoke.py
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans

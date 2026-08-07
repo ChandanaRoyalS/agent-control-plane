@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from acp.exceptions import ConfigurationError
@@ -138,6 +138,74 @@ class GatewaySettings(BaseSettings):
 
     allowed_origins: list[str] = Field(default_factory=list)
     """Browser origins accepted. Empty is correct for non-browser clients."""
+
+    # -- identity (Phase 2) ------------------------------------------------
+    #
+    # There is deliberately no `ACP_AUTH_ENABLED`. Authentication is on when an
+    # identity provider is configured and off when one is not, because a boolean
+    # is a thing somebody forgets to set — and the failure mode of forgetting is
+    # a gateway that accepts every request while its configuration says it
+    # authenticates them. Presence of configuration cannot be forgotten in that
+    # direction: you cannot validate tokens without an issuer.
+    #
+    # Setting *some* of these and not the others is a startup failure. Half
+    # configured authentication that silently does nothing is the worst of the
+    # three possible states.
+
+    auth_issuer: str = ""
+    """The authorization server's issuer URL. Must match the token's ``iss``."""
+
+    auth_audience: str = ""
+    """This gateway's identifier, checked against the token's ``aud``.
+
+    Not optional when authentication is on. A token minted for another service
+    in the estate is correctly signed and unexpired, and accepting it would let
+    anything that can obtain *any* token act through this gateway.
+    """
+
+    auth_jwks_url: str = ""
+    """Where the authorization server publishes its signing keys."""
+
+    auth_algorithms: list[str] = Field(
+        default_factory=lambda: ["RS256", "RS384", "RS512", "ES256", "ES384", "PS256"]
+    )
+    """Signature algorithms accepted. Asymmetric only — a symmetric algorithm
+    here is refused at startup, because a JWKS publishes *public* keys and an
+    attacker can sign HS256 with one."""
+
+    auth_leeway: float = Field(default=60.0, ge=0)
+    """Clock skew tolerated on ``exp``, ``nbf`` and ``iat``, in seconds."""
+
+    auth_jwks_cache_ttl: float = Field(default=600.0, gt=0)
+
+    auth_jwks_min_refresh_interval: float = Field(default=30.0, ge=0)
+    """Floor between key-set fetches triggered by an unknown ``kid``.
+
+    A rate limit on attacker-triggered work: the ``kid`` comes from the token,
+    so refetching on every miss makes the gateway an amplifier pointed at its
+    own identity provider.
+    """
+
+    @property
+    def authentication_configured(self) -> bool:
+        return bool(self.auth_issuer and self.auth_audience and self.auth_jwks_url)
+
+    @model_validator(mode="after")
+    def _identity_settings_are_all_or_nothing(self) -> GatewaySettings:
+        provided = {
+            "ACP_AUTH_ISSUER": self.auth_issuer,
+            "ACP_AUTH_AUDIENCE": self.auth_audience,
+            "ACP_AUTH_JWKS_URL": self.auth_jwks_url,
+        }
+        missing = [name for name, value in provided.items() if not value]
+        if missing and len(missing) != len(provided):
+            msg = (
+                "identity settings are all-or-nothing; "
+                f"missing {', '.join(sorted(missing))}. "
+                "Set all three to authenticate, or none to run unauthenticated."
+            )
+            raise ValueError(msg)
+        return self
 
 
 def allowed_hosts_for(hosts: list[str], port: int) -> list[str]:

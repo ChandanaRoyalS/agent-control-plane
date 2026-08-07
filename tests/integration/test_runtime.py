@@ -17,7 +17,13 @@ import pytest
 
 from acp.config import GatewaySettings
 from acp.exceptions import ConfigurationError
-from acp.runtime import build_drift_detector, gateway_from_configs, gateway_from_settings
+from acp.identity import DEFAULT_ALGORITHMS
+from acp.runtime import (
+    build_drift_detector,
+    build_token_validator,
+    gateway_from_configs,
+    gateway_from_settings,
+)
 from acp.schema import SchemaSnapshot
 from acp.upstream import UpstreamConfig
 from acp.upstream.models import ListToolsResult
@@ -137,3 +143,75 @@ def test_asking_for_drift_detection_without_probing_says_so(
     anyio.run(_run)
 
     assert any(r.message == "schema.drift_detection_inert" for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Identity wiring (task 22)
+# ---------------------------------------------------------------------------
+
+ISSUER = "https://idp.test/realms/acp"
+AUDIENCE = "agent-control-plane"
+JWKS_URL = "https://idp.test/realms/acp/certs"
+
+
+def identity_settings(algorithms: list[str] | None = None) -> GatewaySettings:
+    """Written out rather than splatted from a dict.
+
+    `**{"auth_issuer": ...}` is a `dict[str, str]`, and mypy cannot check kwargs
+    unpacked from one against a model whose fields are variously `int`, `bool`,
+    `Path` and `list[str]` — so it rejects every one of them. Explicit arguments
+    are longer and are what actually type-checks.
+    """
+    return GatewaySettings(  # type: ignore[call-arg]
+        _env_file=None,
+        auth_issuer=ISSUER,
+        auth_audience=AUDIENCE,
+        auth_jwks_url=JWKS_URL,
+        auth_algorithms=list(algorithms if algorithms is not None else DEFAULT_ALGORITHMS),
+    )
+
+
+def test_no_provider_configured_builds_no_validator() -> None:
+    """`None` here is what makes the gateway run unauthenticated, which is how
+    every task before this one behaved and has to keep working."""
+    settings = GatewaySettings(_env_file=None)  # type: ignore[call-arg]
+
+    assert build_token_validator(settings) is None
+
+
+def test_a_configured_provider_builds_a_validator() -> None:
+    validator = build_token_validator(identity_settings())
+
+    assert validator is not None
+    assert validator.policy.issuer == ISSUER
+    assert validator.policy.audience == AUDIENCE
+    assert validator.keys.url == JWKS_URL
+
+
+def test_a_symmetric_algorithm_stops_the_gateway_starting() -> None:
+    """Before a port is bound, rather than on the first request that exploits
+    it. A JWKS publishes public keys, so accepting HS256 means accepting tokens
+    an attacker can forge from published material — a misconfiguration that
+    fails *open* has to be impossible to run, not merely unlikely to be
+    written."""
+    settings = identity_settings(algorithms=["RS256", "HS256"])
+
+    with pytest.raises(ConfigurationError, match="symmetric"):
+        build_token_validator(settings)
+
+
+def test_an_unauthenticated_gateway_says_so_at_startup(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Half of what makes unauthenticated mode acceptable at all. The other half
+    is `principal: anonymous` on every request line — together they mean nobody
+    can read a log and fail to notice that nothing is being authenticated."""
+
+    async def _run() -> None:
+        with caplog.at_level(logging.WARNING, logger="acp.runtime"):
+            async with gateway_from_configs([], validator=None):
+                pass
+
+    anyio.run(_run)
+
+    assert any(r.message == "auth.disabled" for r in caplog.records)

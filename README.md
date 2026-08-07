@@ -67,12 +67,6 @@ uv run python scripts/compose_smoke.py     # asserts it actually works
 Then look at it: the MCP endpoint on `:8080`, metrics, health and schema drift
 on `:9090`, and traces at <http://localhost:16686>.
 
-![One tools/list request fanning out to two upstreams concurrently](docs/demo/jaeger-fanout.png)
-
-One inbound request becoming two concurrent outbound calls, across container
-boundaries, with the trace context carried in `params._meta` per SEP-414. The
-gateway's own span is the parent; each upstream gets a child named for it.
-
 ```bash
 curl -s localhost:9090/readyz  | jq
 curl -s localhost:9090/schemas | jq
@@ -105,6 +99,25 @@ can rewrite without breaking a single client. A server that has behaved perfectl
 for six months and then appends a sentence beginning "Before using any other
 tool…" produces no timeout, no error and no failed call. See
 [ADR 0013](docs/decisions/0013-schema-drift-is-a-security-control.md).
+
+### Identity
+
+Every request resolves to a **principal** — the human the work is for, plus the
+agent doing it, taken from RFC 8693's `act` claim. Both halves matter: what may
+be read is a question about the subject, and which agent may act at all is a
+question about the actor.
+
+```bash
+ACP_AUTH_ISSUER=https://idp.example/realms/acp
+ACP_AUTH_AUDIENCE=agent-control-plane
+ACP_AUTH_JWKS_URL=https://idp.example/realms/acp/protocol/openid-connect/certs
+```
+
+There is no `ACP_AUTH_ENABLED`. Authentication is on when a provider is
+configured, because a boolean is a thing somebody forgets to set. Leave these
+blank and the gateway runs unauthenticated, says so at startup, and stamps
+`principal: anonymous` on every request line. See
+[ADR 0015](docs/decisions/0015-two-identities-not-one.md).
 
 ## Development
 

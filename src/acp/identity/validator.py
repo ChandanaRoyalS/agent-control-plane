@@ -23,6 +23,15 @@ same problem RFC 8707 resource indicators solve on the outbound side in task 26.
 JWT. A token without it never expires, and a verifier that treats a missing
 claim as "no constraint" turns one leaked token into permanent access.
 
+**The issuer chooses the rules, before any rule is applied.** With more than
+one trusted authorization server, "verify against whichever key matches, then
+read ``iss``" accepts a token genuinely signed by server B while applying server
+A's registration to it. So ``iss`` is read *first*, from the unverified payload,
+and selects one registration — and the signature is then checked against that
+registration's keys and that registration's issuer. A token that lies about who
+issued it selects a registration whose keys will not verify it. See
+``acp.identity.issuers``.
+
 **The caller is told nothing about why.** Expired, wrong audience, bad
 signature and unknown key all come back as one answer. A validator that
 distinguishes them is an oracle an attacker can query, and the reason is
@@ -33,13 +42,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import jwt
 
 from acp.exceptions import AuthenticationError, ConfigurationError
-from acp.identity.keys import JwksCache
 from acp.identity.principal import Principal, from_claims
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle: issuers imports TokenPolicy
+    from acp.identity.issuers import IssuerRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +104,7 @@ class TokenPolicy:
 class TokenValidator:
     """Verifies a bearer token and returns the principal it names."""
 
-    policy: TokenPolicy
-    keys: JwksCache
+    issuers: IssuerRegistry
 
     async def validate(self, token: str) -> Principal:
         """Verify ``token`` and build its principal, or raise.
@@ -104,23 +114,31 @@ class TokenValidator:
         """
         header = self._header(token)
         self._reject_forbidden_algorithm(header.get("alg"))
-        key = await self.keys.key_for(_optional_str(header.get("kid")))
+
+        # Read who the token *claims* issued it, and let that choose the rules.
+        # Nothing has been verified at this point; the safety comes from the two
+        # steps below, which check the signature against this registration's
+        # keys and `iss` against this registration's issuer. A lie here selects
+        # a registration that cannot verify the token.
+        registration = self.issuers.registration_for(self._claimed_issuer(token))
+        policy = registration.policy
+        key = await registration.keys.key_for(_optional_str(header.get("kid")))
 
         try:
             claims: dict[str, Any] = jwt.decode(
                 token,
                 key=key,
-                algorithms=list(self.policy.algorithms),
-                audience=self.policy.audience,
-                issuer=self.policy.issuer,
-                leeway=self.policy.leeway,
+                algorithms=list(policy.algorithms),
+                audience=policy.audience,
+                issuer=policy.issuer,
+                leeway=policy.leeway,
                 # Written as a literal rather than assembled elsewhere so that
                 # every verification this gateway performs is visible in one
                 # place. `require` is the load-bearing entry: without it a token
                 # missing `exp` is not rejected, it is simply never checked for
                 # expiry, and one leaked token becomes permanent access.
                 options={
-                    "require": list(self.policy.required_claims),
+                    "require": list(policy.required_claims),
                     "verify_signature": True,
                     "verify_exp": True,
                     "verify_nbf": True,
@@ -143,6 +161,30 @@ class TokenValidator:
 
     # -- internals ---------------------------------------------------------
 
+    def _claimed_issuer(self, token: str) -> str | None:
+        """The ``iss`` the token asserts, with nothing verified.
+
+        Every check is switched off deliberately: this is not a validation, it
+        is a lookup key, and running expiry or audience checks against a
+        registration that has not been chosen yet would apply the wrong rules
+        in order to decide which rules apply.
+        """
+        try:
+            payload: dict[str, Any] = jwt.decode(
+                token,
+                options={
+                    "verify_signature": False,
+                    "verify_exp": False,
+                    "verify_nbf": False,
+                    "verify_iat": False,
+                    "verify_aud": False,
+                    "verify_iss": False,
+                },
+            )
+        except jwt.InvalidTokenError as exc:
+            raise _rejected("MalformedPayload") from exc
+        return _optional_str(payload.get("iss"))
+
     def _header(self, token: str) -> dict[str, Any]:
         try:
             header: dict[str, Any] = jwt.get_unverified_header(token)
@@ -153,12 +195,10 @@ class TokenValidator:
     def _reject_forbidden_algorithm(self, alg: Any) -> None:
         """Read the header's ``alg`` only in order to refuse it.
 
-        This is the one place an unverified value from the token is consulted,
-        and it is consulted to say no. ``jwt.decode`` already refuses anything
-        outside the allow-list, so this is redundant — deliberately. It fails
-        earlier, before a key lookup that a flood of ``none``-algorithm tokens
-        would otherwise turn into work, and it makes the rejection explicit at
-        the place a reader looks for it.
+        ``jwt.decode`` already refuses anything outside the allow-list, so this
+        is redundant — deliberately. It fails earlier, before a key lookup that
+        a flood of ``none``-algorithm tokens would otherwise turn into work, and
+        it makes the rejection explicit at the place a reader looks for it.
         """
         if isinstance(alg, str) and alg.startswith(SYMMETRIC_PREFIXES):
             raise _rejected("ForbiddenAlgorithm")

@@ -202,6 +202,19 @@ def test_a_tool_call_with_an_unheaderable_name_passes_too() -> None:
     accepted(body, headers)
 
 
+def test_trace_context_in_meta_does_not_break_validation() -> None:
+    """SEP-414 puts bare `traceparent` in `params._meta` alongside namespaced
+    envelope keys, which is an odd-looking mixture. This asserts the SDK is
+    genuinely fine with it, rather than us assuming so from the prose.
+    """
+    body, headers = sent(lambda c: c.list_tools())
+    body["params"]["_meta"]["traceparent"] = (
+        "00-0af7651916cd43dd8448eb211c80319c-00f067aa0ba902b7-01"
+    )
+
+    accepted(body, headers)
+
+
 def test_the_client_advertises_who_it_is() -> None:
     """Optional in the spec, and worth sending: an upstream operator reading
     their own logs should be able to tell which client is calling them."""

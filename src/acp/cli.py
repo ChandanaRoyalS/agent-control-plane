@@ -21,7 +21,7 @@ from typing import Any
 from acp import __version__
 from acp.config import load_settings
 from acp.exceptions import ACPError
-from acp.observability import configure_logging
+from acp.observability import configure_logging, configure_tracing
 from acp.runtime import gateway_from_settings
 from acp.upstream import UpstreamClient, UpstreamConfig
 
@@ -134,6 +134,11 @@ def _serve_command(args: argparse.Namespace) -> int:
         return _usage_error(exc.message)
 
     configure_logging(settings.log_level, settings.log_format)
+    # After logging, so the decision about whether tracing is on is itself
+    # logged in the format the operator asked for. Reads OpenTelemetry's own
+    # environment variables rather than ACP_ ones, and is a no-op unless
+    # OTEL_TRACES_EXPORTER names an exporter.
+    configure_tracing()
 
     # Imported here, not at module scope: `acp probe` and `acp call` are
     # diagnostic commands that must start instantly, and uvicorn pulls in a

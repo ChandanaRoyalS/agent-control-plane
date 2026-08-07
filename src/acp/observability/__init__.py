@@ -16,17 +16,29 @@ from acp.observability.log import (
     redact,
 )
 from acp.observability.middleware import RequestContextMiddleware
+from acp.observability.tracing import (
+    TRACING_AVAILABLE,
+    client_span,
+    configure_tracing,
+    current_trace_context,
+    trace_ids,
+)
 
 __all__ = [
     "REDACTED",
+    "TRACING_AVAILABLE",
     "ConsoleFormatter",
     "ContextFilter",
     "JsonFormatter",
     "RequestContextMiddleware",
     "bind",
+    "client_span",
     "configure_logging",
+    "configure_tracing",
+    "current_trace_context",
     "new_request_id",
     "redact",
     "request",
     "request_id",
+    "trace_ids",
 ]

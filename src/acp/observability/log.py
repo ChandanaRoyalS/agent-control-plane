@@ -29,7 +29,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Final
 
-from acp.observability import context
+from acp.observability import context, tracing
 
 # ---------------------------------------------------------------------------
 # Redaction
@@ -156,10 +156,13 @@ class ContextFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        for key, value in context.current().items():
+        # Trace IDs first, request context second, so an explicitly bound
+        # `trace_id` (a test, or a replayed request) still wins — the rule
+        # everywhere here is that the more specific source beats the more
+        # ambient one.
+        for key, value in {**tracing.trace_ids(), **context.current()}.items():
             if not hasattr(record, key):
-                # An explicit `extra=` on the call site wins over ambient
-                # context: the specific beats the general.
+                # An explicit `extra=` on the call site wins over both.
                 setattr(record, key, value)
         return True
 

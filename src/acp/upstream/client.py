@@ -29,9 +29,10 @@ from acp.exceptions import (
     UpstreamTimeoutError,
     UpstreamUnavailableError,
 )
+from acp.observability import semconv, tracing
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.envelope import routing_headers, with_envelope
-from acp.upstream.models import CallToolResult, ToolDefinition
+from acp.upstream.models import PROTOCOL_VERSION, CallToolResult, ToolDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -137,15 +138,45 @@ class UpstreamClient:
         Every failure path out of this method raises a member of the exception
         taxonomy. Nothing else escapes.
         """
+        request_id = next(self._ids)
+        attributes = semconv.client_attributes(
+            method=method,
+            upstream=self.config.name,
+            url=self.config.url,
+            tool=tool_name,
+            request_id=request_id,
+            protocol_version=PROTOCOL_VERSION,
+        )
+        # The span is opened *before* the body is built, and that ordering is
+        # the point: the trace context injected below is this span's, so the
+        # upstream's own server span nests underneath this client span rather
+        # than beside it. Open it afterwards and the trace loses its shape.
+        with tracing.client_span(semconv.span_name(method, tool_name), attributes) as span:
+            return await self._send(method, params, tool_name, request_id, span)
+
+    async def _send(
+        self,
+        method: str,
+        params: Mapping[str, Any] | None,
+        tool_name: str | None,
+        request_id: int,
+        span: Any,
+    ) -> dict[str, Any]:
         # The envelope lives in `params._meta`, so `params` is always present
         # — even for a method that takes no arguments. A `tools/list` with no
         # params is not a valid 2026-07-28 request, and a real server rejects
         # it with -32602 before the method is ever dispatched.
+        #
+        # The W3C trace context rides in the same `_meta`, unprefixed, per
+        # SEP-414. Empty when nothing is being traced, in which case the request
+        # is byte-for-byte what it was before tracing existed.
         body: dict[str, Any] = {
             "jsonrpc": "2.0",
-            "id": next(self._ids),
+            "id": request_id,
             "method": method,
-            "params": with_envelope(params, CLIENT_NAME, __version__),
+            "params": with_envelope(
+                params, CLIENT_NAME, __version__, tracing.current_trace_context()
+            ),
         }
         # Derived from the body rather than assembled alongside it, so the
         # headers cannot drift from what they are asserting about. A server
@@ -157,6 +188,7 @@ class UpstreamClient:
             response = await self._http.post(self.config.url, json=body, headers=headers)
         except httpx.TimeoutException as exc:
             self._observe(method, tool_name, started, "timeout")
+            tracing.mark_failed(span, semconv.error_attributes(exc), "timeout")
             raise UpstreamTimeoutError(
                 f"{self.config.name} did not respond within its timeout budget",
                 upstream=self.config.name,
@@ -167,6 +199,7 @@ class UpstreamClient:
             # connection dropped mid-response. All mean "could not complete the
             # exchange", which is a different thing from "answered badly".
             self._observe(method, tool_name, started, "unavailable")
+            tracing.mark_failed(span, semconv.error_attributes(exc), "unavailable")
             raise UpstreamUnavailableError(
                 f"{self.config.name} is unreachable: {exc}",
                 upstream=self.config.name,
@@ -177,6 +210,11 @@ class UpstreamClient:
             result = self._parse(response, method)
         except ACPError as exc:
             self._observe(method, tool_name, started, "rejected", error=type(exc).__name__)
+            tracing.mark_failed(
+                span,
+                semconv.error_attributes(exc, status_code=getattr(exc, "upstream_code", None)),
+                "rejected",
+            )
             raise
 
         self._observe(method, tool_name, started, "ok", status=response.status_code)

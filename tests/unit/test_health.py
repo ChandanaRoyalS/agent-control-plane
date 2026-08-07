@@ -350,3 +350,55 @@ def test_an_open_circuit_with_no_known_cause_reports_itself() -> None:
     run(m.probe_once)
 
     assert m.record_for("mock-a").error == "UpstreamCircuitOpenError"
+
+
+# ---------------------------------------------------------------------------
+# The catalogue observer (task 20)
+# ---------------------------------------------------------------------------
+
+
+def test_a_successful_probe_offers_its_catalogue_to_the_observer() -> None:
+    """The prober already fetches every upstream's catalogue on a timer, past
+    any cache and off the request path. Schema drift detection is that same
+    fetch read for a different purpose, so it arrives as a hook rather than as
+    work bolted onto `tools/list`."""
+    seen: list[tuple[str, int]] = []
+    up = FakeUpstream("mock-a", [tool("search"), tool("read")])
+    m = monitor(up, on_catalogue=lambda name, result: seen.append((name, len(result.tools))))
+
+    run(m.probe_once)
+
+    assert seen == [("mock-a", 2)]
+
+
+def test_a_failed_probe_offers_nothing() -> None:
+    """There is no catalogue to compare. Handing the observer an empty one would
+    report every tool the upstream has as removed, turning a two-second blip
+    into a fleet-wide drift alert."""
+    seen: list[str] = []
+    up = FakeUpstream("mock-a", UpstreamUnavailableError("down", upstream="mock-a"))
+    m = monitor(up, on_catalogue=lambda name, _result: seen.append(name))
+
+    run(m.probe_once)
+
+    assert seen == []
+
+
+def test_an_observer_that_raises_does_not_break_probing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Same reasoning as the probe's own broad except: an observer that dies
+    would take health monitoring for every upstream with it, which is a
+    monitoring bug escalated into an outage."""
+
+    def explode(_name: str, _result: ListToolsResult) -> None:
+        raise ZeroDivisionError
+
+    good = FakeUpstream("mock-b", [tool("chat")])
+    m = monitor(FakeUpstream("mock-a", [tool("search")]), good, on_catalogue=explode)
+
+    with caplog.at_level(logging.ERROR, logger="acp.health"):
+        run(m.probe_once)
+
+    assert m.record_for("mock-b").state is UpstreamHealth.HEALTHY
+    assert any(r.message == "health.observer_failed" for r in caplog.records)

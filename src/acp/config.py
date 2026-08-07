@@ -103,7 +103,25 @@ class GatewaySettings(BaseSettings):
 
     health_probe_interval: float = Field(default=15.0, gt=0)
     """Seconds between probe rounds, before jitter."""
-    """Set false to run without the second listener at all."""
+
+    schema_drift_detection_enabled: bool = True
+    """Compare each probed catalogue against the committed baseline (task 20).
+
+    Detection rides on the health prober, so this does nothing when
+    ``health_probing_enabled`` is off — see ``acp.schema.detector`` for why that
+    is the right place for it rather than the request path.
+    """
+
+    schema_baseline_file: Path = Path("config/schema-baseline.json")
+    """The acknowledged state of every upstream's catalogue.
+
+    A missing file is not an error: it means nothing has been baselined yet, and
+    the gateway says so once per upstream rather than refusing to start. A file
+    that exists and cannot be parsed is logged loudly and treated as absent —
+    deliberately unlike every other configuration failure in this module, which
+    are fatal. A drift detector is a monitor, and a monitor that can stop the
+    gateway from starting is a larger risk than the one it was added to reduce.
+    """
 
     upstreams_file: Path = Path("config/upstreams.yaml")
     """Path to the upstream definitions, resolved relative to the process's

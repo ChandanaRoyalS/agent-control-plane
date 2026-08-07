@@ -3,7 +3,7 @@
 A policy-enforcing, injection-screening MCP gateway that sits between AI agents
 and the systems they are allowed to touch.
 
-[![CI](https://github.com/chandanaroyal719-bot/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/chandanaroyal719-bot/agent-control-plane/actions/workflows/ci.yml)
+[![CI](https://github.com/USERNAME/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/USERNAME/agent-control-plane/actions/workflows/ci.yml)
 
 > **Status:** in development. Phase 1 of 10 — foundation.
 
@@ -53,6 +53,25 @@ uv sync --all-groups
 uv run pre-commit install
 uv run pytest
 ```
+
+### Schema drift
+
+An MCP server can change what it exposes at any moment, and the protocol has no
+way to announce it. The catalogue every upstream serves is recorded in
+[`config/schema-baseline.json`](config/schema-baseline.json) and compared against
+what they actually serve.
+
+```bash
+acp schemas capture   # record the current catalogues as the baseline
+acp schemas check     # compare; exits 1 on drift, so it works as a CI gate
+```
+
+The case worth caring about is not a broken argument schema. A tool description
+is prose that goes verbatim into the agent's prompt — the only field an upstream
+can rewrite without breaking a single client. A server that has behaved perfectly
+for six months and then appends a sentence beginning "Before using any other
+tool…" produces no timeout, no error and no failed call. See
+[ADR 0013](docs/decisions/0013-schema-drift-is-a-security-control.md).
 
 ## Development
 

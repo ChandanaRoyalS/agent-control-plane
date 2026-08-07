@@ -8,6 +8,7 @@ hundred times in a deploy loop would exhaust the host.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +17,10 @@ import pytest
 
 from acp.config import GatewaySettings
 from acp.exceptions import ConfigurationError
-from acp.runtime import gateway_from_configs, gateway_from_settings
+from acp.runtime import build_drift_detector, gateway_from_configs, gateway_from_settings
+from acp.schema import SchemaSnapshot
 from acp.upstream import UpstreamConfig
+from acp.upstream.models import ListToolsResult
 
 pytestmark = pytest.mark.integration
 
@@ -79,3 +82,58 @@ def test_settings_path_validates_before_opening_connections(tmp_path: Path) -> N
 
     with pytest.raises(ConfigurationError, match="BAD_NAME"):
         anyio.run(_run)
+
+
+# ---------------------------------------------------------------------------
+# Schema drift wiring (task 20)
+# ---------------------------------------------------------------------------
+
+
+def test_a_missing_baseline_does_not_stop_the_gateway(tmp_path: Path) -> None:
+    """Every new deployment starts unbaselined. Refusing to serve over it would
+    be absurd; saying so once per upstream is the whole response."""
+    detector = build_drift_detector(tmp_path / "absent.json", ["mock-a"])
+
+    assert detector.has_baseline is False
+
+
+def test_a_corrupt_baseline_is_loud_but_not_fatal(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The only place in this project where a bad file on disk does not stop
+    the process, and the exception is deliberate. Configuration failures are
+    fatal because a gateway that starts with a broken policy has already failed
+    open. A schema baseline is a *monitor*, and a monitor that can prevent the
+    gateway from serving is a larger risk than the one it exists to reduce.
+    """
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text("{not json", encoding="utf-8")
+
+    with caplog.at_level(logging.ERROR, logger="acp.runtime"):
+        detector = build_drift_detector(baseline, ["mock-a"])
+
+    assert detector.has_baseline is False
+    assert any(r.message == "schema.baseline_unreadable" for r in caplog.records)
+
+
+def test_a_valid_baseline_is_loaded(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline.json"
+    SchemaSnapshot.from_catalogues({"mock-a": ListToolsResult()}).save(baseline)
+
+    assert build_drift_detector(baseline, ["mock-a"]).has_baseline is True
+
+
+def test_asking_for_drift_detection_without_probing_says_so(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Detection rides on the prober's fetch, so this combination cannot do
+    what it says. Silently detecting nothing would be the worse outcome."""
+
+    async def _run() -> None:
+        with caplog.at_level(logging.WARNING, logger="acp.runtime"):
+            async with gateway_from_configs([], probe_health=False, detect_drift=True) as app:
+                assert app.state.schema_drift is None
+
+    anyio.run(_run)
+
+    assert any(r.message == "schema.drift_detection_inert" for r in caplog.records)

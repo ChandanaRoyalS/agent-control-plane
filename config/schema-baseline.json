@@ -1,0 +1,112 @@
+{
+  "captured_at": "2026-08-07T10:30:56+00:00",
+  "upstreams": {
+    "mock-a": {
+      "tools": {
+        "create_ticket": {
+          "description": "File a ticket. NOT idempotent to retry blindly — see ADR 0003.",
+          "inputSchema": {
+            "properties": {
+              "priority": {
+                "enum": [
+                  "low",
+                  "normal",
+                  "high"
+                ],
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "type": "object"
+          },
+          "name": "create_ticket"
+        },
+        "read_document": {
+          "description": "Read a document by its path.",
+          "inputSchema": {
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
+          "name": "read_document"
+        },
+        "search": {
+          "description": "Search documents by keyword.",
+          "inputSchema": {
+            "properties": {
+              "limit": {
+                "default": 10,
+                "type": "integer"
+              },
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "name": "search"
+        }
+      }
+    },
+    "mock-b": {
+      "tools": {
+        "list_channels": {
+          "description": "List all known channels.",
+          "inputSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "name": "list_channels"
+        },
+        "search": {
+          "description": "Search chat messages, optionally scoped to a channel.",
+          "inputSchema": {
+            "properties": {
+              "channel": {
+                "type": "string"
+              },
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "name": "search"
+        },
+        "summarize": {
+          "description": "Summarize all messages in a channel.",
+          "inputSchema": {
+            "properties": {
+              "channel": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "channel"
+            ],
+            "type": "object"
+          },
+          "name": "summarize"
+        }
+      }
+    }
+  },
+  "version": 1
+}

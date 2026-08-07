@@ -31,10 +31,12 @@ from starlette.routing import Route
 from acp import __version__
 from acp.health import HealthMonitor
 from acp.observability import metrics
+from acp.schema import DriftDetector
 
 METRICS_PATH = "/metrics"
 HEALTH_PATH = "/healthz"
 READY_PATH = "/readyz"
+SCHEMAS_PATH = "/schemas"
 
 
 async def _metrics(_request: Request) -> Response:
@@ -98,12 +100,41 @@ def build_readyz(health: HealthMonitor | None) -> Any:
     return readyz
 
 
-def build_admin_app(health: HealthMonitor | None = None) -> Starlette:
+def build_schemas(detector: DriftDetector | None) -> Any:
+    """Current distance from the committed schema baseline (task 20).
+
+    Always 200, including when there is drift. Drift is not an outage and must
+    not read as one: a catalogue that changed is a thing for a human to look at,
+    not a reason for a load balancer to take a healthy gateway out of rotation.
+    That is also why it is a route of its own rather than a field on ``/readyz``
+    — the two are read by different consumers for different purposes, and
+    merging them would eventually have somebody wiring drift into a probe.
+
+    Reports the *whole* outstanding difference every time, not only what is new.
+    The log line is the edge-triggered alert; this is the level-triggered view
+    you check when you are already looking.
+    """
+
+    async def schemas(_request: Request) -> Response:
+        if detector is None:
+            return JSONResponse({"detecting": False, "baseline": False, "drift": False})
+        report = detector.report()
+        return JSONResponse(
+            {"detecting": True, "baseline": detector.has_baseline, **report.as_dict()}
+        )
+
+    return schemas
+
+
+def build_admin_app(
+    health: HealthMonitor | None = None, drift: DriftDetector | None = None
+) -> Starlette:
     """The admin ASGI app. Small on purpose — it must not be able to fail."""
     return Starlette(
         routes=[
             Route(METRICS_PATH, _metrics, methods=["GET"]),
             Route(HEALTH_PATH, _healthz, methods=["GET"]),
             Route(READY_PATH, build_readyz(health), methods=["GET"]),
+            Route(SCHEMAS_PATH, build_schemas(drift), methods=["GET"]),
         ]
     )

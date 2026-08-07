@@ -224,10 +224,19 @@ def _run(coro: Any) -> int:
 
 async def _probe(config: UpstreamConfig) -> int:
     async with await UpstreamClient.connect(config) as client:
-        tools = await client.list_tools()
+        catalogue = await client.list_tools()
 
-    print(f"{config.name}: {len(tools)} tool(s)")  # noqa: T201
-    for tool in tools:
+    # The freshness hints are worth surfacing here: `acp probe` exists to show
+    # what an upstream actually said, and whether it consents to being cached
+    # is part of that. `private` means it computed this list for a particular
+    # caller, which is the kind of thing you want to notice from a terminal
+    # rather than from a cache that quietly declined to hold anything.
+    print(f"{config.name}: {len(catalogue.tools)} tool(s)")  # noqa: T201
+    print(  # noqa: T201
+        f"  cache: ttlMs={catalogue.ttl_ms} scope={catalogue.cache_scope}"
+        f" ({'shareable' if catalogue.is_shareable else 'not cached'})"
+    )
+    for tool in catalogue.tools:
         required = tool.input_schema.get("required", [])
         print(f"  {tool.name}({', '.join(required)})  {tool.description}")  # noqa: T201
     return 0

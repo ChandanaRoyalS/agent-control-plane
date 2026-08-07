@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from acp.upstream.config import UpstreamConfig
-from acp.upstream.models import CallToolResult, ToolDefinition
+from acp.upstream.models import CallToolResult, ListToolsResult
 
 
 @runtime_checkable
@@ -31,8 +31,18 @@ class Upstream(Protocol):
         satisfy it — the concrete client stores it, the wrappers delegate."""
         ...
 
-    async def list_tools(self) -> list[ToolDefinition]:
-        """Fetch this upstream's tool catalogue."""
+    async def list_tools(self) -> ListToolsResult:
+        """Fetch this upstream's tool catalogue, with its freshness hints."""
+        ...
+
+    async def invalidate(self) -> None:
+        """Discard anything cached about this upstream.
+
+        On the protocol rather than only on the caching wrapper, because the
+        health monitor has to be able to force a real request without knowing
+        which layers are present. A probe answered from cache reports on a
+        conversation that happened minutes ago.
+        """
         ...
 
     async def call_tool(

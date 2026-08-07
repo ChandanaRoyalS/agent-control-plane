@@ -166,7 +166,12 @@ class HealthMonitor:
         record = self._records[name]
         previous = record.state
         try:
-            tools = await upstream.list_tools()
+            # Forced past any cache. A probe answered from a cached catalogue
+            # reports on a conversation that happened minutes ago, which is the
+            # one thing a liveness check must never do — and it repopulates the
+            # cache as a side effect, so the prober keeps it warm.
+            await upstream.invalidate()
+            result = await upstream.list_tools()
         except UpstreamCircuitOpenError:
             # The gateway's own refusal, not news about the upstream — the same
             # distinction `counts_as_failure` draws in the breaker. Whatever
@@ -197,7 +202,9 @@ class HealthMonitor:
                 name, UpstreamHealth.UNHEALTHY, error=type(exc).__name__, previous=previous
             )
         else:
-            self._update(name, UpstreamHealth.HEALTHY, tool_count=len(tools), previous=previous)
+            self._update(
+                name, UpstreamHealth.HEALTHY, tool_count=len(result.tools), previous=previous
+            )
 
     def _update(
         self,

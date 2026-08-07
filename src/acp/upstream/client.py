@@ -32,7 +32,7 @@ from acp.exceptions import (
 from acp.observability import metrics, semconv, tracing
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.envelope import routing_headers, with_envelope
-from acp.upstream.models import PROTOCOL_VERSION, CallToolResult, ToolDefinition
+from acp.upstream.models import PROTOCOL_VERSION, CallToolResult, ListToolsResult
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +83,8 @@ class UpstreamClient:
 
     # -- MCP methods -------------------------------------------------------
 
-    async def list_tools(self) -> list[ToolDefinition]:
-        """Fetch the upstream's tool catalogue."""
+    async def list_tools(self) -> ListToolsResult:
+        """Fetch the upstream's tool catalogue, with its freshness hints."""
         result = await self._request("tools/list")
         raw_tools = result.get("tools")
         if not isinstance(raw_tools, list):
@@ -94,12 +94,16 @@ class UpstreamClient:
                 details={"received_keys": sorted(result)},
             )
         try:
-            return [ToolDefinition.model_validate(t) for t in raw_tools]
+            return ListToolsResult.model_validate(result)
         except Exception as exc:
             raise UpstreamProtocolError(
                 f"tools/list returned a malformed tool definition: {exc}",
                 upstream=self.config.name,
             ) from exc
+
+    async def invalidate(self) -> None:
+        """Nothing to forget. This layer holds no cache."""
+        return
 
     async def call_tool(
         self, name: str, arguments: Mapping[str, Any] | None = None

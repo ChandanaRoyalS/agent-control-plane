@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from acp.config import (
     GatewaySettings,
     allowed_hosts_for,
+    load_issuers,
     load_settings,
     load_upstreams,
 )
@@ -226,7 +227,6 @@ def test_expansion_is_idempotent_in_effect() -> None:
 IDENTITY = {
     "auth_issuer": "https://idp.test/realms/acp",
     "auth_audience": "agent-control-plane",
-    "auth_jwks_url": "https://idp.test/realms/acp/certs",
 }
 
 
@@ -235,22 +235,33 @@ def settings(**overrides: Any) -> GatewaySettings:
 
 
 def test_no_identity_settings_means_unauthenticated() -> None:
-    """How every task before this one ran. It has to keep working, or the
+    """How every task before task 22 ran. It has to keep working, or the
     gateway could not start at all until Phase 2 finishes."""
     assert settings().authentication_configured is False
 
 
-def test_all_three_identity_settings_turns_authentication_on() -> None:
+def test_an_issuer_and_an_audience_turn_authentication_on() -> None:
     """There is no `ACP_AUTH_ENABLED`, and that is the point: a boolean is a
     thing somebody forgets to set, and forgetting it leaves a gateway accepting
-    every request while its config claims otherwise. Presence of configuration
-    cannot fail in that direction."""
+    every request while its config claims otherwise."""
     assert settings(**IDENTITY).authentication_configured is True
 
 
+def test_the_jwks_url_is_optional_because_it_can_be_discovered() -> None:
+    """And better left unset. Configuring it by hand skips the RFC 8414 §3.3
+    check that the key set actually belongs to the issuer being trusted — the
+    mix-up achieved by copy-paste rather than by an attacker."""
+    assert settings(**IDENTITY).auth_jwks_url == ""
+    assert settings(**IDENTITY).authentication_configured is True
+
+
+def test_an_issuers_file_turns_authentication_on() -> None:
+    assert settings(auth_issuers_file="config/issuers.yaml").authentication_configured is True
+
+
 @pytest.mark.parametrize("omitted", sorted(IDENTITY))
-def test_half_configured_identity_refuses_to_start(omitted: str) -> None:
-    """The worst of the three possible states: settings that look like
+def test_issuer_without_audience_or_vice_versa_refuses_to_start(omitted: str) -> None:
+    """The worst of the available states: settings that look like
     authentication and do nothing. Fatal at startup, like every other
     configuration error in this module."""
     partial = {k: v for k, v in IDENTITY.items() if k != omitted}
@@ -262,5 +273,82 @@ def test_half_configured_identity_refuses_to_start(omitted: str) -> None:
 def test_the_error_names_what_is_missing() -> None:
     """Read by a human at 3am. "Invalid configuration" is not good enough when
     the fix is one environment variable."""
-    with pytest.raises(ValidationError, match="ACP_AUTH_JWKS_URL"):
-        settings(auth_issuer=IDENTITY["auth_issuer"], auth_audience=IDENTITY["auth_audience"])
+    with pytest.raises(ValidationError, match="ACP_AUTH_AUDIENCE"):
+        settings(auth_issuer=IDENTITY["auth_issuer"])
+
+
+def test_a_file_and_single_issuer_settings_together_are_refused() -> None:
+    """Two sources disagreeing about which authorization servers are trusted is
+    not a merge to be resolved."""
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        settings(auth_issuers_file="config/issuers.yaml", **IDENTITY)
+
+
+def test_a_global_jwks_url_alongside_an_issuers_file_is_refused() -> None:
+    """Per-issuer key sets belong to their issuer. One URL shared across several
+    servers is the crossing this whole task exists to prevent, spelled as a
+    config option."""
+    with pytest.raises(ValidationError, match="per-issuer"):
+        settings(auth_issuers_file="config/issuers.yaml", auth_jwks_url="https://idp.test/keys")
+
+
+def test_a_jwks_url_with_no_issuer_is_refused() -> None:
+    with pytest.raises(ValidationError, match="names keys for nobody"):
+        settings(auth_jwks_url="https://idp.test/keys")
+
+
+# ---------------------------------------------------------------------------
+# The issuers file
+# ---------------------------------------------------------------------------
+
+
+def write_issuers(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "issuers.yaml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_a_well_formed_issuers_file_loads(tmp_path: Path) -> None:
+    path = write_issuers(
+        tmp_path,
+        """
+issuers:
+  - issuer: https://idp.corp.test/realms/acp
+    audience: agent-control-plane
+  - issuer: https://idp.partner.test/
+    audience: agent-control-plane-partner
+    jwks_url: https://idp.partner.test/keys
+""",
+    )
+
+    documents = load_issuers(path)
+
+    assert [d["issuer"] for d in documents] == [
+        "https://idp.corp.test/realms/acp",
+        "https://idp.partner.test/",
+    ]
+    assert "jwks_url" not in documents[0], "an absent jwks_url must stay absent, not become empty"
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        pytest.param("issuers: []", "non-empty list", id="empty"),
+        pytest.param("issuers: not-a-list", "non-empty list", id="not-a-list"),
+        pytest.param("servers: []", "`issuers` key", id="wrong-key"),
+        pytest.param("issuers:\n  - just-a-string", "must be a mapping", id="entry-not-a-mapping"),
+        pytest.param("issuers: [oops: [", "not valid YAML", id="malformed"),
+    ],
+)
+def test_a_malformed_issuers_file_is_a_startup_failure(
+    tmp_path: Path, body: str, expected: str
+) -> None:
+    """Read by whoever is trying to work out why nothing can authenticate, so
+    every message names the file and, where possible, the offending entry."""
+    with pytest.raises(ConfigurationError, match=expected):
+        load_issuers(write_issuers(tmp_path, body))
+
+
+def test_a_missing_issuers_file_names_itself(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match=r"issuers\.yaml"):
+        load_issuers(tmp_path / "issuers.yaml")

@@ -176,16 +176,20 @@ def test_no_provider_configured_builds_no_validator() -> None:
     every task before this one behaved and has to keep working."""
     settings = GatewaySettings(_env_file=None)  # type: ignore[call-arg]
 
-    assert build_token_validator(settings) is None
+    assert anyio.run(build_token_validator, settings) is None
 
 
 def test_a_configured_provider_builds_a_validator() -> None:
-    validator = build_token_validator(identity_settings())
+    validator = anyio.run(build_token_validator, identity_settings())
 
     assert validator is not None
-    assert validator.policy.issuer == ISSUER
-    assert validator.policy.audience == AUDIENCE
-    assert validator.keys.url == JWKS_URL
+    # One registration, and everything about that authorization server lives
+    # inside it — see ADR 0016 on why issuer, audience and key set are not
+    # separately addressable.
+    assert validator.issuers.issuers == [ISSUER]
+    registration = validator.issuers.registration_for(ISSUER)
+    assert registration.audience == AUDIENCE
+    assert registration.keys.url == JWKS_URL
 
 
 def test_a_symmetric_algorithm_stops_the_gateway_starting() -> None:
@@ -197,7 +201,7 @@ def test_a_symmetric_algorithm_stops_the_gateway_starting() -> None:
     settings = identity_settings(algorithms=["RS256", "HS256"])
 
     with pytest.raises(ConfigurationError, match="symmetric"):
-        build_token_validator(settings)
+        anyio.run(build_token_validator, settings)
 
 
 def test_an_unauthenticated_gateway_says_so_at_startup(

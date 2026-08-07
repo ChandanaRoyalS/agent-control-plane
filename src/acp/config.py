@@ -164,17 +164,47 @@ class GatewaySettings(BaseSettings):
     """
 
     auth_jwks_url: str = ""
-    """Where the authorization server publishes its signing keys."""
+    """Where the authorization server publishes its signing keys.
+
+    **Optional, and better left empty.** When absent it is discovered from the
+    issuer's metadata, and discovery is where the binding between an issuer and
+    its keys is *verified* rather than asserted: RFC 8414 §3.3 requires the
+    metadata to name the same issuer the document was fetched for. Setting this
+    by hand skips that check, which is exactly how a key set belonging to one
+    authorization server ends up trusted for another — a mix-up achieved by
+    copy-paste rather than by an attacker.
+    """
+
+    auth_issuers_file: Path | None = None
+    """Path to a YAML file registering several authorization servers.
+
+    A file rather than more environment variables, for the same reason the
+    upstreams are one: a list of servers each with its own audience, key set and
+    algorithms does not fit flat `KEY=value` pairs without inventing an indexing
+    convention nobody can read.
+
+    Mutually exclusive with the single-issuer settings above. Two sources
+    disagreeing about which servers are trusted is not a merge to be resolved.
+    """
 
     auth_algorithms: list[str] = Field(
         default_factory=lambda: ["RS256", "RS384", "RS512", "ES256", "ES384", "PS256"]
     )
-    """Signature algorithms accepted. Asymmetric only — a symmetric algorithm
-    here is refused at startup, because a JWKS publishes *public* keys and an
+    """Signature algorithms accepted, unless an entry in the issuers file
+    overrides them for one server. Asymmetric only — a symmetric algorithm here
+    is refused at startup, because a JWKS publishes *public* keys and an
     attacker can sign HS256 with one."""
 
     auth_leeway: float = Field(default=60.0, ge=0)
     """Clock skew tolerated on ``exp``, ``nbf`` and ``iat``, in seconds."""
+
+    auth_discovery_timeout: float = Field(default=5.0, gt=0)
+    """Seconds to wait for an authorization server's metadata at startup.
+
+    Short. This runs before the port is bound, so a hung identity provider
+    delays a deployment rather than a request — but a deploy that hangs
+    indefinitely on a DNS black hole is its own kind of outage.
+    """
 
     auth_jwks_cache_ttl: float = Field(default=600.0, gt=0)
 
@@ -188,22 +218,49 @@ class GatewaySettings(BaseSettings):
 
     @property
     def authentication_configured(self) -> bool:
-        return bool(self.auth_issuer and self.auth_audience and self.auth_jwks_url)
+        return bool(self.auth_issuers_file or (self.auth_issuer and self.auth_audience))
 
     @model_validator(mode="after")
-    def _identity_settings_are_all_or_nothing(self) -> GatewaySettings:
-        provided = {
+    def _identity_settings_are_coherent(self) -> GatewaySettings:
+        """Refuse anything that would authenticate differently than it reads.
+
+        Three separate ways to be wrong, and all of them fail *open* if allowed
+        through — the gateway would serve while its configuration described
+        something else. Configuration errors in this project are fatal for
+        exactly this reason.
+        """
+        single = {
             "ACP_AUTH_ISSUER": self.auth_issuer,
             "ACP_AUTH_AUDIENCE": self.auth_audience,
-            "ACP_AUTH_JWKS_URL": self.auth_jwks_url,
         }
-        missing = [name for name, value in provided.items() if not value]
-        if missing and len(missing) != len(provided):
+        if self.auth_issuers_file and any(single.values()):
             msg = (
-                "identity settings are all-or-nothing; "
-                f"missing {', '.join(sorted(missing))}. "
-                "Set all three to authenticate, or none to run unauthenticated."
+                "ACP_AUTH_ISSUERS_FILE and the single-issuer settings are mutually "
+                f"exclusive; also set {', '.join(sorted(n for n, v in single.items() if v))}. "
+                "Two sources disagreeing about which authorization servers are trusted "
+                "is not a merge to be resolved."
             )
+            raise ValueError(msg)
+
+        if self.auth_issuers_file and self.auth_jwks_url:
+            msg = (
+                "ACP_AUTH_JWKS_URL applies to the single-issuer settings only; "
+                "per-issuer key sets belong in ACP_AUTH_ISSUERS_FILE."
+            )
+            raise ValueError(msg)
+
+        missing = [name for name, value in single.items() if not value]
+        if missing and len(missing) != len(single):
+            msg = (
+                "ACP_AUTH_ISSUER and ACP_AUTH_AUDIENCE are all-or-nothing; "
+                f"missing {', '.join(sorted(missing))}. Set both to authenticate "
+                "against one server, ACP_AUTH_ISSUERS_FILE for several, or none "
+                "to run unauthenticated."
+            )
+            raise ValueError(msg)
+
+        if self.auth_jwks_url and not self.auth_issuer:
+            msg = "ACP_AUTH_JWKS_URL was set without ACP_AUTH_ISSUER, so it names keys for nobody"
             raise ValueError(msg)
         return self
 
@@ -302,6 +359,47 @@ def _reject_duplicate_names(configs: list[UpstreamConfig], path: Path) -> None:
             )
             raise ConfigurationError(msg)
         seen.add(config.name)
+
+
+def load_issuers(path: Path) -> list[dict[str, Any]]:
+    """Read the authorization servers this gateway will accept tokens from.
+
+    Returns plain documents rather than built registrations, because a
+    registration may still need its `jwks_url` discovered — and discovery is
+    async, network-touching, and has no business inside a config parser.
+
+    Same failure discipline as `load_upstreams`: every problem is a startup
+    failure naming the file and, where possible, the offending entry. This one
+    is read by whoever is trying to work out why nothing can authenticate.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        msg = f"cannot read issuers file {str(path)!r}: {exc}"
+        raise ConfigurationError(msg) from exc
+
+    try:
+        document = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        msg = f"issuers file {str(path)!r} is not valid YAML: {exc}"
+        raise ConfigurationError(msg) from exc
+
+    if not isinstance(document, dict) or "issuers" not in document:
+        msg = f"issuers file {str(path)!r} must be a mapping with an `issuers` key"
+        raise ConfigurationError(msg)
+
+    entries = document["issuers"]
+    if not isinstance(entries, list) or not entries:
+        msg = f"`issuers` in {str(path)!r} must be a non-empty list"
+        raise ConfigurationError(msg)
+
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            msg = f"issuer #{index} in {str(path)!r} must be a mapping, got {type(entry).__name__}"
+            raise ConfigurationError(msg)
+
+    documents: list[dict[str, Any]] = list(entries)
+    return documents
 
 
 def load_settings(**overrides: Any) -> GatewaySettings:

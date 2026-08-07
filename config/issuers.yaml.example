@@ -1,0 +1,44 @@
+# Authorization servers this gateway will accept tokens from.
+#
+# Only needed to trust more than one. A single server is configured with
+# ACP_AUTH_ISSUER and ACP_AUTH_AUDIENCE; setting both this file and those is a
+# startup failure, because two sources disagreeing about which servers are
+# trusted is not a merge to be resolved.
+#
+# Point ACP_AUTH_ISSUERS_FILE at a copy of this file to use it.
+#
+# ---------------------------------------------------------------------------
+# Why each server gets its own block (ADR 0016)
+# ---------------------------------------------------------------------------
+#
+# Issuer, audience, key set and algorithms belong together and are used
+# together. A token's `iss` selects one block, and every decision after that
+# comes from that block — never from a merged view and never from a default.
+#
+# The failure this prevents is the resource-server form of the authorization
+# server mix-up attack. Collect every trusted key into one pool, verify against
+# whichever key matches, then read `iss`, and a token genuinely signed by the
+# partner but claiming the corporate issuer is accepted with the corporate
+# server's rules applied to it. The partner can mint corporate principals.
+
+issuers:
+  # `jwks_url` omitted on purpose. Left out, it is discovered from the issuer's
+  # own metadata — and discovery is where the binding between an issuer and its
+  # keys is *verified* rather than asserted: RFC 8414 §3.3 requires the metadata
+  # document to name the same issuer it was fetched for.
+  - issuer: https://idp.corp.example/realms/acp
+    audience: agent-control-plane
+
+  # An explicit `jwks_url` is honoured, for servers that publish no metadata at
+  # all. It skips the §3.3 check, so the gateway logs a warning on every start:
+  # a check being skipped should be a decision somebody made, not one inherited
+  # from a config file they never read.
+  - issuer: https://idp.partner.example/
+    audience: agent-control-plane-partner
+    jwks_url: https://idp.partner.example/protocol/openid-connect/certs
+
+    # Optional, and narrower than the global ACP_AUTH_ALGORITHMS default. A
+    # server known to sign only with ES256 should not have RSA accepted on its
+    # behalf. Symmetric algorithms are refused here exactly as they are
+    # globally — a JWKS publishes public keys whoever serves it.
+    algorithms: ["ES256"]

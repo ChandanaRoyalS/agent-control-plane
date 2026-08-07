@@ -12,11 +12,18 @@ Both halves matter and neither substitutes for the other: what may be read is a
 question about the subject, and which agent may act at all is a question about
 the actor.
 
-What lands here later in the phase: issuer validation binding credentials to the
-authorization server that issued them (task 23, RFC 9207), protected resource
-metadata so clients can discover that server (task 24, RFC 9728), and token
-exchange minting a short-lived credential scoped to one upstream (task 25,
-RFC 8693 with RFC 8707 resource indicators).
+Task 23 makes that safe to do for more than one authorization server at a time.
+Each trusted issuer is an indivisible registration — issuer, audience, key set
+and algorithms configured and used together — selected by the token's own ``iss``
+before any rule is applied, so a credential from one server can never be judged
+by another's rules. Where the binding is verified rather than merely asserted is
+discovery: RFC 8414 §3.3 requires an authorization server's metadata to name the
+same issuer the document was fetched for.
+
+What lands here later in the phase: protected resource metadata so clients can
+discover that server (task 24, RFC 9728), and token exchange minting a
+short-lived credential scoped to one upstream (task 25, RFC 8693 with RFC 8707
+resource indicators).
 
 The invariant the whole security model rests on, stated before there is any code
 that could violate it: **no inbound token is ever forwarded upstream.** There is
@@ -24,6 +31,8 @@ a test that asserts it rather than a comment claiming it.
 """
 
 from acp.identity.asgi import ANONYMOUS, AuthenticationMiddleware
+from acp.identity.discovery import ProviderMetadata, discover
+from acp.identity.issuers import IssuerRegistration, IssuerRegistry, single_issuer
 from acp.identity.keys import JwksCache
 from acp.identity.principal import (
     Actor,
@@ -39,11 +48,16 @@ __all__ = [
     "DEFAULT_ALGORITHMS",
     "Actor",
     "AuthenticationMiddleware",
+    "IssuerRegistration",
+    "IssuerRegistry",
     "JwksCache",
     "Principal",
+    "ProviderMetadata",
     "TokenPolicy",
     "TokenValidator",
     "bind_principal",
     "current_principal",
+    "discover",
     "from_claims",
+    "single_issuer",
 ]

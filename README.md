@@ -119,6 +119,19 @@ blank and the gateway runs unauthenticated, says so at startup, and stamps
 `principal: anonymous` on every request line. See
 [ADR 0015](docs/decisions/0015-two-identities-not-one.md).
 
+The JWKS URL is deliberately absent above: it is discovered from the issuer's
+metadata, and discovery is where the binding between an issuer and its keys gets
+*verified* rather than assumed — RFC 8414 §3.3 requires that document to name the
+same issuer it was fetched for.
+
+Trusting more than one authorization server needs
+[`config/issuers.yaml`](config/issuers.yaml.example), because each one is an
+indivisible registration: issuer, audience, key set and algorithms configured
+and used together. A token's `iss` selects one registration *before* any rule is
+applied, so a credential from one server can never be judged by another's
+rules — the resource-server form of the authorization-server mix-up attack. See
+[ADR 0016](docs/decisions/0016-bind-every-credential-to-its-issuer.md).
+
 ## Development
 
 ```bash

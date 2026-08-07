@@ -19,14 +19,20 @@ import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from starlette.applications import Starlette
 
-from acp.config import GatewaySettings, allowed_hosts_for, load_upstreams
+from acp.config import GatewaySettings, allowed_hosts_for, load_issuers, load_upstreams
 from acp.exceptions import ConfigurationError
 from acp.gateway import UpstreamRegistry, build_app
 from acp.health import DEFAULT_INTERVAL, HealthMonitor
-from acp.identity import JwksCache, TokenPolicy, TokenValidator
+from acp.identity import (
+    IssuerRegistry,
+    TokenValidator,
+    discover,
+)
+from acp.identity.issuers import registry_from_documents
 from acp.schema import DEFAULT_BASELINE_PATH, DriftDetector, SchemaSnapshot
 from acp.upstream import Upstream, UpstreamConfig, connect_upstream
 
@@ -150,43 +156,87 @@ async def gateway_from_configs(
         logger.info("gateway.stopped", extra={"upstream_count": len(clients)})
 
 
-def build_token_validator(settings: GatewaySettings) -> TokenValidator | None:
+async def build_token_validator(settings: GatewaySettings) -> TokenValidator | None:
     """Assemble token validation, or ``None`` when no provider is configured.
 
     Note what is *not* here: a flag. Authentication is on when an identity
     provider is configured and off when one is not — see ``acp.config`` for why
-    a boolean is the wrong control for this. A partially configured provider is
-    already a startup failure by then, so reaching this function with some
-    settings and not others is impossible.
+    a boolean is the wrong control. Incoherent combinations are already a
+    startup failure by this point, so reaching here with a half-configured
+    provider is impossible.
+
+    Async because a registration without an explicit ``jwks_url`` has to ask the
+    authorization server for one, and that request is also where the binding
+    between issuer and key set is checked (RFC 8414 §3.3). Doing it at startup
+    rather than lazily is deliberate: an issuer whose metadata contradicts its
+    own identity should stop a deployment, not surprise the first request.
 
     ``TokenPolicy`` refuses a symmetric algorithm in its constructor, so a
     configuration that would accept forged tokens fails here, before a port is
-    bound, rather than on the first request that exploits it.
+    bound.
     """
     if not settings.authentication_configured:
         return None
 
-    policy = TokenPolicy(
-        issuer=settings.auth_issuer,
-        audience=settings.auth_audience,
-        algorithms=tuple(settings.auth_algorithms),
+    documents = _issuer_documents(settings)
+    resolved = [await _with_keys(document, settings) for document in documents]
+    registrations = registry_from_documents(
+        resolved,
+        default_algorithms=settings.auth_algorithms,
         leeway=settings.auth_leeway,
-    )
-    keys = JwksCache(
-        settings.auth_jwks_url,
-        ttl=settings.auth_jwks_cache_ttl,
+        cache_ttl=settings.auth_jwks_cache_ttl,
         min_refresh_interval=settings.auth_jwks_min_refresh_interval,
     )
+    registry = IssuerRegistry(registrations)
+
     logger.info(
         "auth.enabled",
         extra={
-            "issuer": settings.auth_issuer,
-            "audience": settings.auth_audience,
-            "jwks_url": settings.auth_jwks_url,
+            "issuers": registry.issuers,
+            "count": len(registry),
             "algorithms": list(settings.auth_algorithms),
         },
     )
-    return TokenValidator(policy=policy, keys=keys)
+    return TokenValidator(issuers=registry)
+
+
+def _issuer_documents(settings: GatewaySettings) -> list[dict[str, Any]]:
+    """The configured authorization servers, from whichever source was used."""
+    if settings.auth_issuers_file is not None:
+        return load_issuers(settings.auth_issuers_file)
+    return [
+        {
+            "issuer": settings.auth_issuer,
+            "audience": settings.auth_audience,
+            # Absent rather than empty when undiscovered, so `_with_keys` can
+            # tell "not configured" from "configured as an empty string".
+            **({"jwks_url": settings.auth_jwks_url} if settings.auth_jwks_url else {}),
+        }
+    ]
+
+
+async def _with_keys(document: dict[str, Any], settings: GatewaySettings) -> dict[str, Any]:
+    """Fill in ``jwks_url`` by discovery when it was not configured by hand.
+
+    An explicit URL is honoured and *not* checked against the issuer's metadata,
+    which is a real gap and a deliberate one: some authorization servers publish
+    no metadata at all, and refusing to talk to them would be a purity the
+    deployment cannot act on. It is logged, because skipping the RFC 8414 §3.3
+    check is a thing somebody should have decided rather than inherited.
+    """
+    if document.get("jwks_url"):
+        logger.warning(
+            "auth.jwks_url_unverified",
+            extra={
+                "issuer": document.get("issuer"),
+                "reason": "explicit jwks_url skips the RFC 8414 issuer binding check",
+            },
+        )
+        return document
+
+    issuer = str(document.get("issuer") or "")
+    metadata = await discover(issuer, request_timeout=settings.auth_discovery_timeout)
+    return {**document, "jwks_url": metadata.jwks_uri}
 
 
 @asynccontextmanager
@@ -197,7 +247,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     malformed config fails without side effects.
     """
     upstreams = load_upstreams(settings.upstreams_file)
-    validator = build_token_validator(settings)
+    validator = await build_token_validator(settings)
     try:
         async with gateway_from_configs(
             upstreams,
@@ -216,4 +266,4 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         # The key cache owns an HTTP connection pool, for the same reason the
         # upstream clients do and with the same consequence for leaking it.
         if validator is not None:
-            await validator.keys.aclose()
+            await validator.issuers.aclose()

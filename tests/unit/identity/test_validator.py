@@ -20,6 +20,7 @@ import jwt
 import pytest
 
 from acp.exceptions import AuthenticationError, ConfigurationError
+from acp.identity.issuers import single_issuer
 from acp.identity.validator import TokenPolicy, TokenValidator
 
 from ...tokens import AUDIENCE, ISSUER, Keypair, claims
@@ -39,9 +40,15 @@ class StubKeys:
 
 
 def validator(keypair: Keypair, **policy: Any) -> TokenValidator:
+    """A validator trusting exactly one issuer.
+
+    Cross-issuer behaviour — the point of task 23 — is tested in
+    `test_issuers.py`. Here the registry is a registry of one so these tests
+    stay about verification rather than about selection.
+    """
     settings = {"issuer": ISSUER, "audience": AUDIENCE, **policy}
     keys: Any = StubKeys(keypair)
-    return TokenValidator(policy=TokenPolicy(**settings), keys=keys)
+    return TokenValidator(issuers=single_issuer(TokenPolicy(**settings), keys))
 
 
 def run(fn: Any) -> Any:
@@ -253,7 +260,8 @@ def test_garbage_is_refused_without_raising_something_else(keypair: Keypair) -> 
 
 def test_the_kid_from_the_header_is_what_gets_looked_up(keypair: Keypair) -> None:
     keys = StubKeys(keypair)
-    v = TokenValidator(policy=TokenPolicy(issuer=ISSUER, audience=AUDIENCE), keys=keys)  # type: ignore[arg-type]
+    registry = single_issuer(TokenPolicy(issuer=ISSUER, audience=AUDIENCE), keys)  # type: ignore[arg-type]
+    v = TokenValidator(issuers=registry)
 
     run(lambda: v.validate(keypair.sign(claims())))
 

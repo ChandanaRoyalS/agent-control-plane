@@ -23,7 +23,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from acp.identity import AuthenticationMiddleware, JwksCache, TokenPolicy, TokenValidator
+from acp.identity import (
+    AuthenticationMiddleware,
+    JwksCache,
+    TokenPolicy,
+    TokenValidator,
+    single_issuer,
+)
 from acp.identity.principal import current_principal
 from acp.observability import RequestContextMiddleware, context
 from acp.observability.log import ContextFilter, JsonFormatter
@@ -71,7 +77,12 @@ def validator_for(keypair: Keypair, provider_status: int = 200) -> TokenValidato
         "https://idp.test/jwks",
         client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
     )
-    return TokenValidator(policy=TokenPolicy(issuer=ISSUER, audience=AUDIENCE), keys=keys)
+    # A registry of one. Cross-issuer isolation is task 23's subject and lives
+    # in `tests/unit/identity/test_issuers.py`; what these tests are about is
+    # what the *outside* of the gateway sees.
+    return TokenValidator(
+        issuers=single_issuer(TokenPolicy(issuer=ISSUER, audience=AUDIENCE), keys)
+    )
 
 
 def get(app: Starlette, headers: dict[str, str] | None = None) -> httpx.Response:

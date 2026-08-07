@@ -79,6 +79,21 @@ class GatewaySettings(BaseSettings):
     terminal. Production gets JSON without anyone having to remember to ask for
     it, and a developer at a terminal gets something readable."""
 
+    admin_host: str = "127.0.0.1"
+    """Interface for the metrics and health listener.
+
+    Loopback by default, and deliberately a *separate* listener from the
+    gateway. A scrape endpoint publishes every upstream name, every tool name
+    and which dependencies are currently failing — a reconnaissance report for
+    anyone choosing what to attack. Exposing it beyond the host should be a
+    deliberate act, not the default.
+    """
+
+    admin_port: int = Field(default=9090, gt=0, le=65535)
+
+    admin_enabled: bool = True
+    """Set false to run without the second listener at all."""
+
     upstreams_file: Path = Path("config/upstreams.yaml")
     """Path to the upstream definitions, resolved relative to the process's
     working directory."""

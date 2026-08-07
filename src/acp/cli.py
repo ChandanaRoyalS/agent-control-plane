@@ -168,7 +168,8 @@ def _serve_command(args: argparse.Namespace) -> int:
                 await gateway.serve()
                 return 0
 
-            admin = _server(build_admin_app(), settings.admin_host, settings.admin_port)
+            monitor = getattr(app.state, "health", None)
+            admin = _server(build_admin_app(monitor), settings.admin_host, settings.admin_port)
             logger.info(
                 "admin.listening",
                 extra={"host": settings.admin_host, "port": settings.admin_port},
@@ -180,11 +181,16 @@ def _serve_command(args: argparse.Namespace) -> int:
             # they did with one server.
             async with anyio.create_task_group() as tg:
                 tg.start_soon(admin.serve)
+                if monitor is not None:
+                    # Started here because this is where a task group legitimately
+                    # lives. Cancelled with the group when the gateway returns.
+                    tg.start_soon(monitor.run)
                 await gateway.serve()
                 # The gateway returning means shutdown was requested; the admin
                 # listener has no reason to outlive it, and would hold the
                 # process open if left running.
                 admin.should_exit = True
+                tg.cancel_scope.cancel()
         return 0
 
     return _run(run())

@@ -92,6 +92,17 @@ class GatewaySettings(BaseSettings):
     admin_port: int = Field(default=9090, gt=0, le=65535)
 
     admin_enabled: bool = True
+
+    health_probing_enabled: bool = True
+    """Background probing of upstream health.
+
+    Off means the gateway behaves exactly as it did before task 18: every
+    upstream is attempted on every request, and a breaker recovers only when
+    some agent's request happens to become its trial call.
+    """
+
+    health_probe_interval: float = Field(default=15.0, gt=0)
+    """Seconds between probe rounds, before jitter."""
     """Set false to run without the second listener at all."""
 
     upstreams_file: Path = Path("config/upstreams.yaml")

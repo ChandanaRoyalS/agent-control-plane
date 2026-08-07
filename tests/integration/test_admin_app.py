@@ -14,7 +14,8 @@ import anyio
 import httpx
 import pytest
 
-from acp.admin import HEALTH_PATH, METRICS_PATH, build_admin_app
+from acp.admin import HEALTH_PATH, METRICS_PATH, READY_PATH, build_admin_app
+from acp.health import HealthRecord, UpstreamHealth
 
 pytestmark = pytest.mark.integration
 
@@ -94,4 +95,80 @@ def test_the_admin_app_is_separate_from_the_gateway_app() -> None:
     paths = {route.path for route in app.routes}
 
     assert "/mcp" not in paths
-    assert paths == {METRICS_PATH, HEALTH_PATH}
+    assert paths == {METRICS_PATH, HEALTH_PATH, READY_PATH}
+
+
+# ---------------------------------------------------------------------------
+# Readiness
+# ---------------------------------------------------------------------------
+
+
+class FakeMonitor:
+    """Stands in for a HealthMonitor without needing upstreams to probe."""
+
+    def __init__(self, records: dict[str, Any], serving_nothing: bool) -> None:
+        self._records = records
+        self.is_serving_nothing = serving_nothing
+
+    def snapshot(self) -> dict[str, Any]:
+        return self._records
+
+
+def ready(monitor: Any) -> httpx.Response:
+    async def _run() -> httpx.Response:
+        transport = httpx.ASGITransport(app=build_admin_app(monitor))
+        async with httpx.AsyncClient(transport=transport, base_url="http://admin") as client:
+            return await client.get(READY_PATH)
+
+    response: httpx.Response = anyio.run(_run)
+    return response
+
+
+def test_readiness_without_probing_reports_ready_and_says_so() -> None:
+    """A gateway with probing disabled is not unready — it is unmonitored, and
+    the payload distinguishes the two rather than implying health it has not
+    checked."""
+    body = ready(None).json()
+
+    assert body == {"ready": True, "probing": False, "upstreams": []}
+
+
+def test_a_healthy_upstream_makes_the_gateway_ready() -> None:
+    record = HealthRecord("mock-a", UpstreamHealth.HEALTHY, checked_at=1.0, tool_count=3)
+    response = ready(FakeMonitor({"mock-a": record}, serving_nothing=False))
+
+    assert response.status_code == 200
+    assert response.json()["upstreams"][0]["tools"] == 3
+
+
+def test_readiness_fails_only_when_nothing_can_be_served() -> None:
+    """503 because every `tools/list` would raise anyway under the total-failure
+    policy. Reporting ready there is a lie a load balancer believes."""
+    record = HealthRecord("mock-a", UpstreamHealth.UNHEALTHY, error="UpstreamUnavailableError")
+    response = ready(FakeMonitor({"mock-a": record}, serving_nothing=True))
+
+    assert response.status_code == 503
+    assert response.json()["ready"] is False
+
+
+def test_partial_service_is_still_ready() -> None:
+    """The whole partial-failure policy rests on one upstream dying not being
+    treated as an outage."""
+    records = {
+        "mock-a": HealthRecord("mock-a", UpstreamHealth.UNHEALTHY, error="UpstreamTimeoutError"),
+        "mock-b": HealthRecord("mock-b", UpstreamHealth.HEALTHY, tool_count=3),
+    }
+    response = ready(FakeMonitor(records, serving_nothing=False))
+
+    assert response.status_code == 200
+
+
+def test_readiness_reports_error_types_never_messages() -> None:
+    """This endpoint has no authentication in front of it. An exception message
+    quotes hosts, arguments and upstream responses; a class name does not."""
+    record = HealthRecord("mock-a", UpstreamHealth.UNHEALTHY, error="UpstreamUnavailableError")
+    body = ready(FakeMonitor({"mock-a": record}, serving_nothing=True)).text
+
+    assert "UpstreamUnavailableError" in body
+    assert "10." not in body
+    assert "http" not in body

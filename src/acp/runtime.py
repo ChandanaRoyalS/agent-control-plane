@@ -18,15 +18,46 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from starlette.applications import Starlette
 
 from acp.config import GatewaySettings, allowed_hosts_for, load_upstreams
+from acp.exceptions import ConfigurationError
 from acp.gateway import UpstreamRegistry, build_app
 from acp.health import DEFAULT_INTERVAL, HealthMonitor
+from acp.schema import DEFAULT_BASELINE_PATH, DriftDetector, SchemaSnapshot
 from acp.upstream import Upstream, UpstreamConfig, connect_upstream
 
 logger = logging.getLogger(__name__)
+
+
+def build_drift_detector(baseline_file: Path, known: Sequence[str]) -> DriftDetector:
+    """Load the committed baseline, tolerating its absence and its corruption.
+
+    The only place in this project where a bad file on disk does *not* stop the
+    process. Configuration failures are fatal by design — a gateway that starts
+    with a broken policy has already failed open. A schema baseline is the other
+    kind of thing: it is a monitor, and a monitor that can prevent the gateway
+    from serving is a bigger risk than the one it exists to reduce. So a
+    corrupt baseline is logged at ERROR and treated as no baseline, which
+    reports every upstream as unbaselined — noisy, obvious, and not an outage.
+    """
+    try:
+        baseline = SchemaSnapshot.load(baseline_file)
+    except ConfigurationError as exc:
+        logger.error(  # noqa: TRY400 — the traceback adds nothing; the message is the point
+            "schema.baseline_unreadable",
+            extra={"path": str(baseline_file), "error": exc.message},
+        )
+        baseline = None
+
+    if baseline is None:
+        logger.warning(
+            "schema.baseline_missing",
+            extra={"path": str(baseline_file), "hint": "run `acp schemas capture`"},
+        )
+    return DriftDetector(baseline, known=known)
 
 
 @asynccontextmanager
@@ -37,6 +68,8 @@ async def gateway_from_configs(
     allowed_origins: Sequence[str] = (),
     probe_health: bool = False,
     probe_interval: float = DEFAULT_INTERVAL,
+    detect_drift: bool = False,
+    baseline_file: Path | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -56,7 +89,28 @@ async def gateway_from_configs(
             },
         )
 
-        monitor = HealthMonitor(clients, interval=probe_interval) if probe_health else None
+        # Drift detection rides on the health prober's fetch (see
+        # `acp.schema.detector`), so it needs one to ride on. Asking for it
+        # without probing is a configuration that cannot do what it says, and
+        # saying so beats silently detecting nothing.
+        detector: DriftDetector | None = None
+        if detect_drift and probe_health:
+            detector = build_drift_detector(
+                baseline_file or DEFAULT_BASELINE_PATH,
+                [c.config.name for c in clients],
+            )
+        elif detect_drift:
+            logger.warning("schema.drift_detection_inert", extra={"reason": "probing disabled"})
+
+        monitor = (
+            HealthMonitor(
+                clients,
+                interval=probe_interval,
+                on_catalogue=detector.observe if detector else None,
+            )
+            if probe_health
+            else None
+        )
         app = build_app(
             UpstreamRegistry(clients, monitor),
             allowed_hosts=allowed_hosts or ("127.0.0.1", "localhost"),
@@ -69,6 +123,7 @@ async def gateway_from_configs(
         # different task from the one that exits the generator, which is the
         # classic way to get a cancellation that fires in the wrong place.
         app.state.health = monitor
+        app.state.schema_drift = detector
         yield app
     finally:
         # Reverse order, and every close attempted even if one raises — a
@@ -95,6 +150,8 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         upstreams,
         probe_health=settings.health_probing_enabled,
         probe_interval=settings.health_probe_interval,
+        detect_drift=settings.schema_drift_detection_enabled,
+        baseline_file=settings.schema_baseline_file,
         # Expanded to include `host:port`, because that is what a client
         # actually sends in the Host header on a non-default port.
         allowed_hosts=allowed_hosts_for(settings.allowed_hosts, settings.port),

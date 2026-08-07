@@ -26,7 +26,7 @@ from acp.health import (
     UpstreamHealth,
 )
 from acp.upstream import UpstreamConfig
-from acp.upstream.models import ToolDefinition
+from acp.upstream.models import ListToolsResult, ToolDefinition
 
 
 class FakeUpstream:
@@ -36,12 +36,16 @@ class FakeUpstream:
         self.config = UpstreamConfig(name=name, url=f"http://{name}/mcp")
         self.outcome = outcome
         self.probes = 0
+        self.invalidations = 0
 
-    async def list_tools(self) -> list[ToolDefinition]:
+    async def list_tools(self) -> ListToolsResult:
         self.probes += 1
         if isinstance(self.outcome, BaseException):
             raise self.outcome
-        return list(self.outcome or [])
+        return ListToolsResult(tools=list(self.outcome or []))
+
+    async def invalidate(self) -> None:
+        self.invalidations += 1
 
     async def call_tool(self, name: str, arguments: Any = None) -> Any:  # pragma: no cover
         raise NotImplementedError

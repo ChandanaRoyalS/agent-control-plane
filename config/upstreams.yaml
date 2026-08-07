@@ -58,3 +58,25 @@ upstreams:
 #     half_open_max_calls: 1
 #     max_concurrency: 20
 #     max_connections: 20
+
+# Catalogue caching (ADR 0012). The upstream decides, within limits set here.
+#
+# Nothing is cached unless the upstream asks for it: a `tools/list` response
+# carrying `ttlMs: 0`, or marked `cacheScope: private`, is never held. `private`
+# means the upstream computed that catalogue for a particular caller, so holding
+# it in a shared cache would serve one principal another's tool list — an
+# authorization rule, not a tuning choice.
+#
+# `max_cache_ttl_ms` clamps whatever the upstream advertises. A hint is input
+# from a system this gateway does not control, and an upstream asking for a day
+# would otherwise mean a day of offering tools that no longer exist.
+#
+# The payoff is larger than a saved round trip: an agent's prompt contains its
+# tool list, so a catalogue that changes every turn misses the model provider's
+# prompt cache and the whole prompt is billed again.
+#
+#   - name: mock-a
+#     url: http://127.0.0.1:9101/mcp
+#     cache_enabled: true
+#     max_cache_ttl_ms: 86400000     # 24h, matching the SDK's own ceiling
+#     default_cache_ttl_ms: 0        # used only when no hint is sent at all

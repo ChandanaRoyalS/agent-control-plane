@@ -19,11 +19,12 @@ from acp.upstream.breaker import (
     CircuitBreaker,
     breaker_policy_for,
 )
+from acp.upstream.cache import CachePolicy, CachingUpstreamClient
 from acp.upstream.client import UpstreamClient
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.factory import build_upstream, connect_upstream
 from acp.upstream.guard import Bulkhead, GuardedUpstreamClient
-from acp.upstream.models import CallToolResult, ContentBlock, ToolDefinition
+from acp.upstream.models import CallToolResult, ContentBlock, ListToolsResult, ToolDefinition
 from acp.upstream.protocol import Upstream
 from acp.upstream.resilient import RetryingUpstreamClient, policy_for
 from acp.upstream.retry import RetryPolicy
@@ -33,10 +34,13 @@ __all__ = [
     "BreakerSnapshot",
     "BreakerState",
     "Bulkhead",
+    "CachePolicy",
+    "CachingUpstreamClient",
     "CallToolResult",
     "CircuitBreaker",
     "ContentBlock",
     "GuardedUpstreamClient",
+    "ListToolsResult",
     "RetryPolicy",
     "RetryingUpstreamClient",
     "ToolDefinition",

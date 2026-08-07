@@ -159,9 +159,22 @@ class CallToolResult(BaseModel):
     is_error: bool = Field(default=False, serialization_alias="isError")
 
 
-def tool_definitions_result(tools: list[ToolDefinition]) -> dict[str, Any]:
-    """Render a ``tools/list`` result payload."""
-    return {"tools": [t.model_dump(by_alias=True) for t in tools]}
+def tool_definitions_result(
+    tools: list[ToolDefinition], *, ttl_ms: int = 0, cache_scope: str = "public"
+) -> dict[str, Any]:
+    """Render a ``tools/list`` result payload, with its freshness hints.
+
+    ``ttlMs`` and ``cacheScope`` live at the top level of the result under the
+    2026-07-28 revision, not inside ``_meta``. The defaults here are the
+    permissive ones because these are mocks whose caching behaviour is meant to
+    be exercised; a real server's defaults are ``0`` and ``private``, which is
+    what the gateway assumes when a hint is absent.
+    """
+    return {
+        "tools": [t.model_dump(by_alias=True) for t in tools],
+        "ttlMs": ttl_ms,
+        "cacheScope": cache_scope,
+    }
 
 
 def call_tool_result(result: CallToolResult) -> dict[str, Any]:

@@ -120,6 +120,30 @@ class UpstreamConfig(BaseModel):
     should receive a burst.
     """
 
+    cache_enabled: bool = True
+    """Whether this upstream's catalogue may be cached at all.
+
+    Even when true, nothing is cached unless the upstream itself asks for it —
+    a response with no ``ttlMs``, or one marked ``private``, is never held.
+    """
+
+    max_cache_ttl_ms: int = Field(default=24 * 60 * 60 * 1000, ge=0)
+    """Ceiling on whatever the upstream advertises.
+
+    A hint is input from a system the gateway does not control. An upstream
+    asking for a day — by bug or by design — would otherwise freeze its
+    catalogue for a day, and the gateway would keep offering tools that no
+    longer exist.
+    """
+
+    default_cache_ttl_ms: int = Field(default=0, ge=0)
+    """Used only when a response carries no hint at all.
+
+    Zero, matching the SDK: an upstream that says nothing has not agreed to
+    anything, and inferring consent from silence is how a gateway serves a
+    catalogue its owner never sanctioned.
+    """
+
     @model_validator(mode="after")
     def _bulkhead_fits_the_pool(self) -> UpstreamConfig:
         """The bulkhead must be the narrower of the two limits.

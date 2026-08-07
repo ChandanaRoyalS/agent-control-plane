@@ -11,6 +11,8 @@ written differently in two of them.
 from __future__ import annotations
 
 from acp.upstream.breaker import CircuitBreaker, breaker_policy_for
+from acp.upstream.cache import CachingUpstreamClient
+from acp.upstream.cache import policy_for as cache_policy_for
 from acp.upstream.client import UpstreamClient
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.guard import Bulkhead, GuardedUpstreamClient
@@ -30,7 +32,11 @@ def build_upstream(client: UpstreamClient) -> Upstream:
         CircuitBreaker(config.name, breaker_policy_for(config)),
         Bulkhead(config.name, config.max_concurrency),
     )
-    return RetryingUpstreamClient(guarded, policy_for(config))
+    retrying = RetryingUpstreamClient(guarded, policy_for(config))
+    # Caching outermost, so a hit costs nothing: no retry bookkeeping, no
+    # breaker check, no bulkhead slot. An answer the gateway already holds
+    # should not walk through three layers of failure handling to be returned.
+    return CachingUpstreamClient(retrying, cache_policy_for(config))
 
 
 async def connect_upstream(config: UpstreamConfig) -> Upstream:

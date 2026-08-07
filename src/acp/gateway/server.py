@@ -101,7 +101,16 @@ def build_server(registry: UpstreamRegistry) -> Server[None]:
                 },
             )
 
-        return types.ListToolsResult(tools=[to_mcp_tool(tool) for tool in catalogue.tools])
+        # The gateway's own freshness hint, composed from the upstreams that
+        # contributed. An agent's prompt contains this list, so a catalogue that
+        # changes every turn misses the model provider's prompt cache and the
+        # whole prompt is billed again — stability here is a cost decision, not
+        # only a latency one.
+        return types.ListToolsResult(
+            tools=[to_mcp_tool(tool) for tool in catalogue.tools],
+            ttl_ms=catalogue.ttl_ms,
+            cache_scope="public" if catalogue.cache_scope == "public" else "private",
+        )
 
     async def on_call_tool(
         _ctx: ServerRequestContext[None, Any],

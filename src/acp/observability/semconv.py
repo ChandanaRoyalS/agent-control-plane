@@ -86,6 +86,29 @@ def span_name(method: str, target: str | None = None) -> str:
     return f"{method} {target}" if target else method
 
 
+def client_target(upstream: str, tool: str | None = None) -> str:
+    """The target half of an outbound span's name: which upstream, and what.
+
+    The upstream is always present, and that is not cosmetic. A `tools/list`
+    carries no tool name, so without this every span in a fan-out is named
+    identically — a picture of one request becoming three concurrent calls,
+    in which the three calls are indistinguishable. Found by looking at the
+    trace rather than by any test, because "the labels are ambiguous" is not
+    a property a test knows to assert.
+
+    Both halves are bounded by things the gateway controls: upstream names come
+    from the config file, tool names from a catalogue. Neither is caller input,
+    which is the rule that decides what may appear in a span name at all.
+
+    Separated with `/` rather than the `__` of ADR 0003, deliberately. The
+    qualified name is what the *agent* asked for; what actually went upstream is
+    the bare tool name after routing, and writing `mock-a__read_document` on this
+    span would claim the qualified name crossed the wire when the entire point
+    of the routing layer is that it does not.
+    """
+    return f"{upstream}/{tool}" if tool else upstream
+
+
 # ---------------------------------------------------------------------------
 # Attribute sets
 # ---------------------------------------------------------------------------

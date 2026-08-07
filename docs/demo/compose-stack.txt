@@ -1,0 +1,22 @@
+=== docker compose ps ===
+NAME          IMAGE                             STATUS
+acp-gateway   acp/gateway:dev                   Up 7 minutes (healthy)
+acp-jaeger    jaegertracing/all-in-one:1.76.0   Up 44 minutes (healthy)
+acp-mock-a    acp/mocks:dev                     Up 44 minutes (healthy)
+acp-mock-b    acp/mocks:dev                     Up 44 minutes (healthy)
+
+=== the images, and what is in them ===
+acp/gateway:dev  235MB
+acp/mocks:dev  235MB
+gateway runs as uid: 10001
+acp.mocks in the gateway image: absent (correct)
+
+=== the stack, from outside every container ===
+waiting for the stack...
+  ok   liveness — http://127.0.0.1:9090/healthz
+  ok   both upstreams healthy over the compose network — ready=True healthy=['mock-a', 'mock-b']
+  ok   schema baseline loaded and clean — baseline=True drift=False
+  ok   tools/list returns 6 qualified tools — 6: mock-a__create_ticket, mock-a__read_document, mock-a__search, mock-b__list_channels, mock-b__search, mock-b__summarize
+  ok   traces reached Jaeger — agent-control-plane
+
+all checks passed

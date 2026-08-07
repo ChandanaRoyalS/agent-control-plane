@@ -93,3 +93,23 @@ The trace context reaches upstreams in `params._meta` under a bare `traceparent`
 key — a documented exception to MCP's namespacing rule (SEP-414), made
 explicitly so traces do not break between implementations that disagree about a
 prefix.
+
+## `metrics-during-an-outage.txt`
+
+A Prometheus scrape taken after the same outage the breaker capture describes:
+`mock-a` killed, four catalogue fetches, then restarted and recovered.
+
+Worth reading alongside `logging-breaker-lifecycle.jsonl`. Both files report the
+same event by different mechanisms and agree on the number that matters — five
+connection attempts where twelve would have happened without a circuit breaker.
+One is a narrative, the other is a counter; neither was derived from the other.
+
+The labels are as considered as the values. `tool="none"` marks a method that
+runs no tool; a tool name not present in any catalogue would collapse to
+`unknown`, because the name in a `tools/call` is chosen by the agent and a label
+value chosen by a caller is an unbounded write into the metrics server's memory.
+The histogram omits the tool dimension entirely, since buckets multiply.
+
+Served on a separate listener bound to loopback (ADR 0010) — this output names
+every upstream, every tool and every currently-failing dependency, which is not
+something to hand to whoever can reach the gateway.

@@ -14,16 +14,22 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import sys
 from collections.abc import Sequence
 from typing import Any
 
+import anyio
+
 from acp import __version__
+from acp.admin import build_admin_app
 from acp.config import load_settings
 from acp.exceptions import ACPError
 from acp.observability import configure_logging, configure_tracing
 from acp.runtime import gateway_from_settings
 from acp.upstream import UpstreamClient, UpstreamConfig
+
+logger = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -145,21 +151,40 @@ def _serve_command(args: argparse.Namespace) -> int:
     # noticeable amount of machinery only the server needs.
     import uvicorn  # noqa: PLC0415
 
+    def _server(app: Any, host: str, port: int) -> Any:
+        return uvicorn.Server(
+            uvicorn.Config(app, host=host, port=port, log_level=settings.log_level.lower())
+        )
+
     async def run() -> int:
         async with gateway_from_settings(settings) as app:
-            server = uvicorn.Server(
-                uvicorn.Config(
-                    app,
-                    host=settings.host,
-                    port=settings.port,
-                    log_level=settings.log_level.lower(),
-                )
+            gateway = _server(app, settings.host, settings.port)
+
+            if not settings.admin_enabled:
+                # uvicorn installs its own SIGTERM/SIGINT handling: it stops
+                # accepting, drains in-flight requests, then returns — after
+                # which the context manager closes the upstream pools. That
+                # ordering is why the clients are managed around the server.
+                await gateway.serve()
+                return 0
+
+            admin = _server(build_admin_app(), settings.admin_host, settings.admin_port)
+            logger.info(
+                "admin.listening",
+                extra={"host": settings.admin_host, "port": settings.admin_port},
             )
-            # uvicorn installs its own SIGTERM/SIGINT handling: it stops
-            # accepting, drains in-flight requests, then returns — after which
-            # this context manager closes the upstream pools. That ordering is
-            # why the clients are managed around the server, not inside it.
-            await server.serve()
+
+            # Both servers in one task group. Each installs its own signal
+            # handling, so a Ctrl+C or SIGTERM drains both and the group exits
+            # when the last one returns — leaving the pools to close exactly as
+            # they did with one server.
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(admin.serve)
+                await gateway.serve()
+                # The gateway returning means shutdown was requested; the admin
+                # listener has no reason to outlive it, and would hold the
+                # process open if left running.
+                admin.should_exit = True
         return 0
 
     return _run(run())

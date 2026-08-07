@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from types import TracebackType
 from typing import Any, Self
 
+from acp.observability import metrics
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.models import CallToolResult, ToolDefinition
 from acp.upstream.protocol import Upstream
@@ -107,6 +108,7 @@ class RetryingUpstreamClient:
         """
 
         def observe(attempt: int, delay: float, exc: BaseException) -> None:
+            metrics.record_retry(upstream=self.config.name, method=operation)
             logger.warning(
                 "upstream.retry",
                 extra={

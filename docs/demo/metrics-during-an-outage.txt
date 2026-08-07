@@ -1,0 +1,42 @@
+Captured from `curl -s http://127.0.0.1:9090/metrics` after a run in which
+`mock-a` was killed, four catalogue fetches were made against it, and it was
+then restarted and allowed to recover. Abridged: the histogram bucket rows are
+trimmed to the interesting ones.
+
+# Outcomes. mock-b never failed — one upstream dying did not touch the other,
+# which is the partial-failure policy visible as a number rather than a claim.
+acp_upstream_calls_total{method="tools/list",outcome="ok",tool="none",upstream="mock-a"} 4.0
+acp_upstream_calls_total{method="tools/list",outcome="ok",tool="none",upstream="mock-b"} 6.0
+acp_upstream_calls_total{method="tools/list",outcome="unavailable",tool="none",upstream="mock-a"} 5.0
+
+# Five failures, not twelve. Four fetches at three attempts each would have been
+# twelve connection attempts to a dead host; the circuit opened on the fifth and
+# the remaining seven never happened. The same number the log capture in
+# logging-breaker-lifecycle.jsonl arrived at, by a different mechanism.
+acp_upstream_retries_total{method="tools/list",upstream="mock-a"} 4.0
+
+# Breaker state as a state set: exactly one series reads 1. Closed here because
+# the run ended after mock-a was restarted and a single probe found it healthy.
+acp_upstream_breaker_state{state="closed",upstream="mock-a"} 1.0
+acp_upstream_breaker_state{state="half_open",upstream="mock-a"} 0.0
+acp_upstream_breaker_state{state="open",upstream="mock-a"} 0.0
+
+# Concurrency, with the limit exported alongside the count so saturation is a
+# ratio rather than a number you need the config to interpret.
+acp_upstream_calls_in_flight{upstream="mock-a"} 0.0
+acp_upstream_bulkhead_capacity{upstream="mock-a"} 20.0
+
+# Latency. Every call landed under 25ms against in-process mocks; the buckets
+# reach 60s because the default read timeout is 30, and Prometheus' own default
+# buckets stop at 10 — which would put every timeout in one overflow bucket and
+# make a p99 meaningless exactly where it matters.
+acp_upstream_call_duration_seconds_bucket{le="0.005",method="tools/list",upstream="mock-a"} 6.0
+acp_upstream_call_duration_seconds_bucket{le="0.025",method="tools/list",upstream="mock-a"} 9.0
+acp_upstream_call_duration_seconds_bucket{le="+Inf",method="tools/list",upstream="mock-a"} 9.0
+acp_upstream_call_duration_seconds_count{method="tools/list",upstream="mock-a"} 9.0
+acp_upstream_call_duration_seconds_sum{method="tools/list",upstream="mock-a"} 0.04647987299176748
+
+# `tool="none"` is the cardinality guard. tools/list runs no tool, which is a
+# bounded value; a tool name that is not in any catalogue collapses to
+# `unknown`, because the name in a tools/call is chosen by the agent and an
+# unbounded label is an unbounded memory write into the metrics server.

@@ -1,0 +1,23 @@
+# The same two upstreams as `upstreams.yaml`, addressed by service name.
+#
+# A separate file rather than environment substitution in the original. The
+# gateway's config loader validates a real file and names it in any error, and
+# a YAML full of `${MOCK_A_URL}` placeholders would be a document that is only
+# valid once something else has expanded it — which is exactly the sort of
+# thing that fails at 3am with a message about a malformed URL.
+#
+# `mock-a` and `mock-b` here are Docker Compose service names, resolved by the
+# embedded DNS server on the project's network. They are also, deliberately,
+# the same *upstream* names as in `upstreams.yaml` — the schema baseline
+# (ADR 0013) is keyed by upstream name, so the committed baseline applies
+# unchanged whether the gateway is running on the host or in a container. A
+# baseline that only held in one of those would be worth very little.
+
+upstreams:
+  - name: mock-a
+    url: http://mock-a:9101/mcp
+
+  - name: mock-b
+    url: http://mock-b:9102/mcp
+    connect_timeout: 3.0
+    read_timeout: 30.0

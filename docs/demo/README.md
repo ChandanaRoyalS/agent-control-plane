@@ -113,3 +113,16 @@ The histogram omits the tool dimension entirely, since buckets multiply.
 Served on a separate listener bound to loopback (ADR 0010) — this output names
 every upstream, every tool and every currently-failing dependency, which is not
 something to hand to whoever can reach the gateway.
+
+## `health-withdrawal.txt`
+
+The same outage as the other two captures, seen from the agent's side rather
+than the operator's. `mock-a` dies, and instead of a six-tool catalogue with
+three failures attached, the agent is handed a three-tool catalogue. A tool it
+never sees is a tool it will not call.
+
+Ends with the transition that justifies the whole module: `mock-a` recovering
+with no requests made in between. A breaker cannot half-open without a caller,
+and an idle gateway has none — so a scheduled probe becomes the caller, and the
+cost of discovering recovery is paid by a background task rather than by
+whichever agent request happened to arrive first.

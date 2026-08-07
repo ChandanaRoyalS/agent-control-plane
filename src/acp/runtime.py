@@ -23,6 +23,7 @@ from starlette.applications import Starlette
 
 from acp.config import GatewaySettings, allowed_hosts_for, load_upstreams
 from acp.gateway import UpstreamRegistry, build_app
+from acp.health import DEFAULT_INTERVAL, HealthMonitor
 from acp.upstream import Upstream, UpstreamConfig, connect_upstream
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ async def gateway_from_configs(
     *,
     allowed_hosts: Sequence[str] = (),
     allowed_origins: Sequence[str] = (),
+    probe_health: bool = False,
+    probe_interval: float = DEFAULT_INTERVAL,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -53,11 +56,19 @@ async def gateway_from_configs(
             },
         )
 
+        monitor = HealthMonitor(clients, interval=probe_interval) if probe_health else None
         app = build_app(
-            UpstreamRegistry(clients),
+            UpstreamRegistry(clients, monitor),
             allowed_hosts=allowed_hosts or ("127.0.0.1", "localhost"),
             allowed_origins=allowed_origins,
         )
+        # Attached rather than yielded, so the signature every existing caller
+        # and test depends on is unchanged. The probe loop itself is started by
+        # whoever owns a task group — deliberately not here: starting a
+        # long-lived task inside an async generator puts its cancel scope in a
+        # different task from the one that exits the generator, which is the
+        # classic way to get a cancellation that fires in the wrong place.
+        app.state.health = monitor
         yield app
     finally:
         # Reverse order, and every close attempted even if one raises — a
@@ -82,6 +93,8 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     upstreams = load_upstreams(settings.upstreams_file)
     async with gateway_from_configs(
         upstreams,
+        probe_health=settings.health_probing_enabled,
+        probe_interval=settings.health_probe_interval,
         # Expanded to include `host:port`, because that is what a client
         # actually sends in the Host header on a non-default port.
         allowed_hosts=allowed_hosts_for(settings.allowed_hosts, settings.port),

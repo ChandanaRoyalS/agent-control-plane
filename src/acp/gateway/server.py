@@ -83,6 +83,10 @@ def build_server(registry: UpstreamRegistry) -> Server[None]:
             first = next(iter(catalogue.failures.values()))
             raise to_mcp_error(first)
 
+        # Withdrawals are deliberately not logged here. They were logged once,
+        # by the health monitor, when the upstream changed state — logging them
+        # again on every request would produce a warning per request for as long
+        # as the outage lasts.
         for name, exc in catalogue.failures.items():
             # Partial failure is served, not raised — see UpstreamRegistry.
             logger.warning(
@@ -93,6 +97,7 @@ def build_server(registry: UpstreamRegistry) -> Server[None]:
                     "error": type(exc).__name__,
                     "reason": exc.message,
                     "served_tools": len(catalogue.tools),
+                    "withdrawn": sorted(catalogue.withdrawn),
                 },
             )
 

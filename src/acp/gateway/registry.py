@@ -34,6 +34,7 @@ from acp.gateway.naming import (
     suffix_of,
     upstream_of,
 )
+from acp.health import HealthMonitor
 from acp.upstream import CallToolResult, ToolDefinition, Upstream
 
 
@@ -45,22 +46,38 @@ class Catalogue:
     failures: dict[str, ACPError] = field(default_factory=dict)
     """Upstream name to the error it raised. Empty when every upstream answered."""
 
+    withdrawn: dict[str, str] = field(default_factory=dict)
+    """Upstreams not even attempted, because health probing found them down.
+
+    Kept apart from ``failures`` because they are a different kind of event. A
+    failure is a surprise worth a warning on the request that hit it; a
+    withdrawal is a known condition already logged once when it started. Merging
+    them would mean an upstream that has been down for an hour logs a warning on
+    every single request for that hour.
+    """
+
     @property
     def is_total_failure(self) -> bool:
-        """True when nothing answered — no tools *and* at least one failure.
+        """True when nothing answered — no tools, and something went wrong.
 
         Distinguishes "every upstream is down" from the legitimate case of
         upstreams that simply expose no tools, which are not the same thing and
-        deserve different responses.
+        deserve different responses. A withdrawal counts: an agent given an
+        empty catalogue would conclude it has no tools and proceed without
+        them, which is exactly the outcome the total-failure error prevents.
         """
-        return not self.tools and bool(self.failures)
+        return not self.tools and bool(self.failures or self.withdrawn)
 
 
 class UpstreamRegistry:
     """Holds the configured upstreams and brokers between them."""
 
-    def __init__(self, clients: Iterable[Upstream]) -> None:
+    def __init__(self, clients: Iterable[Upstream], health: HealthMonitor | None = None) -> None:
         self._clients: dict[str, Upstream] = {c.config.name: c for c in clients}
+        # Optional on purpose. Without a monitor every upstream is attempted,
+        # which is exactly the behaviour before task 18 — so a registry built
+        # by a test, or by `build_app` directly, is unaffected.
+        self._health = health
         # qualified name -> real tool name, populated as catalogues are read.
         # Only ever consulted for names that may have been truncated.
         self._resolved: dict[str, str] = {}
@@ -80,6 +97,7 @@ class UpstreamRegistry:
         """
         tools: dict[str, list[ToolDefinition]] = {}
         failures: dict[str, ACPError] = {}
+        withdrawn: dict[str, str] = {}
 
         async def fetch(name: str, client: Upstream) -> None:
             try:
@@ -91,6 +109,12 @@ class UpstreamRegistry:
 
         async with anyio.create_task_group() as group:
             for name, client in self._clients.items():
+                if self._health is not None and not self._health.serves_tools(name):
+                    # Known down. Not attempted at all — the breaker would make
+                    # the attempt cheap, but "cheap" is not "free", and an agent
+                    # is waiting on this fan-out.
+                    withdrawn[name] = self._health.record_for(name).error or "unhealthy"
+                    continue
                 group.start_soon(fetch, name, client)
 
         merged: list[ToolDefinition] = []
@@ -100,7 +124,7 @@ class UpstreamRegistry:
                 self._resolved[qualified] = tool.name
                 merged.append(tool.model_copy(update={"name": qualified}))
 
-        return Catalogue(tools=merged, failures=failures)
+        return Catalogue(tools=merged, failures=failures, withdrawn=withdrawn)
 
     # -- routing -----------------------------------------------------------
 

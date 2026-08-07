@@ -1,0 +1,56 @@
+Background health probing, catalogue withdrawal, and recovery without traffic.
+Captured from a run with ACP_HEALTH_PROBE_INTERVAL=3 against two mock upstreams.
+
+--- both upstreams healthy, /readyz on the admin listener -------------------
+
+  mock-a  healthy  3 tools
+  mock-b  healthy  3 tools
+  HTTP 200
+
+--- mock-a killed; one probe round later ------------------------------------
+
+  mock-a  unhealthy  UpstreamUnavailableError
+  mock-b  healthy    None
+  HTTP 200   <- partial service is still service. Failing readiness here would
+               take every replica out of rotation for one degraded dependency,
+               which is the partial-failure policy inverted.
+
+The reported cause is UpstreamUnavailableError, not UpstreamCircuitOpenError.
+Once the breaker opens, every probe fails with the gateway's own refusal — and
+recording that would discard the one fact an operator needs. The last real cause
+is kept instead. Same distinction `counts_as_failure` draws inside the breaker.
+
+--- what the agent sees --------------------------------------------------------
+
+  3 tools: ['mock-b__search', 'mock-b__summarize', 'mock-b__list_channels']
+
+Not six tools with three failures behind them: three tools. An agent that never
+sees `mock-a__search` will not call it and will plan around its absence, which
+is a better outcome than calling it and handling an error. This is the first
+point at which the breaker's knowledge reaches the caller rather than only the
+dashboards.
+
+--- mock-a restarted, then 40s with no requests at all -------------------------
+
+  mock-a  healthy  3 tools
+  mock-b  healthy  3 tools
+
+--- the transitions, from the structured log -----------------------------------
+
+"event":"health.changed","upstream":"mock-b","state":"healthy","previous":"unknown","tools":3
+"event":"health.changed","upstream":"mock-a","state":"healthy","previous":"unknown","tools":3
+"event":"health.changed","upstream":"mock-a","state":"unhealthy","previous":"healthy","error":"UpstreamUnavailableError"
+"event":"health.changed","upstream":"mock-a","state":"healthy","previous":"unhealthy","tools":3
+
+Four lines for the whole episode, not one per probe: only transitions are
+logged. A probe every three seconds forever would otherwise be a log line every
+three seconds forever.
+
+The last transition is the point of the module. A circuit breaker opens, waits
+out its reset timeout, and then needs somebody to make a call before it will
+half-open and find out whether the upstream came back. With no traffic there is
+nobody, so a gateway that goes quiet overnight would wake with every circuit
+still open. Here the scheduled probe was that somebody — and note the 40 second
+wait is the breaker's reset timeout, not the probe interval. The probe does not
+override the breaker; it just means the probe pays the timeout instead of
+whichever agent request happened to be next.

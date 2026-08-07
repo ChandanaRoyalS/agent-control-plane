@@ -27,6 +27,7 @@ dependencies = [
     # through `mcp` is a fact about today's resolution, not a contract.
     "starlette>=0.45",
     "uvicorn>=0.34",
+    "pyjwt[crypto]>=2.10",
 ]
 
 [project.scripts]

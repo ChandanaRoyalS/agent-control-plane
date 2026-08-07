@@ -9,8 +9,10 @@ an error message, it is a puzzle.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from acp.config import (
     GatewaySettings,
@@ -194,9 +196,9 @@ def test_allow_list_gains_the_port_qualified_form() -> None:
     """The bug the whole test suite missed until a real client connected.
 
     A client reaching `http://127.0.0.1:8080/mcp` sends `Host: 127.0.0.1:8080`.
-    A bare `127.0.0.1` does not match it, and the SDK answers 421 Misdirected
-    Request. The tests never caught this because they connect on the default
-    port, where the Host header carries no port suffix.
+    A bare `127.0.0.1` in the allow-list does not match it, and the SDK answers
+    421 Misdirected Request. The tests never caught this because they connect on
+    the default port, where the Host header carries no port suffix.
     """
     assert allowed_hosts_for(["127.0.0.1", "localhost"], 8080) == [
         "127.0.0.1",
@@ -211,7 +213,54 @@ def test_explicit_ports_are_left_alone() -> None:
     assert allowed_hosts_for(["gateway.internal:443"], 8080) == ["gateway.internal:443"]
 
 
-def test_expansion_is_idempotent() -> None:
+def test_expansion_is_idempotent_in_effect() -> None:
     once = allowed_hosts_for(["localhost"], 8080)
 
     assert allowed_hosts_for(once, 8080) == once
+
+
+# ---------------------------------------------------------------------------
+# Identity settings (task 22, ADR 0015)
+# ---------------------------------------------------------------------------
+
+IDENTITY = {
+    "auth_issuer": "https://idp.test/realms/acp",
+    "auth_audience": "agent-control-plane",
+    "auth_jwks_url": "https://idp.test/realms/acp/certs",
+}
+
+
+def settings(**overrides: Any) -> GatewaySettings:
+    return GatewaySettings(_env_file=None, **overrides)  # type: ignore[call-arg]
+
+
+def test_no_identity_settings_means_unauthenticated() -> None:
+    """How every task before this one ran. It has to keep working, or the
+    gateway could not start at all until Phase 2 finishes."""
+    assert settings().authentication_configured is False
+
+
+def test_all_three_identity_settings_turns_authentication_on() -> None:
+    """There is no `ACP_AUTH_ENABLED`, and that is the point: a boolean is a
+    thing somebody forgets to set, and forgetting it leaves a gateway accepting
+    every request while its config claims otherwise. Presence of configuration
+    cannot fail in that direction."""
+    assert settings(**IDENTITY).authentication_configured is True
+
+
+@pytest.mark.parametrize("omitted", sorted(IDENTITY))
+def test_half_configured_identity_refuses_to_start(omitted: str) -> None:
+    """The worst of the three possible states: settings that look like
+    authentication and do nothing. Fatal at startup, like every other
+    configuration error in this module."""
+    partial = {k: v for k, v in IDENTITY.items() if k != omitted}
+
+    with pytest.raises(ValidationError, match="all-or-nothing"):
+        settings(**partial)
+
+
+def test_the_error_names_what_is_missing() -> None:
+    """Read by a human at 3am. "Invalid configuration" is not good enough when
+    the fix is one environment variable."""
+    with pytest.raises(ValidationError, match="ACP_AUTH_JWKS_URL"):
+        settings(auth_issuer=IDENTITY["auth_issuer"], auth_audience=IDENTITY["auth_audience"])

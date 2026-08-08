@@ -54,6 +54,41 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
 
+  compat:
+    name: oldest supported python
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # `requires-python = ">=3.12"` is a promise, and until this job existed it
+    # was a promise nothing tested — every other job runs 3.14. A compatibility
+    # claim with no evidence behind it is the same class of thing as a comment
+    # asserting an invariant.
+    #
+    # A separate job rather than a matrix on `quality`, deliberately: a matrix
+    # renames the check to "lint · types · tests (3.14)", and branch protection
+    # names required checks by string. Adding a job is additive; renaming one
+    # blocks every open pull request until somebody notices.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install the floor version
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-groups --python 3.12
+
+      - name: Test
+        # Tests only. Lint and types are pinned to the floor already —
+        # `target-version = "py312"` and `python_version = "3.12"` — so running
+        # them again on the same target would check the same thing twice.
+        run: uv run pytest
+
   image:
     name: image · compose · smoke
     runs-on: ubuntu-latest

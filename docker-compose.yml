@@ -30,6 +30,17 @@ services:
     image: acp/gateway:dev
     container_name: acp-gateway
     restart: unless-stopped
+    # A demo-ordering convenience, and explicitly *not* how the gateway
+    # decides whether it can serve. It starts perfectly well with zero
+    # upstreams — `gateway_from_configs([])` is a supported configuration — and
+    # its readiness comes from the health prober (ADR 0011), which withdraws an
+    # upstream's tools when it fails and restores them when it recovers.
+    # `docs/demo/health-withdrawal.txt` is that happening with no restart.
+    #
+    # What this buys is determinism for `--wait`: the smoke test runs the
+    # instant compose returns, and without ordering it would race a gateway
+    # whose first probe round has not finished. A real deployment has no
+    # equivalent line, because there is nothing to race.
     depends_on:
       mock-a:
         condition: service_healthy

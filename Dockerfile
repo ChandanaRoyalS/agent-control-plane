@@ -9,6 +9,10 @@
 # Builder
 # ---------------------------------------------------------------------------
 
+# 3.14 while `pyproject.toml` says `>=3.12`, and the two are not in conflict:
+# a package declares the range it supports, a deployment picks one point in it.
+# The floor is not decoration either — CI's `compat` job runs the suite on 3.12,
+# so the range is a tested claim rather than an aspiration.
 FROM python:3.14-slim AS builder
 
 # uv is installed rather than pinned to a specific release on purpose. It is a

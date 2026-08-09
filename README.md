@@ -162,7 +162,7 @@ paragraph describing which buttons to press.
 ```bash
 make up                 # gateway, mocks, Jaeger, Keycloak
 make token              # an access token for alice (USER=bob for the other one)
-make identity-smoke     # eight assertions against the real server
+make identity-smoke     # fourteen assertions against the real server
 ```
 
 That last command is the point of having it. Everything in tasks 22–24 is tested
@@ -221,6 +221,21 @@ The inbound token has to exist somewhere — RFC 8693 sends it as `subject_token
 as a field on `Principal`. That makes the invariant a statement about one call
 site instead of about a value passed everywhere. See
 [ADR 0019](docs/decisions/0019-mint-a-credential-per-call-and-hold-none.md).
+
+**The scope is enforced on what came back, not on what was asked for.** RFC 8707
+names an exchange target by URI, and the gateway sends it — but measurement
+rather than assumption showed that Keycloak accepts that parameter and discards
+it, returning a token for the `audience` even when `resource` names something
+else entirely, with no error. An exchange it declines to narrow comes back valid
+at *every* upstream in the estate.
+
+So every minted credential is checked against the request: it must name the
+target, and it must not name another upstream this gateway brokers for. That
+second condition is the confused-deputy rule written out, and it holds against a
+conformant server, a non-conformant one, and a misconfigured one alike, because
+it reads what was granted rather than what was requested. `make probe-resource`
+re-runs the measurement; the results are in
+[ADR 0020](docs/decisions/0020-check-the-scope-you-were-granted.md).
 
 ## Development
 

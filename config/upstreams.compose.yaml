@@ -26,13 +26,21 @@
 # fifth with nothing is worse than one that credentials none, because the hole
 # is the only part nobody is watching.
 
+# `resource` is RFC 8707's way of naming the same thing by URI. Both are sent.
+# Keycloak accepts `resource` and discards it — measured, not assumed
+# (`make probe-resource`, ADR 0020) — so `audience` is what narrows here and
+# `resource` is what would narrow on a conformant server. Neither is trusted:
+# the credential that comes back is checked against the one that was asked for.
+
 upstreams:
   - name: mock-a
     url: http://mock-a:9101/mcp
     audience: acp-upstream-mock-a
+    resource: https://mock-a.internal/mcp
 
   - name: mock-b
     url: http://mock-b:9102/mcp
     audience: acp-upstream-mock-b
+    resource: https://mock-b.internal/mcp
     connect_timeout: 3.0
     read_timeout: 30.0

@@ -96,6 +96,23 @@ services:
       # And the price of a demo identity provider that speaks plain HTTP.
       # Narrow, named, and logged at every start — ADR 0018.
       ACP_AUTH_INSECURE_ISSUER_HOSTS: '["keycloak"]'
+      # -- token exchange (task 27) ----------------------------------------
+      #
+      # Who the gateway *is* when it asks the authorization server for a
+      # credential. Distinct from ACP_AUTH_AUDIENCE above, which is what the
+      # gateway is *called* by tokens arriving at it — resource server there,
+      # OAuth client here, and conflating the two is the easy mistake.
+      #
+      # Setting both of these is what turns exchange on: there is no boolean,
+      # because a credential is not something you can forget to supply and still
+      # have the feature appear to work. Once on, every upstream must declare an
+      # `audience` or the gateway refuses to start.
+      ACP_AUTH_CLIENT_ID: acp-gateway
+      # In git, and a fixture rather than a secret — see config/keycloak/README.
+      # A real deployment mounts this at /run/secrets/auth_client_secret and
+      # never puts it in the environment, because a process's environment is
+      # readable by anything that can see /proc.
+      ACP_AUTH_CLIENT_SECRET: dev-only-not-a-secret-either
       # OpenTelemetry's own variables, not ACP_ ones. `jaeger` is the service
       # name below; on the host this same gateway finds Jaeger on localhost
       # with no configuration at all, because 4318 is already the OTLP/HTTP

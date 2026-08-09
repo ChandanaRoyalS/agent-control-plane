@@ -124,6 +124,51 @@ class IdentityProviderUnavailableError(ACPError):
 # ---------------------------------------------------------------------------
 
 
+class CredentialExchangeError(ACPError):
+    """The gateway could not obtain a credential for an upstream.
+
+    A *refusal* rather than a degradation, and the distinction is the point: the
+    alternative to failing here is calling the upstream without a credential, or
+    with the caller's own token. The first is a gateway that quietly stops
+    enforcing the thing it exists to enforce; the second is the passthrough this
+    entire phase is built to make impossible.
+
+    A *refused* exchange lands here: the audience does not exist, this client
+    may not exchange, the subject token lacks the requester in its ``aud``. All
+    of those fail identically on the next attempt, so ``recoverable`` is false.
+    An authorization server that is merely unreachable raises the subclass below.
+    """
+
+    code = -32032
+
+    retry_locally = False
+    """Never retried inside the upstream's retry budget.
+
+    The authorization server is a different dependency with different
+    availability characteristics, and borrowing an upstream's backoff policy for
+    it means an identity outage is measured against — and eventually charged
+    to — a service that is behaving perfectly. Caching exchanged credentials
+    (task 30) is the real mitigation; a tighter retry loop is not.
+    """
+
+
+class CredentialProviderUnavailableError(CredentialExchangeError):
+    """The authorization server could not be reached, or answered 5xx.
+
+    A subclass here, unlike ``IdentityProviderUnavailableError``, which is
+    deliberately *not* a subclass of ``AuthenticationError``. The difference is
+    what a shared handler would do. There, ``except AuthenticationError`` sends
+    a 401 — telling an agent to go and get a new token because somebody else's
+    server is down, which is how a dependency outage becomes a login storm.
+    Here there is no such handler: both mean "no credential, so the call cannot
+    proceed", and the only thing that differs is the advice attached to it.
+    """
+
+    code = -32033
+
+    recoverable = True
+
+
 class UpstreamError(ACPError):
     """Base for anything that went wrong talking to an upstream MCP server."""
 

@@ -93,6 +93,19 @@ class ProviderMetadata:
     issuer: str
     jwks_uri: str
     source: str
+    token_endpoint: str = ""
+    """Where to exchange a token (RFC 8693, task 27).
+
+    Empty when the server publishes none, which is not fatal here — a gateway
+    that only validates tokens never needs it. It becomes fatal in
+    ``build_token_exchanger``, at the point where somebody has asked for
+    exchange and there is nowhere to send the request.
+
+    Taken from discovery rather than configured, for the reason the key set is:
+    the metadata document has already been proved to belong to this issuer
+    (RFC 8414 §3.3), so an endpoint read from it inherits that proof. A token
+    endpoint pasted into a config file inherits nothing.
+    """
     """Which URL answered. Logged, because "discovery worked" and "discovery
     worked *via the OIDC form*" are different facts when debugging a server that
     only implements one of them."""
@@ -232,7 +245,13 @@ def _validate(document: dict[str, object], issuer: str, url: str) -> ProviderMet
         msg = f"metadata at {url} declares no `jwks_uri`, so there are no keys to verify with"
         raise ConfigurationError(msg)
 
-    return ProviderMetadata(issuer=issuer, jwks_uri=jwks_uri, source=url)
+    token_endpoint = document.get("token_endpoint")
+    return ProviderMetadata(
+        issuer=issuer,
+        jwks_uri=jwks_uri,
+        source=url,
+        token_endpoint=token_endpoint if isinstance(token_endpoint, str) else "",
+    )
 
 
 def _mismatch_message(declared: object, issuer: str, url: str) -> str:

@@ -43,6 +43,21 @@ class UpstreamConfig(BaseModel):
     url: str
     """Full URL of the upstream's MCP endpoint, e.g. ``http://mock-a:9101/mcp``."""
 
+    audience: str = ""
+    """What a credential for this upstream must be minted for (task 27).
+
+    The value the gateway sends as RFC 8693's ``audience`` when exchanging the
+    caller's token, and the ``aud`` the resulting credential carries. It names
+    *this upstream* to the authorization server, which is what makes a token for
+    one upstream useless against another — the confused-deputy defence, spelled
+    as configuration.
+
+    Empty means no credential is attached. That is the correct default while
+    exchange is unconfigured, and a **startup failure** once it is: an upstream
+    silently reached without a credential, in a deployment that believes every
+    call is scoped, is the failure mode this whole phase exists to remove.
+    """
+
     connect_timeout: float = Field(default=3.0, gt=0)
     """Seconds to establish a TCP connection. Short: an unreachable host should
     fail fast so a circuit breaker can open, not tie up a worker."""

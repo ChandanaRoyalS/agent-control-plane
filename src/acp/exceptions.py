@@ -322,3 +322,23 @@ class UpstreamRejectedError(UpstreamError):
             message, upstream=upstream, details={"upstream_code": upstream_code, **(details or {})}
         )
         self.upstream_code = upstream_code
+
+
+class PolicyDeniedError(ACPError):
+    """A policy rule refused this call, or no rule allowed it.
+
+    ``recoverable`` is **false**. Unlike an expired token, a denial is not a
+    transient condition the agent can fix by trying again — the principal is not
+    entitled to this tool, and retrying the identical call will be refused
+    identically. The correct agent behaviour is to stop, not to back off.
+
+    Carries the deciding rule's name in ``details`` for the audit log, or
+    ``None`` when the deny default applied. As with ``AuthenticationError``, the
+    reason is for the log rather than the caller: telling an agent *which* rule
+    denied it, or that a tool exists but is forbidden, is an oracle worth
+    denying. From task 35 the tool will not appear in the catalogue at all, so
+    the honest answer to the caller is simply that no such tool is available.
+    """
+
+    code = -32040
+    recoverable = False

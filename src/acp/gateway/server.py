@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
 
 from mcp import types
@@ -33,7 +34,7 @@ from acp.identity import (
 )
 from acp.identity.principal import current_principal
 from acp.observability import RequestContextMiddleware
-from acp.policy import Policy, enforce_call
+from acp.policy import Policy, enforce_call, visible_tools
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,16 @@ def build_server(registry: UpstreamRegistry, *, policy: Policy | None = None) ->
         _params: types.PaginatedRequestParams | None,
     ) -> types.ListToolsResult:
         catalogue = await registry.list_tools()
+
+        if policy is not None:
+            # Show only what this principal may call. Fail-closed, like
+            # on_call_tool: a loaded policy with no principal sees an
+            # empty catalogue, not the full one.
+            principal = current_principal()
+            visible = (
+                visible_tools(policy, principal, catalogue.tools) if principal is not None else []
+            )
+            catalogue = replace(catalogue, tools=visible)
 
         if catalogue.is_total_failure:
             # Nothing answered. Returning an empty catalogue would tell the

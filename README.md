@@ -162,7 +162,7 @@ paragraph describing which buttons to press.
 ```bash
 make up                 # gateway, mocks, Jaeger, Keycloak
 make token              # an access token for alice (USER=bob for the other one)
-make identity-smoke     # fourteen assertions against the real server
+make identity-smoke     # sixteen assertions against the real server
 ```
 
 That last command is the point of having it. Everything in tasks 22–24 is tested
@@ -269,6 +269,52 @@ the whole estate. And the whole thing is bounded, which is a security limit
 before it is a memory one: an authenticated caller with a token mint could
 otherwise drive it in a loop. See
 [ADR 0022](docs/decisions/0022-a-cache-key-that-cannot-be-wrong.md).
+
+### The invariant, proved and then re-proved
+
+The whole model reduces to one sentence: **the inbound token never reaches an
+upstream.** Policy, budgets, the firewall and the audit log all assume the
+upstream is holding a credential the gateway minted rather than the one the
+caller presented. If that fails, a compromised upstream can act as the caller
+everywhere the caller has access, and the gateway has added a hop rather than
+removed a risk.
+
+So it is a suite rather than an assertion. A real signed JWT enters through the
+real authentication middleware, over HTTP. Every wrapper composition, every
+method on the upstream protocol, and every credential shape is driven to a
+recorder that keeps requests verbatim — happy path, retry, cache hit, open
+circuit, refused exchange, static API key, no audience, no principal. Each
+recorded request is then searched *whole*: URL, every header name, every header
+value, body. A token copied into `X-Forwarded-Authorization` or tucked into
+`params._meta` would sail past a check that reads one header and stops.
+
+Two of the tests are static, and they are the ones that outlive this week. Every
+method on the `Upstream` protocol must be classified as either swept or
+incapable of making a request, so adding one fails the build until somebody
+says which. And the set of source files that may call `current_subject_token`
+must be exactly one — that function is the only way to obtain the inbound token,
+so the set of its callers bounds the set of code that could ever leak it.
+
+```bash
+make prove-passthrough
+```
+
+```
+Breaking the no-passthrough invariant on purpose.
+
+  caught   forward the caller's token in a second header
+  caught   log the token alongside the exchange
+  caught   carry the token in the request envelope
+
+all 3 mutations were caught by the assertion meant to catch them
+```
+
+Because a test that has never been observed to fail is a claim about whoever
+wrote it. This project already shipped that once — 297 green tests certifying a
+client no real MCP server would have accepted a request from — so the harness
+breaks the invariant three ways and fails the build unless the suite notices,
+*and the assertion meant to catch it is the one that fires*. It runs on every
+pull request. See [ADR 0023](docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md).
 
 ### Upstreams that cannot exchange
 

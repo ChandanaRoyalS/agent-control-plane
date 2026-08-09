@@ -216,6 +216,19 @@ rather than `404` — said "Keycloak is not listening" instead of "the realm did
 not import". Those are different bugs in different files. A healthcheck built
 out of Keycloak's own shell would have reported neither.
 
+**One check failed on the run where everything else worked, and it was the
+checker.** `dict(HTTPMessage)` looks harmless and quietly discards the one
+property HTTP field names have: RFC 9110 §5.1 makes them case-insensitive, and
+urllib's own message object honours that where a plain dict built from it does
+not. The gateway sends `www-authenticate` in lower case; the script asked for
+`WWW-Authenticate` and reported a missing header on a response that had one.
+
+Two things made it cheap. The same header is asserted in-process by
+`test_authentication.py` through httpx, which is case-insensitive and passes —
+so "the tool is wrong" and "the gateway is wrong" were separable in one command.
+And the check now prints the header names it actually received, so the next
+person to see this failure is told which of the two it is.
+
 **`up --wait` names the gateway rather than the project.** A container that
 deliberately exits has no business in a set compose is asked to see *running*.
 Naming the one service that matters still starts its whole dependency chain,

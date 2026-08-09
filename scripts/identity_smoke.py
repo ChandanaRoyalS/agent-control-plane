@@ -59,6 +59,22 @@ def report(ok: bool, label: str, detail: str = "") -> None:
         failures.append(label)
 
 
+def headers_of(message: Any) -> dict[str, str]:
+    """Response headers, keyed in lower case.
+
+    `dict(HTTPMessage)` looks harmless and quietly throws away the one property
+    HTTP headers have: RFC 9110 §5.1 makes field names case-insensitive, and
+    urllib's own `HTTPMessage` honours that — a plain dict built from it does
+    not. The gateway sends `www-authenticate` in lower case, so a lookup for
+    `WWW-Authenticate` against that dict returns nothing and the check reports a
+    missing header on a response that has one.
+
+    That is exactly what happened on the first green-but-for-one CI run, and it
+    is worth the named function: every header read in this file goes through it.
+    """
+    return {name.lower(): value for name, value in message.items()}
+
+
 def get(url: str, token: str | None = None) -> tuple[int, dict[str, str], bytes]:
     """A GET that returns the status rather than raising on 4xx.
 
@@ -71,9 +87,9 @@ def get(url: str, token: str | None = None) -> tuple[int, dict[str, str], bytes]
         request.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
-            return response.status, dict(response.headers), response.read()
+            return response.status, headers_of(response.headers), response.read()
     except urllib.error.HTTPError as exc:
-        return exc.code, dict(exc.headers), exc.read()
+        return exc.code, headers_of(exc.headers), exc.read()
 
 
 def mcp_list_tools(token: str | None) -> tuple[int, dict[str, str], dict[str, Any]]:
@@ -108,9 +124,9 @@ def mcp_list_tools(token: str | None) -> tuple[int, dict[str, str], dict[str, An
         request.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
-            return response.status, dict(response.headers), _decode(response.read().decode())
+            return response.status, headers_of(response.headers), _decode(response.read().decode())
     except urllib.error.HTTPError as exc:
-        return exc.code, dict(exc.headers), {}
+        return exc.code, headers_of(exc.headers), {}
 
 
 def _decode(payload: str) -> dict[str, Any]:
@@ -145,12 +161,19 @@ def check_metadata_is_public() -> None:
 
 
 def check_challenge_points_at_it() -> None:
+    """RFC 9728 §5.1 — the 401 has to say where to go, not merely say no.
+
+    On failure this prints every header name it did receive. "No challenge
+    header" and "a challenge header I looked up wrongly" are indistinguishable
+    otherwise, and the second is what happened the first time this ran.
+    """
     status, headers, _ = mcp_list_tools(None)
-    challenge = headers.get("WWW-Authenticate", "")
+    challenge = headers.get("www-authenticate", "")
+    detail = challenge or f"(no challenge; headers were: {', '.join(sorted(headers))})"
     report(
         status == UNAUTHORIZED and METADATA_PATH in challenge,
         "an unauthenticated request is challenged, with a discovery URL",
-        f"HTTP {status}: {challenge or '(no challenge header)'}",
+        f"HTTP {status}: {detail}",
     )
 
 

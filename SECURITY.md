@@ -32,8 +32,14 @@ Anything that lets a caller do something the gateway is supposed to prevent:
 - Reaching an upstream, tool or resource the resolved principal is not entitled
   to (from Phase 3 onward, when there is a policy engine to bypass).
 - Causing the gateway to forward an inbound token upstream. This invariant is
-  asserted by a test rather than claimed by a comment, and breaking it is the
-  most serious finding this project could receive.
+  asserted by a suite rather than claimed by a comment — every wrapper
+  composition, every protocol method and every credential shape, with each
+  request searched whole rather than one header inspected
+  ([ADR 0023](docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md)).
+  A mutation harness breaks it three ways on every pull request and fails the
+  build if the suite does not notice. Breaking it is still the most serious
+  finding this project could receive, and a report that defeats *both* the sweep
+  and the static one-reader check is the most interesting one it could receive.
 - Injected instructions surviving result screening (from Phase 5, when there is
   screening to defeat).
 - Unauthenticated denial of service that costs the attacker meaningfully less
@@ -113,6 +119,7 @@ alternatives that were rejected and why:
 - [0020](docs/decisions/0020-check-the-scope-you-were-granted.md) — RFC 8707's parameter is a request, not a guarantee; the control is checking the credential that came back names one upstream and no other
 - [0021](docs/decisions/0021-one-backend-behind-a-seam.md) — an encrypted store turns many secrets into one key and says so; references live in config, values never do
 - [0022](docs/decisions/0022-a-cache-key-that-cannot-be-wrong.md) — a credential cache keyed on the request rather than on claims, because keying it on the upstream serves one caller's credential to the next and passes every functional test
+- [0023](docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md) — the no-passthrough invariant swept across every path, two static alarms that fail when a new path appears, and a mutation harness in CI that breaks the invariant on purpose to prove the test can fail
 
 ## Supported versions
 

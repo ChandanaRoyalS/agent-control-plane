@@ -263,13 +263,24 @@ def credential_seen_by(base: str) -> dict[str, Any]:
     return json.loads(body) if status == 200 else {}  # noqa: PLR2004
 
 
-def call_a_tool(token: str, name: str) -> int:
+def call_a_tool(token: str, name: str) -> tuple[int, str]:
     """One `tools/call`, which is what makes an upstream actually be reached.
 
     `tools/list` is served from the catalogue cache once the health prober has
     warmed it, so it may never touch an upstream at all — the same property that
     made the fan-out invisible in traces until probing was turned off. A tool
     call always goes.
+
+    **`Mcp-Name` is not optional.** The 2026-07-28 revision routes on
+    `Mcp-Method` and `Mcp-Name`, and a server verifies both against the body —
+    a header claiming a name the body does not contain is itself a mismatch
+    (ADR 0008). Omitting it here produced a 400 before any upstream was reached,
+    and five checks that all reported "no credential" for a request that was
+    never made. The gateway was right; the client was writing a request no real
+    client sends, which is the exact thing ADR 0008 exists to catch.
+
+    Returns the body alongside the status, because a 400 that does not say why
+    is a check that turns one bug into an afternoon.
     """
     body = {
         "jsonrpc": "2.0",
@@ -296,24 +307,26 @@ def call_a_tool(token: str, name: str) -> int:
             "Accept": "application/json, text/event-stream",
             "MCP-Protocol-Version": PROTOCOL_VERSION,
             "Mcp-Method": "tools/call",
+            "Mcp-Name": name,
             "Authorization": f"Bearer {token}",
         },
         method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
-            return int(response.status)
+            return int(response.status), response.read().decode()[:200]
     except urllib.error.HTTPError as exc:
-        return int(exc.code)
+        return int(exc.code), exc.read().decode(errors="replace")[:200]
 
 
 def check_the_upstream_gets_a_credential(token: str) -> None:
-    status = call_a_tool(token, "mock-a__search")
+    status, body = call_a_tool(token, "mock-a__search")
     seen = credential_seen_by(MOCK_A)
+    detail = f"HTTP {status}, present={seen.get('present')}"
     report(
         status == 200 and seen.get("present") is True,  # noqa: PLR2004
         "the upstream is reached with a credential",
-        f"HTTP {status}, present={seen.get('present')}",
+        detail if status == 200 else f"{detail} — {body}",  # noqa: PLR2004
     )
 
 

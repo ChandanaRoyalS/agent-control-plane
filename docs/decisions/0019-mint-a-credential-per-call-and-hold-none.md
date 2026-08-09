@@ -177,6 +177,20 @@ prober running, the catalogue cache is permanently warm and a `tools/list` may
 never reach an upstream at all — the same property that made the fan-out
 invisible in traces until probing was turned off.
 
+**The first CI run of those checks failed, and the gateway was right.**
+`tools/call` routes on `Mcp-Name` as well as `Mcp-Method`, and a server verifies
+both against the body (ADR 0008). The smoke script sent no `Mcp-Name`, so the
+request was rejected before any upstream was reached — and five checks all
+reported "no credential" for a call that was never made.
+
+Two things are worth taking from that. The failure was *plural and identical*,
+which is the signature of one cause upstream of all of them rather than five
+bugs. And the same request shape put through the mock fleet's own validator
+returns `-32020` HEADER_MISMATCH, so the property ADR 0008 bought — mocks that
+enforce the specification rather than agreeing with our client — caught the
+client this time, which is the direction that matters least often and proves
+most.
+
 **Nothing is cached, and a test asserts it.** Two calls produce two exchanges.
 When task 30 changes that, the test that has to change is that one —
 deliberately, with the cache key argued over, rather than a behaviour nobody

@@ -39,6 +39,8 @@ from acp.identity import (
 )
 from acp.identity.cache import CredentialCache
 from acp.identity.issuers import registry_from_documents
+from acp.policy import Policy
+from acp.policy.loader import load_policy
 from acp.schema import DEFAULT_BASELINE_PATH, DriftDetector, SchemaSnapshot
 from acp.secrets import EmptyStore, EncryptedFileStore, SecretStore, read_key
 from acp.upstream import Upstream, UpstreamConfig, connect_upstream
@@ -88,6 +90,7 @@ async def gateway_from_configs(
     resource: ProtectedResource | None = None,
     credentials: ExchangedCredentials | None = None,
     secrets: Mapping[str, str] | None = None,
+    policy: Policy | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -149,6 +152,7 @@ async def gateway_from_configs(
             allowed_origins=allowed_origins,
             validator=validator,
             resource=resource,
+            policy=policy,
         )
         # Attached rather than yielded, so the signature every existing caller
         # and test depends on is unchanged. The probe loop itself is started by
@@ -498,6 +502,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     malformed config fails without side effects.
     """
     upstreams = load_upstreams(settings.upstreams_file)
+    policy = load_policy(settings.policy_file)
     validator = await build_token_validator(settings)
     exchanger = build_token_exchanger(settings, validator, upstreams)
     check_upstream_audiences(upstreams, exchanging=exchanger is not None)
@@ -519,6 +524,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             resource=build_protected_resource(settings, validator),
             credentials=ExchangedCredentials(exchanger) if exchanger else None,
             secrets=secrets,
+            policy=policy,
         ) as app:
             yield app
     finally:

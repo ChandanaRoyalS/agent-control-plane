@@ -395,6 +395,29 @@ def check_two_upstreams_get_two_credentials(token: str) -> None:
     )
 
 
+def check_a_credential_does_not_open_two_doors(token: str) -> None:
+    """Task 28's control, seen from outside.
+
+    Keycloak accepts RFC 8707's `resource` and discards it, so a gateway that
+    sent the parameter and trusted it would hand each upstream a credential that
+    also works at the other — and log a success. What makes the scope real is
+    that the gateway checks the credential it was *given*, so this asserts the
+    property rather than the parameter: neither upstream's credential names the
+    other's audience.
+    """
+    call_a_tool(token, "mock-a__search")
+    a = credential_seen_by(MOCK_A)
+    call_a_tool(token, "mock-b__search")
+    b = credential_seen_by(MOCK_B)
+
+    a_aud, b_aud = set(a.get("audience") or []), set(b.get("audience") or [])
+    report(
+        bool(a_aud) and bool(b_aud) and not (a_aud & b_aud),
+        "neither credential is valid at the other upstream",
+        f"mock-a aud={sorted(a_aud)} mock-b aud={sorted(b_aud)}",
+    )
+
+
 def main() -> int:
     try:
         alice = access_token("alice")
@@ -419,6 +442,7 @@ def main() -> int:
     check_the_credential_is_scoped_to_one_upstream(alice)
     check_the_credential_still_names_the_human(alice)
     check_two_upstreams_get_two_credentials(alice)
+    check_a_credential_does_not_open_two_doors(alice)
 
     print()
     if failures:

@@ -111,7 +111,9 @@ class UpstreamClient:
         """
         if self._credentials is None or not self.config.audience:
             return None
-        return await self._credentials.authorization_for(self.config.name, self.config.audience)
+        return await self._credentials.authorization_for(
+            self.config.name, self.config.audience, self.config.resource
+        )
 
     async def list_tools(self) -> ListToolsResult:
         """Fetch the upstream's tool catalogue, with its freshness hints."""

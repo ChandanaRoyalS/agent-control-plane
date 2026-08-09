@@ -127,6 +127,16 @@ class GatewaySettings(BaseSettings):
     """Path to the upstream definitions, resolved relative to the process's
     working directory."""
 
+    policy_file: Path = Path("config/policy.yaml")
+    """Path to the policy rulebook (task 32), resolved relative to the
+    process's working directory.
+
+    Loaded and validated at startup in task 33; task 32 only defines the
+    setting and the schema it points at. A missing or malformed policy is a
+    boot failure, unlike the schema-baseline file above — policy is the
+    control, not a monitor of one, so its absence is fatal rather than
+    tolerated. See ADR 0025."""
+
     allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
     """Hosts the inbound server will accept, for DNS-rebinding protection.
 

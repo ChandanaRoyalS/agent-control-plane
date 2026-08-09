@@ -1,0 +1,47 @@
+# The gateway's rulebook: which principals may call which tools.
+#
+# Task 32 loads and validates this file at startup; nothing evaluates it yet —
+# the engine that turns a policy plus a request into an allow/deny decision is
+# task 33. What this file already commits to is the shape of a rule and the one
+# behaviour that is not written here because it cannot be turned off: the
+# default is deny. A request matching no rule below is refused. There is no
+# `default: allow` to set, by design — see ADR 0025.
+#
+# A rule matches when every field it sets matches the request, and a field left
+# unset matches anything. `effect` is the exception: it has no default, because
+# a rule that matched everything and forgot to say allow-or-deny would be the
+# most dangerous line in the file. Rules are evaluated top to bottom and the
+# first match wins, which is what lets a narrow `deny` sit in front of a broad
+# `allow`.
+#
+# `rules: []` is a valid policy meaning "deny everything". An empty file is not —
+# it is treated as a likely truncation and refused, so a broken mount locks the
+# doors loudly rather than quietly.
+
+rules:
+  # A narrow deny placed first, so it wins over the broad allow below it. The
+  # point of an explicit deny effect: "support agents may use the CRM, except
+  # the one destructive tool" is one deny and one allow, not an allow-list of
+  # every CRM tool but one — which would grow a hole each time the CRM adds a
+  # tool.
+  - name: deny-crm-delete
+    effect: deny
+    tools: [mock-a__delete-record]
+
+  # A subject-scoped allow. Only these two humans may reach the search tool,
+  # whichever agent is acting for them.
+  - name: allow-search-for-support
+    effect: allow
+    subjects: [alice, bob]
+    tools: [mock-a__search]
+
+  # An actor-scoped allow. A read-only reporting agent may list tools on both
+  # upstreams regardless of which human it acts for — "which agent may act" is a
+  # different question from "which human may read" (ADR 0015).
+  - name: allow-listing-for-reporting-agent
+    effect: allow
+    actors: [acp-reporting-agent]
+    tools: [mock-a__list, mock-b__list]
+
+  # Everything not matched above falls through to the deny default. Nothing needs
+  # to be written for that — it is the absence of a matching rule, not a rule.

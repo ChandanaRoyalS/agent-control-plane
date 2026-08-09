@@ -37,6 +37,7 @@ from acp.identity import (
     protected_resource,
     require_token_endpoints,
 )
+from acp.identity.cache import CredentialCache
 from acp.identity.issuers import registry_from_documents
 from acp.schema import DEFAULT_BASELINE_PATH, DriftDetector, SchemaSnapshot
 from acp.secrets import EmptyStore, EncryptedFileStore, SecretStore, read_key
@@ -355,6 +356,10 @@ def build_token_exchanger(
         # discovered, because "which audiences are mine" is a fact about this
         # deployment's configuration and not about any token.
         peer_audiences=[u.audience for u in upstreams if u.audience],
+        # Every deployment gets one. Task 27 minted per call and cached nothing,
+        # which was correct while the key had not been argued over; ADR 0022 is
+        # that argument.
+        cache=CredentialCache(max_entries=settings.auth_credential_cache_max_entries),
     )
 
 

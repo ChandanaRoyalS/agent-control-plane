@@ -37,6 +37,21 @@ mock fleet's `/debug/credential` endpoint:
 11. Is its `aud` this upstream alone, so it cannot be replayed against another?
 12. Does it still name the human, with the gateway recorded as the actor?
 13. Do two different upstreams receive two different credentials?
+
+Task 28 adds the one that a conformant server would make redundant and this one
+does not:
+
+14. Is neither upstream's credential *also* valid at the other? Keycloak accepts
+    RFC 8707's `resource` and discards it (ADR 0020), so the scope is real only
+    because the gateway checks what it was granted rather than what it asked for.
+
+Task 30 adds the two that only exist once credentials are held between calls:
+
+15. Does a repeat call reuse the cached credential, rather than the cache being
+    a correct-looking structure that never hits?
+16. Does a *second caller* get their own credential? This is the one that
+    matters. A cache keyed on the upstream alone hands bob a credential minted
+    for alice — fast, functional, and wrong in the audit log.
 """
 
 from __future__ import annotations
@@ -418,6 +433,64 @@ def check_a_credential_does_not_open_two_doors(token: str) -> None:
     )
 
 
+def check_a_repeat_call_reuses_the_credential(token: str) -> None:
+    """That the cache is doing anything at all, proved from outside.
+
+    Two calls, one fingerprint. This works as evidence only because a *fresh*
+    exchange would produce a different fingerprint every time — Keycloak puts a
+    `jti` in every token it mints, so two credentials for the same caller and
+    the same upstream are still two different strings. An identical fingerprint
+    therefore cannot be a coincidence; it is the same credential, served twice.
+
+    The inverse is the interesting failure: a cache key that is too *specific*
+    never hits, returns entirely correct credentials, breaks nothing, and simply
+    sends every request to the authorization server. Nothing would ever report
+    it. This check is what would.
+    """
+    call_a_tool(token, "mock-a__search")
+    first = credential_seen_by(MOCK_A).get("fingerprint")
+    call_a_tool(token, "mock-a__search")
+    second = credential_seen_by(MOCK_A).get("fingerprint")
+
+    report(
+        bool(first) and first == second,
+        "a repeat call reuses the cached credential",
+        f"first={first!r} second={second!r}",
+    )
+
+
+def check_two_callers_never_share_a_credential(alice: str, bob: str) -> None:
+    """The failure task 30 exists to not have, observed at the upstream.
+
+    Key the cache on the upstream — the obvious thing, since what is cached is
+    'the credential for mock-a' — and bob's call arrives at the upstream holding
+    a credential whose `sub` is alice. It is fast. It returns data. Every
+    functional test passes and the audit trail is wrong in the one way nobody
+    goes looking for: mock-a's log says alice read a record bob asked for.
+
+    Two assertions, because either alone can pass while the design is broken.
+    The fingerprints must differ — two credentials, not one shared. And the
+    subject the upstream saw for bob's call must be *bob*, which is the sentence
+    the leak makes false.
+    """
+    call_a_tool(alice, "mock-a__search")
+    seen_for_alice = credential_seen_by(MOCK_A)
+    call_a_tool(bob, "mock-a__search")
+    seen_for_bob = credential_seen_by(MOCK_A)
+
+    distinct = bool(seen_for_alice.get("fingerprint")) and seen_for_alice[
+        "fingerprint"
+    ] != seen_for_bob.get("fingerprint")
+    named_correctly = seen_for_bob.get("subject") == claims(bob).get("sub")
+
+    report(
+        distinct and named_correctly,
+        "a second caller is not served the first one's credential",
+        f"alice={seen_for_alice.get('fingerprint')!r} sub={seen_for_alice.get('subject')!r}; "
+        f"bob={seen_for_bob.get('fingerprint')!r} sub={seen_for_bob.get('subject')!r}",
+    )
+
+
 def main() -> int:
     try:
         alice = access_token("alice")
@@ -443,6 +516,11 @@ def main() -> int:
     check_the_credential_still_names_the_human(alice)
     check_two_upstreams_get_two_credentials(alice)
     check_a_credential_does_not_open_two_doors(alice)
+
+    # Task 30 — the cache, and the one mistake in it that is a privilege
+    # escalation rather than a performance regression.
+    check_a_repeat_call_reuses_the_credential(alice)
+    check_two_callers_never_share_a_credential(alice, bob)
 
     print()
     if failures:

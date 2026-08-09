@@ -106,6 +106,7 @@ class _Collectors:
     breaker_state: Any
     bulkhead_in_flight: Any
     bulkhead_capacity: Any
+    credential_cache: Any
     schema_drift: Any
     schema_drift_outstanding: Any
 
@@ -179,6 +180,20 @@ def _build() -> _Collectors | None:
             # — a hostile upstream chooses its own tool names, and a label value
             # chosen by the thing being monitored is unbounded by construction.
             ["upstream", "kind"],
+            namespace=NAMESPACE,
+            registry=registry,
+        ),
+        credential_cache=Counter(
+            "credential_cache_total",
+            "Exchanged-credential cache lookups, by outcome.",
+            # `outcome` only, and emphatically not the principal. Subjects are
+            # unbounded by construction — one label value per human the gateway
+            # has ever served — and a metric that grows with your user base is a
+            # metric that eventually takes the scrape endpoint down. The
+            # audience is bounded but omitted too: hit rate per upstream is a
+            # tuning question, and this counter exists to answer a correctness
+            # one, which is whether the thing caches at all.
+            ["outcome"],
             namespace=NAMESPACE,
             registry=registry,
         ),
@@ -264,6 +279,20 @@ def observe_bulkhead(*, upstream: str, in_flight: int, capacity: int) -> None:
         return
     _C.bulkhead_in_flight.labels(upstream).set(in_flight)
     _C.bulkhead_capacity.labels(upstream).set(capacity)
+
+
+def record_credential_cache(*, outcome: str) -> None:
+    """One exchanged-credential cache lookup (task 30).
+
+    Worth a counter rather than a log line because the interesting number is a
+    *ratio* over time, and the interesting failure is silent: a cache whose key
+    is too specific still works, still returns correct credentials, and simply
+    never hits. Nothing breaks, the authorization server takes every request,
+    and the only symptom is a miss rate that nobody is looking at.
+    """
+    if _C is None:
+        return
+    _C.credential_cache.labels(outcome).inc()
 
 
 def record_schema_drift(*, upstream: str, kind: str) -> None:

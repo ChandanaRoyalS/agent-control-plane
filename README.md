@@ -207,6 +207,8 @@ make identity-smoke
   ok   the credential names exactly one upstream — aud=['acp-upstream-mock-a']
   ok   the credential still names the human it was minted for — sub=alice, actor=acp-gateway
   ok   each upstream receives its own credential
+  ok   a repeat call reuses the cached credential
+  ok   a second caller is not served the first one's credential
 ```
 
 The first of those is the invariant the whole security model rests on, observed
@@ -236,6 +238,37 @@ conformant server, a non-conformant one, and a misconfigured one alike, because
 it reads what was granted rather than what was requested. `make probe-resource`
 re-runs the measurement; the results are in
 [ADR 0020](docs/decisions/0020-check-the-scope-you-were-granted.md).
+
+**Credentials are held between calls, and the cache key is the interesting
+line.** Minting one per call means two round trips to the authorization server
+on every request, and an agent turn that fans out across five upstreams becomes
+five token requests — so the gateway becomes a load generator aimed at the one
+component whose failure takes down authentication for everything.
+
+Caching fixes that and introduces the one bug in this phase that is a privilege
+escalation rather than an outage. Key an entry on the upstream — the obvious
+thing, since what is cached is "the credential for mock-a" — and bob's call is
+served the credential minted for alice. It is fast. It returns data. Every
+functional test passes. The only trace is a line in the upstream's audit log
+saying alice read a record bob asked for.
+
+So the key is the *request*, not a model of it: a SHA-256 digest of the subject
+token, plus the audience, plus the resource indicator. An exchange is a pure
+function of what is sent to the token endpoint, so identical input means
+identical output, and the correctness argument is one sentence with nothing left
+to reason about. Keying on claims instead — `sub`, `act`, scopes — requires
+guessing which of them the authorization server used, and being wrong is
+invisible. A digest rather than the token itself, because a cache is a structure
+whose whole purpose is to outlive the request that created it.
+
+The entries expire 30 seconds early, so a credential is never live when the
+gateway checks it and dead when the upstream reads it. Concurrent misses for one
+key collapse into a single exchange, because a burst from one agent turning into
+a burst of token requests is how a rate-limited authorization server takes down
+the whole estate. And the whole thing is bounded, which is a security limit
+before it is a memory one: an authenticated caller with a token mint could
+otherwise drive it in a loop. See
+[ADR 0022](docs/decisions/0022-a-cache-key-that-cannot-be-wrong.md).
 
 ### Upstreams that cannot exchange
 

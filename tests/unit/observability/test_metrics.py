@@ -113,6 +113,7 @@ def test_recording_works_without_the_library_installed() -> None:
     metrics.record_retry(upstream="mock-a", method="tools/list")
     metrics.observe_breaker(upstream="mock-a", state="open")
     metrics.observe_bulkhead(upstream="mock-a", in_flight=2, capacity=20)
+    metrics.record_credential_cache(outcome="hit")
 
 
 def test_rendering_always_returns_a_body_and_a_content_type() -> None:
@@ -141,6 +142,28 @@ def test_recorded_values_reach_the_exposition() -> None:
     assert "acp_upstream_calls_total" in body
     assert 'upstream="metrics-test"' in body
     assert "acp_upstream_call_duration_seconds_bucket" in body
+
+
+@pytest.mark.skipif(not metrics.METRICS_AVAILABLE, reason="prometheus_client not installed")
+def test_the_credential_cache_counter_is_labelled_by_outcome_and_nothing_else() -> None:
+    """Hits and misses are the whole signal, and `outcome` is the whole label.
+
+    The tempting extra label is the principal or the upstream audience, so a
+    scrape could show whose credentials are churning. Both are unbounded — a
+    Prometheus label is a time series per distinct value, and one derived from a
+    credential is also a credential-shaped string sitting in a scrape endpoint
+    that ADR 0010 already treats as a reconnaissance report.
+    """
+    metrics.record_credential_cache(outcome="hit")
+    metrics.record_credential_cache(outcome="miss")
+
+    body = metrics.render()[0].decode()
+    lines = [line for line in body.splitlines() if line.startswith("acp_credential_cache_total{")]
+
+    assert lines, "the counter never reached the exposition"
+    assert all(line.count("=") == 1 for line in lines), f"an extra label appeared: {lines}"
+    assert any('outcome="hit"' in line for line in lines)
+    assert any('outcome="miss"' in line for line in lines)
 
 
 @pytest.mark.skipif(not metrics.METRICS_AVAILABLE, reason="prometheus_client not installed")

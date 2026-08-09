@@ -22,6 +22,7 @@ from acp.config import (
     load_upstreams,
 )
 from acp.exceptions import ConfigurationError
+from acp.identity.discovery import plaintext_permitted
 
 VALID = """
 upstreams:
@@ -292,9 +293,72 @@ def test_a_global_jwks_url_alongside_an_issuers_file_is_refused() -> None:
         settings(auth_issuers_file="config/issuers.yaml", auth_jwks_url="https://idp.test/keys")
 
 
+def test_the_default_is_to_insist_on_an_identity_provider() -> None:
+    """The polarity is the point, and it is the opposite of the boolean this
+    module spent task 22 arguing against.
+
+    `ACP_AUTH_ENABLED=false` would fail *open* when forgotten: a gateway serving
+    everything while its config claimed otherwise. This fails *closed*. It does
+    not turn authentication on — only configuring a provider does that — it
+    asserts that one is configured, and forgetting to think about it produces a
+    gateway that will not start rather than one that will not check.
+
+    Only the *default* is checked here. Enforcement lives in
+    `build_token_validator`, because the claim is about serving rather than
+    about the existence of a settings object — the first version checked it in
+    this module's validator and made `acp schemas capture` unrunnable.
+    """
+    assert settings().auth_required is True
+
+
+def test_settings_are_still_constructible_without_a_provider() -> None:
+    """`acp schemas capture` reads upstream catalogues and has nothing to do
+    with authentication. It builds a `GatewaySettings` like everything else, and
+    for one commit it could not, because a serving rule was enforced at
+    construction. A rule applied further out than its own scope stops being a
+    security property and becomes the reason somebody turns it off."""
+    assert settings().authentication_configured is False
+
+
 def test_a_jwks_url_with_no_issuer_is_refused() -> None:
     with pytest.raises(ValidationError, match="names keys for nobody"):
         settings(auth_jwks_url="https://idp.test/keys")
+
+
+def test_a_resource_identifier_is_optional_when_authentication_is_on() -> None:
+    """Deliberately *not* part of the all-or-nothing rule. Publishing RFC 9728
+    metadata is a convenience for clients, not a control: a gateway without it
+    validates tokens exactly as strictly, and callers simply have to be told
+    the authorization server by hand. `runtime` warns rather than refusing."""
+    assert settings(**IDENTITY).auth_resource == ""
+    assert settings(**IDENTITY).authentication_configured is True
+
+
+def test_a_resource_identifier_with_no_authorization_server_is_refused() -> None:
+    """The document's only useful field would be `authorization_servers`, and
+    there would be none. Publishing a discovery path that dead-ends is a worse
+    answer to "how do I authenticate here" than publishing nothing."""
+    with pytest.raises(ValidationError, match="no client can obtain a token"):
+        settings(auth_resource="https://gw.corp.test/mcp")
+
+
+# ---------------------------------------------------------------------------
+# Plain-HTTP identity providers — the escape hatch (ADR 0018)
+# ---------------------------------------------------------------------------
+
+
+def test_no_host_may_serve_its_metadata_over_plain_http_by_default() -> None:
+    assert settings(**IDENTITY).auth_insecure_issuer_hosts == []
+
+
+def test_naming_a_host_is_what_permits_it() -> None:
+    """Narrow on purpose: a hostname somebody typed, not a boolean and not a
+    disabled certificate check. Loopback needs no entry — traffic that never
+    leaves the machine has no in-flight to be rewritten in."""
+    assert plaintext_permitted("keycloak") is False
+    assert plaintext_permitted("keycloak", ["keycloak"]) is True
+    assert plaintext_permitted("localhost") is True
+    assert plaintext_permitted(None) is False
 
 
 # ---------------------------------------------------------------------------

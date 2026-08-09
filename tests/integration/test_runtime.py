@@ -173,8 +173,14 @@ def identity_settings(algorithms: list[str] | None = None) -> GatewaySettings:
 
 def test_no_provider_configured_builds_no_validator() -> None:
     """`None` here is what makes the gateway run unauthenticated, which is how
-    every task before this one behaved and has to keep working."""
-    settings = GatewaySettings(_env_file=None)  # type: ignore[call-arg]
+    every task before this one behaved and has to keep working.
+
+    `auth_required=False` since task 26. The default is now to refuse — a
+    gateway that is a security control does not start without the thing that
+    makes it one — so running unauthenticated is a thing a deployment asks for
+    rather than a thing it drifts into.
+    """
+    settings = GatewaySettings(_env_file=None, auth_required=False)  # type: ignore[call-arg]
 
     assert anyio.run(build_token_validator, settings) is None
 

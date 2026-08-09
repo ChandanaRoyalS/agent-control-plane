@@ -44,6 +44,8 @@ services:
     depends_on:
       mock-a:
         condition: service_healthy
+      keycloak-ready:
+        condition: service_completed_successfully
       mock-b:
         condition: service_healthy
       jaeger:
@@ -74,6 +76,26 @@ services:
       # it means the request path's upstream fan-out is invisible until
       # something lets the cache actually expire.
       ACP_HEALTH_PROBING_ENABLED: "${ACP_HEALTH_PROBING_ENABLED:-true}"
+      # -- identity, against the real thing (task 26) ----------------------
+      #
+      # The issuer is `keycloak:8080` and not `localhost:8081` because the
+      # gateway resolves it from inside this network, and because `iss` is
+      # compared as an exact string — one identity, one spelling, everywhere.
+      ACP_AUTH_ISSUER: http://keycloak:8080/realms/acp
+      # Audience and resource identifier are the same string on purpose: the
+      # gateway publishes it under RFC 9728, a client asks for it as RFC 8707's
+      # `resource`, and Keycloak's audience mapper writes it into `aud`. It is
+      # `localhost:8080` because that is where a *client* reaches the gateway,
+      # which is a different question from where the gateway reaches Keycloak.
+      ACP_AUTH_AUDIENCE: http://localhost:8080/mcp
+      ACP_AUTH_RESOURCE: http://localhost:8080/mcp
+      # The assertion, not a switch. This deployment has an identity provider,
+      # so a gateway here that resolved every request to `anonymous` is a
+      # deployment that has failed, not one running in a different mode.
+      ACP_AUTH_REQUIRED: "true"
+      # And the price of a demo identity provider that speaks plain HTTP.
+      # Narrow, named, and logged at every start — ADR 0018.
+      ACP_AUTH_INSECURE_ISSUER_HOSTS: '["keycloak"]'
       # OpenTelemetry's own variables, not ACP_ ones. `jaeger` is the service
       # name below; on the host this same gateway finds Jaeger on localhost
       # with no configuration at all, because 4318 is already the OTLP/HTTP
@@ -151,6 +173,99 @@ services:
     ports:
       - "9102:9102"
 
+
+  # -------------------------------------------------------------------------
+  # The identity provider — task 26
+  # -------------------------------------------------------------------------
+  #
+  # Everything in tasks 22 to 24 was tested against fakes written in this
+  # repository, and a mock that agrees with your client proves only that you
+  # wrote both. This is the first thing in the stack that can disagree with us.
+  #
+  # `start-dev` and not `start`: this is a demo realm on a laptop, HTTP-only,
+  # with an in-container database. Running it in production mode would mean
+  # provisioning Postgres and TLS to prove a point nobody is asking about.
+  keycloak:
+    # Pinned, like Jaeger and for the same reason: an identity provider that
+    # silently changes how it issues tokens between runs turns "the gateway
+    # rejects my token" into a question with two possible causes.
+    image: quay.io/keycloak/keycloak:26.7.1
+    container_name: acp-keycloak
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      # The whole reason this file names `keycloak:8080` everywhere rather than
+      # `localhost`. An issuer is a public identity compared as an exact string
+      # (RFC 8414 §2, ADR 0016), so it has to be one string from every vantage
+      # point — and the gateway's vantage point is inside this network, where
+      # `localhost` means the gateway itself. Setting the hostname explicitly
+      # fixes what Keycloak stamps into `iss` regardless of which host a request
+      # arrived on. See ADR 0018.
+      KC_HOSTNAME: http://keycloak:8080
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      # Dev credentials for the admin console, in a file that is in git. They
+      # unlock a realm containing two invented users and no data.
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    volumes:
+      # Read-only. Keycloak imports the realm and never needs to write here, and
+      # a config source an application can rewrite is a config source that tells
+      # you nothing about what it was configured with.
+      - ./config/keycloak:/opt/keycloak/data/import:ro
+      # Dev mode keeps its H2 database under data/. Named, so a restart does not
+      # silently discard whatever was clicked in the console — and so
+      # `make idp-reset` has something definite to remove when the committed
+      # realm changes. Keycloak skips the import when the realm already exists,
+      # which is the right default and the reason editing the realm file appears
+      # to do nothing until the volume goes.
+      - keycloak-data:/opt/keycloak/data/h2
+    ports:
+      # The admin console: http://localhost:8081 (admin / admin).
+      - "8081:8080"
+
+  # A one-shot readiness gate, deliberately built from *our* image.
+  #
+  # The gateway runs OIDC discovery at startup, before it binds a port, because
+  # an issuer whose metadata contradicts its own identity should stop a
+  # deployment rather than surprise the first request. That makes "Keycloak is
+  # answering yet" a hard ordering dependency rather than a nicety.
+  #
+  # The usual way to express that is a healthcheck on the Keycloak container,
+  # which means writing a probe out of whatever binaries that image happens to
+  # ship — no curl, no wget, and a shell one-liner that breaks when the base
+  # image changes. Polling from a container we control needs nothing from
+  # theirs, and the failure message is one we wrote.
+  keycloak-ready:
+    build:
+      context: .
+      target: runtime
+    image: acp/gateway:dev
+    container_name: acp-keycloak-ready
+    restart: "no"
+    depends_on:
+      keycloak:
+        condition: service_started
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import sys, time, urllib.error, urllib.request
+        url = "http://keycloak:8080/realms/acp/.well-known/openid-configuration"
+        deadline = time.monotonic() + 180
+        last = "no attempt"
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen(url, timeout=3) as response:
+                    if response.status == 200:
+                        print("keycloak: realm acp is serving metadata", flush=True)
+                        sys.exit(0)
+                    last = f"HTTP {response.status}"
+            except (urllib.error.URLError, OSError) as exc:
+                last = type(exc).__name__
+            print(f"keycloak: waiting ({last})", flush=True)
+            time.sleep(2)
+        sys.exit(f"keycloak did not serve {url} within 180s; last: {last}")
+
   # -------------------------------------------------------------------------
   # Trace backend
   # -------------------------------------------------------------------------
@@ -181,3 +296,11 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  # Keycloak's dev-mode database. See the comment on the service for why this
+  # is named rather than anonymous, and what `make idp-reset` is for.
+  keycloak-data:

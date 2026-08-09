@@ -92,7 +92,12 @@ jobs:
   image:
     name: image · compose · smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Raised from 15 in task 26: the stack now boots a Keycloak, imports a realm
+    # and waits for it to serve metadata before the gateway will even bind a
+    # port. That is a minute of wall clock nobody can optimise away, and it buys
+    # the only assertions in this repository made against an authorization
+    # server it did not write.
+    timeout-minutes: 20
     # Runs alongside `quality` rather than after it. They fail for unrelated
     # reasons — a type error and a broken Dockerfile are different problems —
     # and chaining them would mean a packaging bug hides behind a lint failure
@@ -141,8 +146,17 @@ jobs:
       - name: Smoke test
         run: python scripts/compose_smoke.py
 
+      - name: Identity smoke test
+        # A separate step, so "the stack works" and "the stack authenticates"
+        # fail with different names in the checks list. They are different
+        # problems and the fix for one is nowhere near the fix for the other.
+        run: python scripts/identity_smoke.py
+
       - name: Logs on failure
         if: failure()
+        # Keycloak included: when the identity smoke fails, the reason is
+        # usually in the gateway's startup lines (which issuer it discovered,
+        # which key set it fetched) or in Keycloak's import log.
         run: docker compose logs --no-color
 
       - name: Tear down

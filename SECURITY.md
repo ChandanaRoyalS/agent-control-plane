@@ -74,6 +74,17 @@ distinguishable. The full reasoning is in
   Python offers no way to reliably zero a `str` and a `del` would be theatre.
   The claim is "fewer places for a credential to be lying around", not "safe".
 
+- **Exchanged credentials living in gateway memory for their lifetime.** Since
+  [ADR 0022](docs/decisions/0022-a-cache-key-that-cannot-be-wrong.md) the
+  gateway holds each minted credential until shortly before it expires, so a
+  core dump or a debugger attached to the process yields live upstream
+  credentials for whoever was recently active. Task 27's stronger claim — that
+  the process holds nothing reusable — now holds only across the credential's
+  few minutes of lifetime. The cache is bounded, per process, never written to
+  disk and never shared over a network, and background refresh was rejected
+  precisely so the gateway does not hold credentials for callers who have gone
+  away.
+
 - **A malicious operator.** Anyone who can change the configuration, the schema
   baseline or the policy files can change what the gateway permits. The controls
   here are arranged so that doing so leaves a reviewable trail — the schema
@@ -101,6 +112,7 @@ alternatives that were rejected and why:
 - [0019](docs/decisions/0019-mint-a-credential-per-call-and-hold-none.md) — the gateway holds no upstream credential; the inbound token reaches exactly one module, whose only destination is the issuer that minted it
 - [0020](docs/decisions/0020-check-the-scope-you-were-granted.md) — RFC 8707's parameter is a request, not a guarantee; the control is checking the credential that came back names one upstream and no other
 - [0021](docs/decisions/0021-one-backend-behind-a-seam.md) — an encrypted store turns many secrets into one key and says so; references live in config, values never do
+- [0022](docs/decisions/0022-a-cache-key-that-cannot-be-wrong.md) — a credential cache keyed on the request rather than on claims, because keying it on the upstream serves one caller's credential to the next and passes every functional test
 
 ## Supported versions
 

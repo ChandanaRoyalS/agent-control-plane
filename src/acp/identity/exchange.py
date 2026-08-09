@@ -62,8 +62,10 @@ from acp.exceptions import (
     CredentialExchangeError,
     CredentialProviderUnavailableError,
 )
+from acp.identity.cache import CredentialCache, CredentialKey
 from acp.identity.issuers import IssuerRegistry
 from acp.identity.principal import current_principal, current_subject_token
+from acp.observability import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +124,7 @@ class TokenExchanger:
         client_id: str,
         client_secret: str,
         peer_audiences: Iterable[str] = (),
+        cache: CredentialCache | None = None,
         http: httpx.AsyncClient | None = None,
         request_timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
@@ -134,6 +137,10 @@ class TokenExchanger:
         # cross-upstream check has nothing to compare against, which is the
         # correct state for a single-upstream deployment.
         self._peers = frozenset(peer_audiences)
+        # `None` disables caching entirely, which is task 27's behaviour and the
+        # right shape for a test that wants to count exchanges. Every deployment
+        # has one; see `runtime.build_token_exchanger`.
+        self._cache = cache
         self._owns_http = http is None
         self._http = http or httpx.AsyncClient(timeout=request_timeout)
 
@@ -143,6 +150,47 @@ class TokenExchanger:
 
     async def exchange(
         self, *, subject_token: str, issuer: str, audience: str, resource: str = ""
+    ) -> ExchangedToken:
+        """A credential for this upstream — cached, or minted and then cached.
+
+        The cache is checked, then a per-key lock is taken, then the cache is
+        checked *again*. That second read is the whole single-flight mechanism
+        and it is easy to leave out: without it, every request that queued on the
+        lock while the first one was minting proceeds to mint its own. Task 22
+        shipped exactly that defect in the JWKS cache, where twenty concurrent
+        misses produced twenty-one fetches — found by asserting a *count* rather
+        than a type.
+        """
+        if self._cache is None:
+            return await self._mint(
+                subject_token=subject_token, issuer=issuer, audience=audience, resource=resource
+            )
+
+        key = CredentialKey.of(subject_token, audience, resource)
+        cached = self._cache.get(key)
+        if cached is not None:
+            self._cache.record(hit=True)
+            metrics.record_credential_cache(outcome="hit")
+            return cached
+
+        async with self._cache.lock_for(key):
+            # Whoever was minting while this call waited has already stored it.
+            cached = self._cache.get(key)
+            if cached is not None:
+                self._cache.record(hit=True)
+                metrics.record_credential_cache(outcome="hit")
+                return cached
+
+            self._cache.record(hit=False)
+            metrics.record_credential_cache(outcome="miss")
+            token = await self._mint(
+                subject_token=subject_token, issuer=issuer, audience=audience, resource=resource
+            )
+            self._cache.put(key, token)
+            return token
+
+    async def _mint(
+        self, *, subject_token: str, issuer: str, audience: str, resource: str
     ) -> ExchangedToken:
         """One exchange, against the issuer that minted the subject token."""
         registration = self.issuers.registration_for(issuer)

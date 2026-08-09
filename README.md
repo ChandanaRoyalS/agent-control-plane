@@ -212,7 +212,9 @@ make identity-smoke
 The first of those is the invariant the whole security model rests on, observed
 from outside the gateway process: the mock upstreams report the credential they
 were handed, so the fingerprint can be compared against the caller's own token
-rather than inferred from the code that built the request.
+rather than inferred from the code that built the request. The full run, with
+what each line proves, is captured in
+[`docs/demo/identity-smoke.txt`](docs/demo/identity-smoke.txt).
 
 The inbound token has to exist somewhere — RFC 8693 sends it as `subject_token`
 — so it lives in its own context variable with exactly one reader, rather than

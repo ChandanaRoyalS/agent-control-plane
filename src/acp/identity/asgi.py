@@ -15,6 +15,13 @@ request succeeded.
 else. The specific cause is already in the log, where the operator can read it
 and an attacker cannot.
 
+**One path is public, and it is derived rather than configured.** RFC 9728's
+protected resource metadata answers "how do I authenticate here", so requiring
+authentication to read it would be a loop with no entry. The exemption is taken
+from the ``ProtectedResource`` this middleware is given — exactly
+``metadata_path``, matched by exact string equality — rather than from a list
+somebody can extend. See ``acp.identity.resource``.
+
 **Unauthenticated mode is a real mode, and it is loud.** With no identity
 provider configured, this middleware binds ``None`` and lets the request
 through. That is how every task before this one behaved, and pretending
@@ -33,6 +40,7 @@ from typing import Any
 
 from acp.exceptions import ACPError, AuthenticationError
 from acp.identity.principal import bind_principal
+from acp.identity.resource import ProtectedResource
 from acp.identity.validator import TokenValidator
 from acp.observability import context
 
@@ -59,12 +67,40 @@ searching for it finds every unauthenticated request in the estate."""
 class AuthenticationMiddleware:
     """Resolves the caller's principal, or refuses the request."""
 
-    def __init__(self, app: Any, validator: TokenValidator | None) -> None:
+    def __init__(
+        self,
+        app: Any,
+        validator: TokenValidator | None,
+        resource: ProtectedResource | None = None,
+    ) -> None:
         self._app = app
         self._validator = validator
+        self._resource = resource
+        # The one unauthenticated path, and it is *derived* rather than
+        # configured. There is deliberately no `public_paths` argument: an
+        # allow-list is a place where a second entry can be added later by
+        # somebody who does not have this file open, and "which routes skip
+        # authentication" is not a question that should be answerable by editing
+        # a config file. The exemption exists because the protected resource
+        # document exists, and it covers exactly that document.
+        self._public: frozenset[str] = (
+            frozenset({resource.metadata_path}) if resource is not None else frozenset()
+        )
 
     async def __call__(self, scope: Scope, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        # Exact string equality against a one-element set, never a prefix test.
+        # `startswith` on an allow-listed path is a classic bypass — the guard
+        # says "public" and the router says "admin" about the same string — and
+        # exact matching fails closed for every encoding trick, dot segment and
+        # trailing slash, because anything the path is not spelled as simply
+        # does not match and gets authenticated like everything else.
+        if scope.get("path", "") in self._public:
+            bind_principal(None)
+            context.bind(principal=ANONYMOUS)
             await self._app(scope, receive, send)
             return
 
@@ -82,13 +118,13 @@ class AuthenticationMiddleware:
             # No credentials at all. RFC 6750 §3: challenge without an `error`
             # code, because there is nothing wrong with the credentials — there
             # are none.
-            await _challenge(send, error=None)
+            await self._challenge(send, error=None)
             return
 
         try:
             principal = await self._validator.validate(token)
         except AuthenticationError:
-            await _challenge(send, error="invalid_token")
+            await self._challenge(send, error="invalid_token")
             return
         except ACPError:
             # The identity provider is unreachable or answering nonsense. This
@@ -103,6 +139,30 @@ class AuthenticationMiddleware:
         bind_principal(principal)
         context.bind(**principal.as_log_fields())
         await self._app(scope, receive, send)
+
+    async def _challenge(self, send: Any, *, error: str | None) -> None:
+        """Answer 401 with a ``WWW-Authenticate`` challenge.
+
+        ``resource_metadata`` (RFC 9728 §5.1) is what turns this from a refusal
+        into an instruction: a client that has never heard of this gateway reads
+        the URL, fetches the document, learns which authorization servers can
+        issue for it, and comes back with a token. Without it a 401 says only
+        "no", and the client's only recourse is a human editing its config.
+
+        Emitted only when there is a document to point at. A challenge naming a
+        URL that answers 404 is worse than one naming nothing, because it sends
+        the client down a discovery path that ends nowhere.
+        """
+        parameters = [] if error is None else [f'error="{error}"']
+        if self._resource is not None:
+            parameters.append(f'resource_metadata="{self._resource.metadata_url}"')
+        challenge = "Bearer" + (" " + ", ".join(parameters) if parameters else "")
+        await _respond(
+            send,
+            status=401,
+            body={"error": error or "unauthorized"},
+            headers=[(b"www-authenticate", challenge.encode("ascii"))],
+        )
 
 
 def _bearer_token(scope: Scope) -> str | None:
@@ -127,22 +187,6 @@ def _bearer_token(scope: Scope) -> str | None:
         credentials = credentials.strip()
         return credentials or None
     return None
-
-
-async def _challenge(send: Any, *, error: str | None) -> None:
-    """Answer 401 with a ``WWW-Authenticate`` challenge.
-
-    Task 24 extends this header with the ``resource_metadata`` parameter of
-    RFC 9728, which is what lets a client discover *which* authorization server
-    to go and get a token from rather than having it configured by hand.
-    """
-    challenge = "Bearer" if error is None else f'Bearer error="{error}"'
-    await _respond(
-        send,
-        status=401,
-        body={"error": error or "unauthorized"},
-        headers=[(b"www-authenticate", challenge.encode("ascii"))],
-    )
 
 
 async def _unavailable(send: Any) -> None:

@@ -1,5 +1,6 @@
 .DEFAULT_GOAL := help
-.PHONY: help install check fmt lint types test cov clean image up down logs smoke
+.PHONY: help install check fmt lint types test cov clean image up down logs smoke \
+        identity-smoke token idp-reset
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -32,9 +33,10 @@ cov:  ## Open the HTML coverage report
 image:  ## Build the container images
 	docker compose build
 
-up:  ## Bring up gateway, mocks and Jaeger, and wait until healthy
-	docker compose up -d --wait
-	@echo "gateway :8080  admin :9090  jaeger http://localhost:16686"
+up:  ## Bring up the whole stack and wait until it is ready
+	docker compose up -d --wait gateway
+	@echo "gateway :8080  admin :9090  jaeger :16686  keycloak :8081 (admin/admin)"
+	@echo "the gateway now authenticates — 'make token' for one, 'make identity-smoke' to prove it"
 
 down:  ## Tear the stack down, volumes included
 	docker compose down -v --remove-orphans
@@ -44,6 +46,21 @@ logs:  ## Follow the gateway's logs
 
 smoke:  ## Assert the composed stack actually works
 	uv run python scripts/compose_smoke.py
+
+identity-smoke:  ## Assert the identity stack works against the real Keycloak
+	uv run python scripts/identity_smoke.py
+
+token:  ## Print an access token for alice (USER=bob for the other one)
+	@uv run python scripts/keycloak_token.py $(or $(USER),alice)
+
+# Keycloak skips the import when the realm already exists, which is the right
+# default and the reason editing config/keycloak/acp-realm.json appears to do
+# nothing. There is no database volume (see docker-compose.yml), so the realm
+# lives in the container's own layer and recreating the container is enough —
+# but a plain `restart` is not, which is the whole reason this target exists.
+idp-reset:  ## Re-import config/keycloak after editing it
+	docker compose rm -sf keycloak
+	docker compose up -d --wait gateway
 
 clean:  ## Remove caches and build artifacts
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage coverage.xml

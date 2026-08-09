@@ -25,7 +25,12 @@ from acp import __version__
 from acp.exceptions import ACPError
 from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.registry import UpstreamRegistry
-from acp.identity import AuthenticationMiddleware, TokenValidator
+from acp.identity import (
+    AuthenticationMiddleware,
+    ProtectedResource,
+    TokenValidator,
+    metadata_route,
+)
 from acp.observability import RequestContextMiddleware
 
 logger = logging.getLogger(__name__)
@@ -137,6 +142,7 @@ def build_app(
     allowed_hosts: Sequence[str] = DEFAULT_ALLOWED_HOSTS,
     allowed_origins: Sequence[str] = (),
     validator: TokenValidator | None = None,
+    resource: ProtectedResource | None = None,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -153,6 +159,11 @@ def build_app(
     a locally-bound server against a malicious web page resolving a hostname to
     a loopback address. Defaults cover local development; deployment behind a
     real hostname must pass its own list, and that becomes config in task 11.
+
+    ``resource``, when given, adds the RFC 9728 metadata route *and* is what the
+    authentication middleware exempts. One object doing both is the point: the
+    only unauthenticated path in the gateway is derived from the document being
+    served there rather than from a list of paths kept in step by hand.
     """
     security = TransportSecuritySettings(
         allowed_hosts=list(allowed_hosts),
@@ -163,6 +174,18 @@ def build_app(
         json_response=True,
         transport_security=security,
     )
+    if resource is not None:
+        # Inserted at the front rather than appended, because the SDK is free to
+        # mount its transport at the root — and a route added after a catch-all
+        # mount is a route that never matches. This is one line of defence
+        # against a silent 404 on the one endpoint whose entire job is to be
+        # findable by a client that knows nothing else about this gateway.
+        #
+        # The middleware receives the same object, which is what makes this
+        # route reachable without a token: the exemption is `metadata_path`
+        # taken from `resource`, so serving it and exempting it cannot come
+        # apart. See `acp.identity.resource`.
+        app.router.routes.insert(0, metadata_route(resource))
     # Added to Starlette's own stack rather than by wrapping the app, so the
     # returned object is still a Starlette instance — `app.router` and the
     # lifespan context are part of this function's contract and the tests use
@@ -175,6 +198,6 @@ def build_app(
     # request-context middleware — which is what makes a rejected request still
     # carry a request ID in its log line. A 401 nobody can correlate is a 401
     # nobody can investigate.
-    app.add_middleware(AuthenticationMiddleware, validator=validator)
+    app.add_middleware(AuthenticationMiddleware, validator=validator, resource=resource)
     app.add_middleware(RequestContextMiddleware)
     return app

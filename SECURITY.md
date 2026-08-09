@@ -50,6 +50,14 @@ distinguishable. The full reasoning is in
   to mint arbitrary tokens, everything downstream follows. The gateway binds
   each issuer to its own keys and audience so a *second* server cannot speak for
   the first, but it cannot detect a server lying about its own users.
+- **An identity provider reached over plain HTTP, when an operator has asked for
+  that by name.** `ACP_AUTH_INSECURE_ISSUER_HOSTS` is empty by default and
+  widens the plain-HTTP exemption to hosts listed in it. Anything on the path to
+  such a host can replace the key set and mint tokens the gateway will accept.
+  It exists because the alternatives people reach for — widening the loopback
+  set, or disabling certificate verification — are broader and quieter, and
+  every entry is logged at every start ([ADR 0018](docs/decisions/0018-one-issuer-string-from-every-vantage-point.md)).
+
 - **A malicious operator.** Anyone who can change the configuration, the schema
   baseline or the policy files can change what the gateway permits. The controls
   here are arranged so that doing so leaves a reviewable trail — the schema
@@ -72,6 +80,8 @@ alternatives that were rejected and why:
 - [0014](docs/decisions/0014-ship-one-image-and-compose-the-rest.md) — the mock upstreams are stripped from the production image; `config/` is mounted read-only so a compromised gateway cannot silence its own drift alarm
 - [0015](docs/decisions/0015-two-identities-not-one.md) — asymmetric algorithms only, because a JWKS publishes public keys and an attacker can sign HS256 with one
 - [0016](docs/decisions/0016-bind-every-credential-to-its-issuer.md) — issuer, audience and key set are one indivisible registration
+- [0017](docs/decisions/0017-let-the-gateway-tell-clients-where-to-authenticate.md) — the one unauthenticated path is derived from the document served there, not from an allow-list; and why publishing the authorization servers is a reconnaissance cost worth paying where publishing the upstreams is not
+- [0018](docs/decisions/0018-one-issuer-string-from-every-vantage-point.md) — an issuer is an identity and not an address; and why the plain-HTTP escape hatch is narrow, named and logged rather than absent
 
 ## Supported versions
 

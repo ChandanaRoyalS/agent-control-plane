@@ -38,13 +38,21 @@ a test that asserts it rather than a comment claiming it.
 
 from acp.identity.asgi import ANONYMOUS, AuthenticationMiddleware
 from acp.identity.discovery import ProviderMetadata, discover
+from acp.identity.exchange import (
+    ExchangedCredentials,
+    ExchangedToken,
+    TokenExchanger,
+    require_token_endpoints,
+)
 from acp.identity.issuers import IssuerRegistration, IssuerRegistry, single_issuer
 from acp.identity.keys import JwksCache
 from acp.identity.principal import (
     Actor,
     Principal,
     bind_principal,
+    bind_subject_token,
     current_principal,
+    current_subject_token,
     from_claims,
 )
 from acp.identity.resource import (
@@ -63,19 +71,25 @@ __all__ = [
     "WELL_KNOWN_SEGMENT",
     "Actor",
     "AuthenticationMiddleware",
+    "ExchangedCredentials",
+    "ExchangedToken",
     "IssuerRegistration",
     "IssuerRegistry",
     "JwksCache",
     "Principal",
     "ProtectedResource",
     "ProviderMetadata",
+    "TokenExchanger",
     "TokenPolicy",
     "TokenValidator",
     "bind_principal",
+    "bind_subject_token",
     "current_principal",
+    "current_subject_token",
     "discover",
     "from_claims",
     "metadata_route",
     "protected_resource",
+    "require_token_endpoints",
     "single_issuer",
 ]

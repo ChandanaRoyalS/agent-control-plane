@@ -225,3 +225,33 @@ def current_principal() -> Principal | None:
     place that authenticates. Callers must handle it; the type says so.
     """
     return _principal.get()
+
+
+_subject_token: ContextVar[str | None] = ContextVar("acp_subject_token", default=None)
+"""The raw inbound token, held apart from the principal on purpose.
+
+``Principal`` deliberately carries no token, so that nothing holding an identity
+can accidentally forward a credential. Task 27 needs the token anyway: RFC 8693
+token exchange presents it as the ``subject_token`` — to the **authorization
+server**, which issued it, and never to an upstream.
+
+Rather than weaken the principal, the token lives in its own variable with its
+own name, and exactly one component reads it: ``acp.identity.exchange``. That
+makes the invariant task 31 has to prove a statement about one call site rather
+than about a data structure that gets passed everywhere:
+
+    the value in this variable is sent to the token endpoint of the issuer that
+    minted it, and to nowhere else.
+
+Reading it from anywhere in ``acp.upstream`` would be the bug. There is nothing
+here that prevents it; what there is, is a name that makes it obvious in a diff.
+"""
+
+
+def bind_subject_token(token: str | None) -> None:
+    _subject_token.set(token)
+
+
+def current_subject_token() -> str | None:
+    """The raw inbound token, for exchange only. See ``_subject_token``."""
+    return _subject_token.get()

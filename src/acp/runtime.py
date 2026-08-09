@@ -28,11 +28,14 @@ from acp.exceptions import ConfigurationError
 from acp.gateway import UpstreamRegistry, build_app
 from acp.health import DEFAULT_INTERVAL, HealthMonitor
 from acp.identity import (
+    ExchangedCredentials,
     IssuerRegistry,
     ProtectedResource,
+    TokenExchanger,
     TokenValidator,
     discover,
     protected_resource,
+    require_token_endpoints,
 )
 from acp.identity.issuers import registry_from_documents
 from acp.schema import DEFAULT_BASELINE_PATH, DriftDetector, SchemaSnapshot
@@ -81,6 +84,7 @@ async def gateway_from_configs(
     baseline_file: Path | None = None,
     validator: TokenValidator | None = None,
     resource: ProtectedResource | None = None,
+    credentials: ExchangedCredentials | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -91,7 +95,7 @@ async def gateway_from_configs(
     clients: list[Upstream] = []
     try:
         for config in upstreams:
-            clients.append(await connect_upstream(config))
+            clients.append(await connect_upstream(config, credentials))
         logger.info(
             "gateway.ready",
             extra={
@@ -307,6 +311,63 @@ def build_protected_resource(
     return resource
 
 
+def build_token_exchanger(
+    settings: GatewaySettings, validator: TokenValidator | None
+) -> TokenExchanger | None:
+    """Assemble RFC 8693 token exchange, or ``None`` when it is not configured.
+
+    Presence-based like everything else in this module: client credentials are
+    the switch, because a credential is not a thing you can forget to supply and
+    still have the feature appear to work.
+
+    ``require_token_endpoints`` runs here rather than on the first request, so
+    an issuer that cannot be exchanged against stops a deployment instead of
+    surprising whichever tenant happens to use it.
+    """
+    if not settings.exchange_configured:
+        return None
+    if validator is None:  # pragma: no cover — config refuses this combination
+        return None
+
+    require_token_endpoints(validator.issuers)
+    logger.info(
+        "auth.exchange_enabled",
+        extra={
+            "client_id": settings.auth_client_id,
+            "issuers": validator.issuers.issuers,
+        },
+    )
+    return TokenExchanger(
+        validator.issuers,
+        client_id=settings.auth_client_id,
+        client_secret=settings.auth_client_secret,
+    )
+
+
+def check_upstream_audiences(upstreams: Sequence[UpstreamConfig], *, exchanging: bool) -> None:
+    """Refuse to start when exchange is on and an upstream has no audience.
+
+    Fatal rather than a warning, and it is the one place in this file where that
+    is worth arguing. The alternative is a gateway which mints scoped
+    credentials for four upstreams and reaches the fifth with none — while every
+    log line, every ADR and every README says the estate is credentialed. A
+    control with a silent hole in it is worse than no control, because the hole
+    is the only part nobody is watching.
+    """
+    if not exchanging:
+        return
+    missing = [u.name for u in upstreams if not u.audience]
+    if not missing:
+        return
+    msg = (
+        f"token exchange is configured, but these upstreams declare no `audience`: "
+        f"{', '.join(sorted(missing))}. Each one names the upstream to the "
+        f"authorization server (RFC 8707), and without it the gateway would reach "
+        f"that upstream with no credential at all."
+    )
+    raise ConfigurationError(msg)
+
+
 def _issuer_documents(settings: GatewaySettings) -> list[dict[str, Any]]:
     """The configured authorization servers, from whichever source was used."""
     if settings.auth_issuers_file is not None:
@@ -318,6 +379,11 @@ def _issuer_documents(settings: GatewaySettings) -> list[dict[str, Any]]:
             # Absent rather than empty when undiscovered, so `_with_keys` can
             # tell "not configured" from "configured as an empty string".
             **({"jwks_url": settings.auth_jwks_url} if settings.auth_jwks_url else {}),
+            **(
+                {"token_endpoint": settings.auth_token_endpoint}
+                if settings.auth_token_endpoint
+                else {}
+            ),
         }
     ]
 
@@ -347,7 +413,13 @@ async def _with_keys(document: dict[str, Any], settings: GatewaySettings) -> dic
         request_timeout=settings.auth_discovery_timeout,
         insecure_hosts=settings.auth_insecure_issuer_hosts,
     )
-    return {**document, "jwks_url": metadata.jwks_uri}
+    # The token endpoint comes along for free and carries the same proof: this
+    # document has already been shown to belong to this issuer. An explicitly
+    # configured one on the document wins, because somebody typed it on purpose.
+    discovered = {"jwks_url": metadata.jwks_uri}
+    if metadata.token_endpoint and not document.get("token_endpoint"):
+        discovered["token_endpoint"] = metadata.token_endpoint
+    return {**document, **discovered}
 
 
 @asynccontextmanager
@@ -359,6 +431,8 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     """
     upstreams = load_upstreams(settings.upstreams_file)
     validator = await build_token_validator(settings)
+    exchanger = build_token_exchanger(settings, validator)
+    check_upstream_audiences(upstreams, exchanging=exchanger is not None)
     try:
         async with gateway_from_configs(
             upstreams,
@@ -372,10 +446,13 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             allowed_origins=settings.allowed_origins,
             validator=validator,
             resource=build_protected_resource(settings, validator),
+            credentials=ExchangedCredentials(exchanger) if exchanger else None,
         ) as app:
             yield app
     finally:
         # The key cache owns an HTTP connection pool, for the same reason the
         # upstream clients do and with the same consequence for leaking it.
+        if exchanger is not None:
+            await exchanger.aclose()
         if validator is not None:
             await validator.issuers.aclose()

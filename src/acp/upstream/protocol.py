@@ -22,6 +22,26 @@ from acp.upstream.models import CallToolResult, ListToolsResult
 
 
 @runtime_checkable
+class Credentials(Protocol):
+    """Whatever can produce an ``Authorization`` value for an upstream call.
+
+    A structural type, and deliberately not an import of ``acp.identity``. The
+    upstream client's business is HTTP and JSON-RPC; giving it a concrete
+    dependency on token exchange would make every test of the transport need an
+    authorization server, and would put an identity import in the one package
+    that should be usable without one.
+
+    What it receives is a name and an audience — never a principal, never a
+    token. The client cannot forward an inbound credential because it is not
+    holding one.
+    """
+
+    async def authorization_for(self, upstream: str, audience: str) -> str | None:
+        """The header value for this call, or ``None`` to send none."""
+        ...
+
+
+@runtime_checkable
 class Upstream(Protocol):
     """One upstream MCP server, however it is reached."""
 

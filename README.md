@@ -237,6 +237,41 @@ it reads what was granted rather than what was requested. `make probe-resource`
 re-runs the measurement; the results are in
 [ADR 0020](docs/decisions/0020-check-the-scope-you-were-granted.md).
 
+### Upstreams that cannot exchange
+
+Everything above assumes an upstream can take part in RFC 8693. Plenty cannot —
+an API key issued out of band, an appliance that will never learn OAuth — and
+until task 29 those could not be configured at all, because `audience` is
+mandatory once exchange is on.
+
+```bash
+acp secrets init                        # a key and an empty encrypted store
+acp secrets set legacy-crm-api-key      # prompts, or reads stdin; never argv
+acp secrets list                        # names only, never values
+```
+
+```yaml
+- name: legacy-crm
+  url: https://crm.internal/mcp
+  credential_ref: legacy-crm-api-key    # a name, never a value
+  credential_header: X-API-Key
+  credential_scheme: ""
+```
+
+The honest claim for a secret store is narrower than the phrase suggests: it
+turns *many* secrets into *one* key. That defends against a stray copy of a
+config directory, a backup, a support bundle, a repository somebody cloned, and
+a value that would otherwise sit where anything reading `/proc` can see it —
+which is how secrets actually leak, in bulk. It does not defend against root on
+the box, the running process, or anyone who can read the key file, and
+`SECURITY.md` says so.
+
+There is one backend and an interface, because the good answer is a workload
+identity that Vault exchanges for a short lease with nothing durable on disk —
+a deployment this project cannot test here, and a half-working adapter for it
+would look like support. The seam is in the right place; the swap is one class.
+See [ADR 0021](docs/decisions/0021-one-backend-behind-a-seam.md).
+
 ## Development
 
 ```bash

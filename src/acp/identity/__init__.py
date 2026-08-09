@@ -20,10 +20,16 @@ by another's rules. Where the binding is verified rather than merely asserted is
 discovery: RFC 8414 §3.3 requires an authorization server's metadata to name the
 same issuer the document was fetched for.
 
-What lands here later in the phase: protected resource metadata so clients can
-discover that server (task 24, RFC 9728), and token exchange minting a
-short-lived credential scoped to one upstream (task 25, RFC 8693 with RFC 8707
-resource indicators).
+Task 24 turns that outward. A client no longer has to be configured with the
+list of authorization servers a gateway trusts: a 401 carries the URL of an
+RFC 9728 protected resource document, the document names the servers, and the
+client runs task 23's discovery against one of them from the other side of the
+wire. The identifier that document publishes is also the audience a token for
+this gateway must carry, which is the seam task 25 uses.
+
+What lands here later in the phase: token exchange minting a short-lived
+credential scoped to one upstream (task 25, RFC 8693 with RFC 8707 resource
+indicators).
 
 The invariant the whole security model rests on, stated before there is any code
 that could violate it: **no inbound token is ever forwarded upstream.** There is
@@ -41,17 +47,27 @@ from acp.identity.principal import (
     current_principal,
     from_claims,
 )
+from acp.identity.resource import (
+    BEARER_METHODS,
+    WELL_KNOWN_SEGMENT,
+    ProtectedResource,
+    metadata_route,
+    protected_resource,
+)
 from acp.identity.validator import DEFAULT_ALGORITHMS, TokenPolicy, TokenValidator
 
 __all__ = [
     "ANONYMOUS",
+    "BEARER_METHODS",
     "DEFAULT_ALGORITHMS",
+    "WELL_KNOWN_SEGMENT",
     "Actor",
     "AuthenticationMiddleware",
     "IssuerRegistration",
     "IssuerRegistry",
     "JwksCache",
     "Principal",
+    "ProtectedResource",
     "ProviderMetadata",
     "TokenPolicy",
     "TokenValidator",
@@ -59,5 +75,7 @@ __all__ = [
     "current_principal",
     "discover",
     "from_claims",
+    "metadata_route",
+    "protected_resource",
     "single_issuer",
 ]

@@ -5,7 +5,8 @@ and the systems they are allowed to touch.
 
 [![CI](https://github.com/USERNAME/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/USERNAME/agent-control-plane/actions/workflows/ci.yml)
 
-> **Status:** in development. Phase 1 of 10 — foundation.
+> **Status:** in development. Phase 1 complete (`v0.1.0`); Phase 2 — identity —
+> in progress.
 
 ## The problem
 
@@ -62,6 +63,7 @@ uv run python scripts/compose_smoke.py     # asserts it actually works
   ok   schema baseline loaded and clean
   ok   tools/list returns 6 qualified tools
   ok   traces reached Jaeger
+  ok   an unauthenticated request is refused
 ```
 
 Then look at it: the MCP endpoint on `:8080`, metrics, health and schema drift
@@ -109,8 +111,8 @@ question about the actor.
 
 ```bash
 ACP_AUTH_ISSUER=https://idp.example/realms/acp
-ACP_AUTH_AUDIENCE=agent-control-plane
-ACP_AUTH_JWKS_URL=https://idp.example/realms/acp/protocol/openid-connect/certs
+ACP_AUTH_AUDIENCE=https://gw.example/mcp
+ACP_AUTH_RESOURCE=https://gw.example/mcp
 ```
 
 There is no `ACP_AUTH_ENABLED`. Authentication is on when a provider is
@@ -131,6 +133,62 @@ and used together. A token's `iss` selects one registration *before* any rule is
 applied, so a credential from one server can never be judged by another's
 rules — the resource-server form of the authorization-server mix-up attack. See
 [ADR 0016](docs/decisions/0016-bind-every-credential-to-its-issuer.md).
+
+`ACP_AUTH_RESOURCE` turns that outward. A client no longer has to be configured
+with the authorization server: an unauthenticated request gets
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://gw.example/.well-known/oauth-protected-resource/mcp"
+```
+
+and that document names the servers a token can come from. The refusal becomes
+an instruction. The identifier it publishes is also the audience a token must
+carry — the client sends it as RFC 8707's `resource` parameter, the server
+copies it into `aud` — so following the chain from a 401 produces exactly the
+token this gateway demands, with nothing hardcoded on either side. That one
+path is the only unauthenticated route in the gateway, and the exemption is
+derived from the document rather than configured, so there is no allow-list for
+a second entry to appear in. See
+[ADR 0017](docs/decisions/0017-let-the-gateway-tell-clients-where-to-authenticate.md).
+
+None of the above needs a real authorization server to *develop* against, and
+that is the problem: it also means none of it had been tested against one. So
+`docker compose up` now runs one. Keycloak, a committed realm
+([`config/keycloak/`](config/keycloak/)), two users, and the gateway configured
+against it — so the auth stack is reproducible from a clone rather than from a
+paragraph describing which buttons to press.
+
+```bash
+make up                 # gateway, mocks, Jaeger, Keycloak
+make token              # an access token for alice (USER=bob for the other one)
+make identity-smoke     # eight assertions against the real server
+```
+
+That last command is the point of having it. Everything in tasks 22–24 is tested
+against fakes written in this repository, and a mock that agrees with your
+client proves only that you wrote both. `identity_smoke.py` asks the questions
+only a real server can answer — including the one worth more than the rest put
+together: it obtains a genuine, correctly signed token from Keycloak's own
+`master` realm, an authorization server the gateway does not trust, and asserts
+it is refused. That is ADR 0016's entire argument, checked against something
+that did not come from here.
+
+Two things surfaced the moment a real server was on the other end, and both are
+written up in
+[ADR 0018](docs/decisions/0018-one-issuer-string-from-every-vantage-point.md):
+an issuer is an *identity* and not an address, so it has to be one exact string
+from inside the network and outside it; and `http://keycloak:8080` is neither
+TLS nor loopback, which is refused by default and permitted by naming that one
+host in `ACP_AUTH_INSECURE_ISSUER_HOSTS` — an escape hatch built deliberately
+and logged at every start, because the ones people improvise are broader and
+quieter.
+
+Since the same task, `ACP_AUTH_REQUIRED` defaults to true: a gateway that is a
+security control refuses to start without the thing that makes it one. Note the
+polarity — it is not a switch that turns authentication on, it is an assertion
+that a provider is configured, so forgetting it produces a gateway that will not
+start rather than one that will not check.
 
 ## Development
 

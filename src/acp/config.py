@@ -187,6 +187,78 @@ class GatewaySettings(BaseSettings):
     disagreeing about which servers are trusted is not a merge to be resolved.
     """
 
+    auth_resource: str = ""
+    """This gateway's public resource identifier, published under RFC 9728.
+
+    The URL an agent actually reaches this gateway on — ``https://gw.corp/mcp``,
+    not the interface it binds — because it is a public identifier and the two
+    are only the same on a laptop. Setting it makes the gateway serve
+    ``/.well-known/oauth-protected-resource`` and add ``resource_metadata`` to
+    every 401, which together let a client that has never been configured for
+    this deployment find its way to a token.
+
+    **Optional, and its absence is a missing convenience rather than a missing
+    control.** Nothing about *validating* a token depends on this; a gateway
+    without it authenticates exactly as strictly, and clients simply have to be
+    told the authorization server by hand. So it is not part of the
+    all-or-nothing rule below — but startup does say when it is missing, because
+    "clients cannot discover us" should be a state somebody chose.
+
+    It should equal the audience tokens for this gateway carry: a client passes
+    this string as RFC 8707's ``resource`` parameter, the authorization server
+    copies it into ``aud``, and task 22 checks it. ``runtime`` warns when the
+    configured audiences do not include it, because that mismatch produces a
+    discovery chain where every step works and the last one fails.
+    """
+
+    auth_required: bool = True
+    """Refuse to start without an identity provider.
+
+    Read the polarity carefully, because this is the boolean the identity
+    settings were designed to avoid and it is the opposite one.
+
+    ``ACP_AUTH_ENABLED=false`` would fail **open** when somebody forgot it: a
+    gateway serving every request while its configuration claimed it
+    authenticated them. This fails **closed**. It is not a switch that turns
+    authentication on — nothing here can do that, only configuring a provider
+    can. It is an *assertion* that one is configured, and the failure mode of
+    forgetting to set it is a gateway that refuses to start.
+
+    Default ``True``, which is a behaviour change: every task before 26 ran
+    unauthenticated with a warning, because there was no identity provider to
+    run against and refusing would have meant the gateway could not run at all.
+    Task 26 put Keycloak in Compose, so that excuse expired. Development still
+    gets the old behaviour by saying so out loud with
+    ``ACP_AUTH_REQUIRED=false``, which is a sentence somebody has to write.
+
+    **Enforced where the gateway starts serving, not here.** The first version
+    of this checked in the settings validator, which made it impossible to
+    construct a ``GatewaySettings`` at all without an identity provider — and
+    that broke ``acp schemas capture``, a local command that reads upstream
+    catalogues and has nothing whatever to do with authentication. The claim
+    being made is "this gateway must not *serve* unauthenticated", so it belongs
+    in ``build_token_validator``, where serving is about to happen. A rule
+    enforced further out than its own scope stops being a security property and
+    starts being an obstacle, which is how fail-closed controls get switched off.
+    """
+
+    auth_insecure_issuer_hosts: list[str] = Field(default_factory=list)
+    """Hosts whose metadata and key sets may be fetched over plain HTTP.
+
+    Empty by default. Loopback is already exempt without this — traffic that
+    never leaves the machine has no in-flight to be rewritten in — so this
+    exists for exactly one case: a development identity provider reachable from
+    another container by service name, where the URL is ``http://keycloak:8080``
+    and neither TLS nor loopback applies.
+
+    The escape hatch is here so that nobody builds a worse one. The alternatives
+    when Keycloak arrived were to add ``keycloak`` to the loopback set, which is
+    a lie that would ship to every deployment, or to disable certificate
+    verification, which is broader, quieter, and invisible in a config file.
+    This is narrow, it is a hostname somebody typed, and every start logs a
+    warning naming each entry. See ADR 0018.
+    """
+
     auth_algorithms: list[str] = Field(
         default_factory=lambda: ["RS256", "RS384", "RS512", "ES256", "ES384", "PS256"]
     )
@@ -261,6 +333,18 @@ class GatewaySettings(BaseSettings):
 
         if self.auth_jwks_url and not self.auth_issuer:
             msg = "ACP_AUTH_JWKS_URL was set without ACP_AUTH_ISSUER, so it names keys for nobody"
+            raise ValueError(msg)
+
+        if self.auth_resource and not self.authentication_configured:
+            # The document's only useful field would be `authorization_servers`,
+            # and there are none. Publishing it anyway would advertise a
+            # discovery path that dead-ends, which is a worse answer to "how do
+            # I authenticate here" than publishing nothing at all.
+            msg = (
+                "ACP_AUTH_RESOURCE names a resource no client can obtain a token for, "
+                "because no authorization server is configured. Set ACP_AUTH_ISSUER "
+                "and ACP_AUTH_AUDIENCE, or ACP_AUTH_ISSUERS_FILE."
+            )
             raise ValueError(msg)
         return self
 

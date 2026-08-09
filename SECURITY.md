@@ -58,6 +58,14 @@ distinguishable. The full reasoning is in
   set, or disabling certificate verification — are broader and quieter, and
   every entry is logged at every start ([ADR 0018](docs/decisions/0018-one-issuer-string-from-every-vantage-point.md)).
 
+- **An exchanged credential the gateway cannot read.** Every credential minted
+  for an upstream is checked to be scoped to that upstream and no other
+  ([ADR 0020](docs/decisions/0020-check-the-scope-you-were-granted.md)). That
+  check reads the token's `aud`, so an authorization server issuing *opaque*
+  reference tokens defeats it — the gateway logs `auth.scope_unverifiable` and
+  proceeds, because refusing would rule out a whole class of provider for a
+  property it cannot observe either way.
+
 - **A malicious operator.** Anyone who can change the configuration, the schema
   baseline or the policy files can change what the gateway permits. The controls
   here are arranged so that doing so leaves a reviewable trail — the schema
@@ -83,6 +91,7 @@ alternatives that were rejected and why:
 - [0017](docs/decisions/0017-let-the-gateway-tell-clients-where-to-authenticate.md) — the one unauthenticated path is derived from the document served there, not from an allow-list; and why publishing the authorization servers is a reconnaissance cost worth paying where publishing the upstreams is not
 - [0018](docs/decisions/0018-one-issuer-string-from-every-vantage-point.md) — an issuer is an identity and not an address; and why the plain-HTTP escape hatch is narrow, named and logged rather than absent
 - [0019](docs/decisions/0019-mint-a-credential-per-call-and-hold-none.md) — the gateway holds no upstream credential; the inbound token reaches exactly one module, whose only destination is the issuer that minted it
+- [0020](docs/decisions/0020-check-the-scope-you-were-granted.md) — RFC 8707's parameter is a request, not a guarantee; the control is checking the credential that came back names one upstream and no other
 
 ## Supported versions
 

@@ -58,6 +58,20 @@ class UpstreamConfig(BaseModel):
     call is scoped, is the failure mode this whole phase exists to remove.
     """
 
+    resource: str = ""
+    """This upstream's identity as a URI, sent as RFC 8707's ``resource``.
+
+    The specified way to name an exchange target, and — measured against
+    Keycloak 26.7 — a parameter it accepts and silently discards
+    (`scripts/probe_resource_indicator.py`, ADR 0020). It is sent anyway,
+    because a gateway that only works against one authorization server is not a
+    gateway, and any conformant server narrows on it.
+
+    What must never happen is treating *sending* it as the control. The scope is
+    enforced by checking the credential that comes back, not by trusting that
+    the request was honoured.
+    """
+
     connect_timeout: float = Field(default=3.0, gt=0)
     """Seconds to establish a TCP connection. Short: an unreachable host should
     fail fast so a circuit breaker can open, not tie up a worker."""

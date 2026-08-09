@@ -312,7 +312,9 @@ def build_protected_resource(
 
 
 def build_token_exchanger(
-    settings: GatewaySettings, validator: TokenValidator | None
+    settings: GatewaySettings,
+    validator: TokenValidator | None,
+    upstreams: Sequence[UpstreamConfig] = (),
 ) -> TokenExchanger | None:
     """Assemble RFC 8693 token exchange, or ``None`` when it is not configured.
 
@@ -341,6 +343,11 @@ def build_token_exchanger(
         validator.issuers,
         client_id=settings.auth_client_id,
         client_secret=settings.auth_client_secret,
+        # The whole estate, so a credential minted for one upstream can be
+        # checked for opening another's door (task 28). Passed here rather than
+        # discovered, because "which audiences are mine" is a fact about this
+        # deployment's configuration and not about any token.
+        peer_audiences=[u.audience for u in upstreams if u.audience],
     )
 
 
@@ -431,7 +438,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     """
     upstreams = load_upstreams(settings.upstreams_file)
     validator = await build_token_validator(settings)
-    exchanger = build_token_exchanger(settings, validator)
+    exchanger = build_token_exchanger(settings, validator, upstreams)
     check_upstream_audiences(upstreams, exchanging=exchanger is not None)
     try:
         async with gateway_from_configs(

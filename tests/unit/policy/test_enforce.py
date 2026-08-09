@@ -30,23 +30,22 @@ def test_allow_returns_none_and_does_not_raise() -> None:
     enforce_call(policy, _principal(), "mock-a__search")  # does not raise
 
 
-def test_explicit_deny_raises_policy_denied() -> None:
+def test_explicit_deny_raises_policy_denied(caplog: pytest.LogCaptureFixture) -> None:
     policy = Policy(
         rules=(Rule(name="deny-delete", effect=Effect.DENY, tools=("mock-a__delete",)),)
     )
-    with pytest.raises(PolicyDeniedError) as exc:
+    with caplog.at_level("INFO"), pytest.raises(PolicyDeniedError):
         enforce_call(policy, _principal(), "mock-a__delete")
-    assert exc.value.details["rule"] == "deny-delete"
-    assert exc.value.details["tool"] == "mock-a__delete"
+    # The rule is logged for the audit trail, not raised to the caller.
+    assert any(getattr(r, "rule", None) == "deny-delete" for r in caplog.records)
 
 
 def test_deny_by_default_raises_with_rule_none() -> None:
     """No rule matched — the deny default. The refusal names no rule, which is
     how the audit log distinguishes 'forbidden by a rule' from 'nothing allowed
     it'."""
-    with pytest.raises(PolicyDeniedError) as exc:
+    with pytest.raises(PolicyDeniedError):
         enforce_call(Policy(), _principal(), "mock-a__search")
-    assert exc.value.details["rule"] is None
 
 
 def test_policy_denied_is_not_recoverable() -> None:
@@ -68,6 +67,10 @@ def test_denial_message_does_not_reveal_the_rule() -> None:
             "mock-a__search",
         )
     assert "secret-deny-rule" not in str(exc.value)
+    assert "secret-deny-rule" not in str(exc.value.details)
+    # details is rendered straight to the JSON-RPC `data` the caller sees, so it
+    # must not carry the rule either.
+    assert "secret-deny-rule" not in str(exc.value.details)
 
 
 def test_first_match_wins_through_enforcement() -> None:

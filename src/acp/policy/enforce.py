@@ -13,10 +13,14 @@ here and testable, and ``server.on_call_tool`` holds only the one-line call.
 
 from __future__ import annotations
 
+import logging
+
 from acp.exceptions import PolicyDeniedError
 from acp.identity.principal import Principal
 from acp.policy.evaluate import evaluate
 from acp.policy.schema import Policy
+
+logger = logging.getLogger(__name__)
 
 
 def enforce_call(policy: Policy, principal: Principal, tool: str) -> None:
@@ -24,18 +28,25 @@ def enforce_call(policy: Policy, principal: Principal, tool: str) -> None:
 
     Returns ``None`` when the policy allows ``principal`` to call ``tool``. On a
     denial — an explicit deny rule, or no rule matching, which is the deny
-    default — raises ``PolicyDeniedError`` carrying the deciding rule's name (or
-    ``None`` for the default) in ``details`` for the audit log.
+    default — raises ``PolicyDeniedError``.
 
-    The message is deliberately uninformative about *why*. A caller learning
-    that a tool exists but is forbidden, or which rule forbade it, is an oracle;
-    the log gets the detail, the caller gets a refusal. This mirrors how
-    ``AuthenticationError`` strips its reason before it reaches the wire.
+    The deciding rule is written to the log and **never** to the raised error.
+    ``PolicyDeniedError.details`` is rendered straight into the JSON-RPC ``data``
+    the caller sees, so putting the rule there would be an oracle: a caller
+    learning which rule denied it, or that the tool exists but is forbidden, can
+    map the policy one request at a time. The log gets the rule; the caller gets
+    an undifferentiated refusal — the same split ``AuthenticationError`` makes
+    between its logged reason and its wire message.
     """
     decision = evaluate(policy, principal, tool)
     if decision.allowed:
         return
-    raise PolicyDeniedError(
-        f"call to {tool!r} was not permitted",
-        details={"rule": decision.rule, "tool": tool},
+    logger.info(
+        "policy.denied",
+        extra={
+            "subject": principal.subject,
+            "tool": tool,
+            "rule": decision.rule,
+        },
     )
+    raise PolicyDeniedError("this call was not permitted")

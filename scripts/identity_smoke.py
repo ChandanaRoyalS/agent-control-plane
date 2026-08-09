@@ -27,10 +27,21 @@ So this file asks the questions only a real server can answer:
    `master` realm. This is ADR 0016's whole argument, tested for the first time
    against something that did not come from this repository.
 8. Is a token whose signature has been altered refused?
+
+Task 27 adds the questions that only the *upstream* can answer, read from the
+mock fleet's `/debug/credential` endpoint:
+
+9.  Did the upstream receive a credential at all?
+10. Is it a *different* token from the one the caller presented — the invariant
+    the entire security model rests on?
+11. Is its `aud` this upstream alone, so it cannot be replayed against another?
+12. Does it still name the human, with the gateway recorded as the actor?
+13. Do two different upstreams receive two different credentials?
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -46,6 +57,8 @@ KEYCLOAK = os.environ.get("ACP_SMOKE_KEYCLOAK", "http://127.0.0.1:8081")
 EXPECTED_ISSUER = os.environ.get("ACP_SMOKE_ISSUER", "http://keycloak:8080/realms/acp")
 EXPECTED_AUDIENCE = os.environ.get("ACP_SMOKE_RESOURCE", "http://localhost:8080/mcp")
 METADATA_PATH = "/.well-known/oauth-protected-resource/mcp"
+MOCK_A = os.environ.get("ACP_SMOKE_MOCK_A", "http://127.0.0.1:9101")
+MOCK_B = os.environ.get("ACP_SMOKE_MOCK_B", "http://127.0.0.1:9102")
 
 PROTOCOL_VERSION = "2026-07-28"
 UNAUTHORIZED = 401
@@ -245,6 +258,143 @@ def check_a_tampered_signature_is_refused(token: str) -> None:
     report(status == UNAUTHORIZED, "a tampered signature is refused", f"HTTP {status}")
 
 
+def credential_seen_by(base: str) -> dict[str, Any]:
+    status, _, body = get(f"{base}/debug/credential")
+    return json.loads(body) if status == 200 else {}  # noqa: PLR2004
+
+
+def call_a_tool(token: str, name: str) -> tuple[int, str]:
+    """One `tools/call`, which is what makes an upstream actually be reached.
+
+    `tools/list` is served from the catalogue cache once the health prober has
+    warmed it, so it may never touch an upstream at all — the same property that
+    made the fan-out invisible in traces until probing was turned off. A tool
+    call always goes.
+
+    **`Mcp-Name` is not optional.** The 2026-07-28 revision routes on
+    `Mcp-Method` and `Mcp-Name`, and a server verifies both against the body —
+    a header claiming a name the body does not contain is itself a mismatch
+    (ADR 0008). Omitting it here produced a 400 before any upstream was reached,
+    and five checks that all reported "no credential" for a request that was
+    never made. The gateway was right; the client was writing a request no real
+    client sends, which is the exact thing ADR 0008 exists to catch.
+
+    Returns the body alongside the status, because a 400 that does not say why
+    is a check that turns one bug into an afternoon.
+    """
+    body = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": name,
+            "arguments": {"query": "retention"},
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
+                "io.modelcontextprotocol/clientCapabilities": {},
+                "io.modelcontextprotocol/clientInfo": {
+                    "name": "acp-identity-smoke",
+                    "version": "0",
+                },
+            },
+        },
+    }
+    request = urllib.request.Request(  # noqa: S310
+        f"{GATEWAY}/mcp",
+        data=json.dumps(body).encode(),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "MCP-Protocol-Version": PROTOCOL_VERSION,
+            "Mcp-Method": "tools/call",
+            "Mcp-Name": name,
+            "Authorization": f"Bearer {token}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
+            return int(response.status), response.read().decode()[:200]
+    except urllib.error.HTTPError as exc:
+        return int(exc.code), exc.read().decode(errors="replace")[:200]
+
+
+def check_the_upstream_gets_a_credential(token: str) -> None:
+    status, body = call_a_tool(token, "mock-a__search")
+    seen = credential_seen_by(MOCK_A)
+    detail = f"HTTP {status}, present={seen.get('present')}"
+    report(
+        status == 200 and seen.get("present") is True,  # noqa: PLR2004
+        "the upstream is reached with a credential",
+        detail if status == 200 else f"{detail} — {body}",  # noqa: PLR2004
+    )
+
+
+def check_it_is_not_the_callers_token(token: str) -> None:
+    """The invariant the entire security model rests on, observed from outside
+    the gateway process for the first time.
+
+    Every other check of this inspects a request the gateway built, using the
+    same code path that builds it. This asks the upstream what it actually
+    received, and compares the fingerprint against the caller's own token.
+    """
+    call_a_tool(token, "mock-a__search")
+    seen = credential_seen_by(MOCK_A)
+    caller = hashlib.sha256(token.encode()).hexdigest()[:16]
+
+    report(
+        bool(seen.get("fingerprint")) and seen["fingerprint"] != caller,
+        "the upstream did NOT receive the caller's token",
+        f"upstream saw {seen.get('fingerprint')!r}, caller presented {caller!r}",
+    )
+
+
+def check_the_credential_is_scoped_to_one_upstream(token: str) -> None:
+    """RFC 8707's whole point, and task 28's subject from the other side: a
+    credential minted for mock-a must be useless against mock-b."""
+    call_a_tool(token, "mock-a__search")
+    seen = credential_seen_by(MOCK_A)
+    audience = seen.get("audience") or []
+
+    report(
+        audience == ["acp-upstream-mock-a"],
+        "the credential names exactly one upstream",
+        f"aud={audience}",
+    )
+
+
+def check_the_credential_still_names_the_human(token: str) -> None:
+    """Delegation, not impersonation. The upstream must be able to log "alice,
+    via the gateway" — an exchanged token whose subject became the gateway would
+    have thrown away the only thing the whole phase exists to preserve."""
+    call_a_tool(token, "mock-a__search")
+    seen = credential_seen_by(MOCK_A)
+
+    report(
+        seen.get("subject") == claims(token).get("sub"),
+        "the credential still names the human it was minted for",
+        f"upstream saw sub={seen.get('subject')!r}, actor={seen.get('actor')!r}",
+    )
+
+
+def check_two_upstreams_get_two_credentials(token: str) -> None:
+    """One credential reused across upstreams would mean a compromised mock-a
+    could call mock-b as alice. Different fingerprints prove they are separate
+    tokens; different audiences prove neither works in the other's place."""
+    call_a_tool(token, "mock-a__search")
+    call_a_tool(token, "mock-b__search")
+    a, b = credential_seen_by(MOCK_A), credential_seen_by(MOCK_B)
+
+    report(
+        bool(a.get("fingerprint"))
+        and bool(b.get("fingerprint"))
+        and a["fingerprint"] != b["fingerprint"]
+        and a.get("audience") != b.get("audience"),
+        "each upstream receives its own credential",
+        f"mock-a aud={a.get('audience')} mock-b aud={b.get('audience')}",
+    )
+
+
 def main() -> int:
     try:
         alice = access_token("alice")
@@ -262,6 +412,13 @@ def main() -> int:
     check_a_real_token_gets_through(bob, "bob")
     check_an_untrusted_issuer_is_refused()
     check_a_tampered_signature_is_refused(alice)
+
+    # Task 27 — what the upstream ends up holding.
+    check_the_upstream_gets_a_credential(alice)
+    check_it_is_not_the_callers_token(alice)
+    check_the_credential_is_scoped_to_one_upstream(alice)
+    check_the_credential_still_names_the_human(alice)
+    check_two_upstreams_get_two_credentials(alice)
 
     print()
     if failures:

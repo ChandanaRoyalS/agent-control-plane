@@ -61,6 +61,15 @@ class IssuerRegistration:
 
     policy: TokenPolicy
     keys: JwksCache
+    token_endpoint: str = ""
+    """Where this server exchanges tokens (RFC 8693, task 27).
+
+    Part of the registration rather than a single gateway-wide setting, and for
+    the reason everything else here is: the exchange has to go back to the server
+    that issued the subject token. One shared endpoint would mean presenting one
+    authorization server's token to another's — the mix-up attack, arrived at by
+    a convenience rather than by an attacker.
+    """
 
     @property
     def issuer(self) -> str:
@@ -153,6 +162,7 @@ def registry_from_documents(
         audience = _required(document, "audience", label)
         jwks_url = _required(document, "jwks_url", label)
         _reject_plaintext_keys(jwks_url, label, insecure_hosts)
+        token_endpoint = document.get("token_endpoint")
         algorithms = document.get("algorithms") or list(default_algorithms)
         if not isinstance(algorithms, list):
             msg = f"issuer {label!r}: `algorithms` must be a list"
@@ -167,6 +177,7 @@ def registry_from_documents(
                     leeway=leeway,
                 ),
                 keys=JwksCache(jwks_url, ttl=cache_ttl, min_refresh_interval=min_refresh_interval),
+                token_endpoint=token_endpoint if isinstance(token_endpoint, str) else "",
             )
         )
     return registrations

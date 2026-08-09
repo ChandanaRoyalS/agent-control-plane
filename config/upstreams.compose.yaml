@@ -13,11 +13,26 @@
 # unchanged whether the gateway is running on the host or in a container. A
 # baseline that only held in one of those would be worth very little.
 
+#
+# `audience` (task 27) names each upstream to the authorization server. It is
+# what the gateway sends as RFC 8693's `audience` when exchanging the caller's
+# token, and what the resulting credential carries in `aud` — which is what
+# makes a token for mock-a useless against mock-b. The values are Keycloak
+# client IDs because Keycloak's exchange names its target that way; the realm
+# defines one client per upstream purely to be named here.
+#
+# Once ACP_AUTH_CLIENT_ID is set, an upstream without an `audience` is a
+# startup failure. A gateway that credentials four upstreams and reaches the
+# fifth with nothing is worse than one that credentials none, because the hole
+# is the only part nobody is watching.
+
 upstreams:
   - name: mock-a
     url: http://mock-a:9101/mcp
+    audience: acp-upstream-mock-a
 
   - name: mock-b
     url: http://mock-b:9102/mcp
+    audience: acp-upstream-mock-b
     connect_timeout: 3.0
     read_timeout: 30.0

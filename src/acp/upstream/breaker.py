@@ -48,6 +48,7 @@ import anyio
 
 from acp.exceptions import (
     ACPError,
+    CredentialExchangeError,
     UpstreamCircuitOpenError,
     UpstreamOverloadedError,
 )
@@ -122,7 +123,7 @@ def breaker_policy_for(config: UpstreamConfig) -> BreakerPolicy:
 def counts_as_failure(exc: BaseException) -> bool:
     """Whether this exception is evidence that the upstream is unhealthy.
 
-    Three groups get excluded, each for its own reason.
+    Four groups get excluded, each for its own reason.
 
     *The gateway's own refusals* — an open circuit, a full bulkhead — never
     reached the upstream. Counting them would make the breaker self-reinforcing:
@@ -134,6 +135,14 @@ def counts_as_failure(exc: BaseException) -> bool:
     can take a perfectly healthy upstream offline for everybody, which is a
     denial of service the gateway inflicts on itself.
 
+    *A credential that could not be minted* (task 27). The exchange happens
+    before a single byte is sent to the upstream, so a failure there says
+    nothing whatever about its health — and because an unreachable authorization
+    server is legitimately marked ``recoverable``, it would otherwise land in
+    the group below and open every upstream's circuit at once. One identity
+    outage would withdraw the entire estate's tools from every agent, and the
+    logs would blame five servers that were answering perfectly.
+
     *Anything that is not an ``ACPError`` at all* is a bug in the gateway. It
     should page a human, not condemn the upstream.
 
@@ -144,6 +153,8 @@ def counts_as_failure(exc: BaseException) -> bool:
     is recorded once.
     """
     if isinstance(exc, UpstreamCircuitOpenError | UpstreamOverloadedError):
+        return False
+    if isinstance(exc, CredentialExchangeError):
         return False
     return isinstance(exc, ACPError) and exc.recoverable
 

@@ -8,6 +8,10 @@ of tools and nothing else.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -113,6 +117,72 @@ def _apply_oversized(result: dict[str, Any], byte_count: int) -> dict[str, Any]:
     return {**result, "_chaos_filler": oversized_text(byte_count)}
 
 
+def unverified_claims(token: str) -> dict[str, Any]:
+    """The payload of a JWT, decoded and emphatically *not* verified.
+
+    Test infrastructure, in a package the production image does not contain
+    (ADR 0014). A mock upstream has no business validating anything — that is
+    the gateway's job, and a mock that verified signatures would be a second
+    implementation of the thing under test, agreeing with the first for reasons
+    nobody could check.
+
+    What this is for is the only question an upstream can answer that the
+    gateway cannot: *which* credential actually arrived. `sub`, `aud` and `azp`
+    from here are what prove the token on the wire is the exchanged one and not
+    the caller's.
+    """
+    try:
+        segment = token.split(".")[1]
+        payload = base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))
+        decoded: dict[str, Any] = json.loads(payload)
+    except (IndexError, ValueError, binascii.Error):
+        return {}
+    return decoded
+
+
+class SeenCredential:
+    """What the last request carried, so a test outside the process can look.
+
+    Deliberately holds the decoded claims and a *fingerprint* rather than the
+    token. A demo that prints a working bearer token to a terminal, into a log,
+    or onto a screenshot has taught the reader something they should not have,
+    and the interesting part was never the token — it is whose it is and who it
+    was minted for.
+    """
+
+    def __init__(self) -> None:
+        self.present = False
+        self.fingerprint = ""
+        self.claims: dict[str, Any] = {}
+
+    def record(self, header: str | None) -> None:
+        if not header or not header.lower().startswith("bearer "):
+            self.present = False
+            self.fingerprint = ""
+            self.claims = {}
+            return
+        token = header.split(" ", 1)[1].strip()
+        self.present = True
+        self.fingerprint = hashlib.sha256(token.encode()).hexdigest()[:16]
+        self.claims = unverified_claims(token)
+
+    def as_json(self) -> dict[str, Any]:
+        audience = self.claims.get("aud")
+        return {
+            "present": self.present,
+            # Enough to prove two requests carried *different* credentials, and
+            # useless to anybody who intercepts it.
+            "fingerprint": self.fingerprint,
+            "subject": self.claims.get("sub"),
+            "audience": audience if isinstance(audience, list) else [audience] if audience else [],
+            "authorized_party": self.claims.get("azp"),
+            "issuer": self.claims.get("iss"),
+            "actor": (self.claims.get("act") or {}).get("sub")
+            if isinstance(self.claims.get("act"), dict)
+            else None,
+        }
+
+
 def build_mock_app(server_name: str, tools: list[MockTool]) -> Starlette:
     """Build a mock MCP upstream exposing ``tools`` over a single ``/mcp`` route.
 
@@ -123,7 +193,10 @@ def build_mock_app(server_name: str, tools: list[MockTool]) -> Starlette:
     """
     tools_by_name = {t.name: t for t in tools}
 
+    seen = SeenCredential()
+
     async def handle(request: Request) -> Response:  # noqa: PLR0911
+        seen.record(request.headers.get("authorization"))
         mode = resolve_mode(request.headers.get(CHAOS_MODE_HEADER))
 
         if mode is ChaosMode.DISCONNECT:
@@ -185,7 +258,22 @@ def build_mock_app(server_name: str, tools: list[MockTool]) -> Starlette:
 
         return _json_response(result)
 
-    return Starlette(routes=[Route("/mcp", handle, methods=["POST"])])
+    async def credential(_request: Request) -> Response:
+        """What credential the last MCP request carried.
+
+        The only vantage point from which the no-passthrough invariant is
+        observable from *outside* the gateway process: everything else in this
+        repository asserts it by inspecting a request the gateway built, which
+        is the same code path being tested.
+        """
+        return JSONResponse(seen.as_json())
+
+    return Starlette(
+        routes=[
+            Route("/mcp", handle, methods=["POST"]),
+            Route("/debug/credential", credential, methods=["GET"]),
+        ]
+    )
 
 
 def validate_envelope(

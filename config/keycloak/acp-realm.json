@@ -2,17 +2,14 @@
   "realm": "acp",
   "enabled": true,
   "displayName": "Agent Control Plane (demo)",
-
   "accessTokenLifespan": 300,
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 36000,
-
   "sslRequired": "none",
   "registrationAllowed": false,
   "resetPasswordAllowed": false,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
-
   "roles": {
     "realm": [
       {
@@ -25,7 +22,6 @@
       }
     ]
   },
-
   "clients": [
     {
       "clientId": "acp-agent",
@@ -39,7 +35,6 @@
       "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": true,
       "attributes": {
-        "standard.token.exchange.enabled": "true",
         "access.token.lifespan": "300"
       },
       "protocolMappers": [
@@ -54,12 +49,24 @@
             "access.token.claim": "true",
             "introspection.token.claim": "true"
           }
+        },
+        {
+          "name": "acp-gateway-as-requester",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "acp-gateway",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
         }
       ]
     },
     {
       "clientId": "acp-gateway",
-      "name": "The gateway, as an exchange target",
+      "name": "The gateway - exchange requester and audience source",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,
@@ -67,10 +74,76 @@
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "standard.token.exchange.enabled": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "upstream-mock-a-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "acp-upstream-mock-a",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "upstream-mock-b-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "acp-upstream-mock-b",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "delegation-actor",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "act.sub",
+            "claim.value": "acp-gateway",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "acp-upstream-mock-a",
+      "name": "Upstream mock-a, as an exchange target",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "dev-only-not-a-secret-mock-a",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "acp-upstream-mock-b",
+      "name": "Upstream mock-b, as an exchange target",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "dev-only-not-a-secret-mock-b",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false
     }
   ],
-
   "users": [
     {
       "username": "alice",
@@ -80,9 +153,15 @@
       "enabled": true,
       "emailVerified": true,
       "credentials": [
-        { "type": "password", "value": "alice", "temporary": false }
+        {
+          "type": "password",
+          "value": "alice",
+          "temporary": false
+        }
       ],
-      "realmRoles": ["acp-reader"]
+      "realmRoles": [
+        "acp-reader"
+      ]
     },
     {
       "username": "bob",
@@ -92,9 +171,16 @@
       "enabled": true,
       "emailVerified": true,
       "credentials": [
-        { "type": "password", "value": "bob", "temporary": false }
+        {
+          "type": "password",
+          "value": "bob",
+          "temporary": false
+        }
       ],
-      "realmRoles": ["acp-reader", "acp-writer"]
+      "realmRoles": [
+        "acp-reader",
+        "acp-writer"
+      ]
     }
   ]
 }

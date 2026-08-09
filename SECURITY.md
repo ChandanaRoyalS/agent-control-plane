@@ -82,6 +82,7 @@ alternatives that were rejected and why:
 - [0016](docs/decisions/0016-bind-every-credential-to-its-issuer.md) — issuer, audience and key set are one indivisible registration
 - [0017](docs/decisions/0017-let-the-gateway-tell-clients-where-to-authenticate.md) — the one unauthenticated path is derived from the document served there, not from an allow-list; and why publishing the authorization servers is a reconnaissance cost worth paying where publishing the upstreams is not
 - [0018](docs/decisions/0018-one-issuer-string-from-every-vantage-point.md) — an issuer is an identity and not an address; and why the plain-HTTP escape hatch is narrow, named and logged rather than absent
+- [0019](docs/decisions/0019-mint-a-credential-per-call-and-hold-none.md) — the gateway holds no upstream credential; the inbound token reaches exactly one module, whose only destination is the issuer that minted it
 
 ## Supported versions
 

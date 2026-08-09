@@ -16,7 +16,7 @@ from acp.upstream.cache import policy_for as cache_policy_for
 from acp.upstream.client import UpstreamClient
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.guard import Bulkhead, GuardedUpstreamClient
-from acp.upstream.protocol import Upstream
+from acp.upstream.protocol import Credentials, Upstream
 from acp.upstream.resilient import RetryingUpstreamClient, policy_for
 
 
@@ -39,6 +39,15 @@ def build_upstream(client: UpstreamClient) -> Upstream:
     return CachingUpstreamClient(retrying, cache_policy_for(config))
 
 
-async def connect_upstream(config: UpstreamConfig) -> Upstream:
-    """Open a pool to ``config`` and return the fully wrapped upstream."""
-    return build_upstream(await UpstreamClient.connect(config))
+async def connect_upstream(
+    config: UpstreamConfig, credentials: Credentials | None = None
+) -> Upstream:
+    """Open a pool to ``config`` and return the fully wrapped upstream.
+
+    ``credentials`` goes to the innermost layer on purpose. A credential minted
+    outside the cache would be minted for answers that are never sent, and one
+    minted outside the retry would be reused across attempts that may span
+    longer than it lives. The client is the only layer that knows a request is
+    actually about to leave the process.
+    """
+    return build_upstream(await UpstreamClient.connect(config, credentials))

@@ -98,6 +98,8 @@ ignore = [
     "S101",      # assert is the point of a test
     "PLR2004",   # magic numbers are fine in assertions
     "ARG",       # fixtures are often unused-by-name
+    "S105",      # a fixture named like a token is not a secret — see test_exchange
+    "S106",      # ditto, as a keyword argument
 ]
 
 [tool.ruff.lint.pydocstyle]

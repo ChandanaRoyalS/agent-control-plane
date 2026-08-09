@@ -211,6 +211,42 @@ class GatewaySettings(BaseSettings):
     discovery chain where every step works and the last one fails.
     """
 
+    auth_client_id: str = ""
+    """The gateway's own client at the authorization server (task 27).
+
+    Two identities are in play once exchange exists and they are easy to
+    conflate. ``auth_audience`` is what the gateway is *called* by tokens
+    arriving at it — it is a resource server there. This is who the gateway
+    *is* when it asks for a credential, as an OAuth client. Nothing before task
+    27 needed the second, because a resource server never speaks to a token
+    endpoint.
+
+    Setting this and its secret is what turns exchange on. As everywhere else in
+    this module there is no boolean: presence of credentials is the switch,
+    because a credential is a thing you cannot forget to supply and still have
+    the feature appear to work.
+    """
+
+    auth_client_secret: str = ""
+    """The gateway's client secret.
+
+    Read from the secrets *directory* in any real deployment — a file at
+    ``/run/secrets/auth_client_secret`` — rather than the environment, for the
+    reason stated at the top of this module: a process's environment is readable
+    by anything that can see ``/proc``, and this is the one value here that is
+    genuinely a credential.
+    """
+
+    auth_token_endpoint: str = ""
+    """Where to exchange tokens, when it cannot be discovered.
+
+    **Normally empty.** It comes from the issuer's metadata, which has already
+    been proved to belong to that issuer (RFC 8414 §3.3), so an endpoint read
+    from it inherits that proof. This exists only for the single-issuer case
+    where ``ACP_AUTH_JWKS_URL`` was set by hand and discovery therefore never
+    ran. With an issuers file, put ``token_endpoint`` on the entry that needs it.
+    """
+
     auth_required: bool = True
     """Refuse to start without an identity provider.
 
@@ -292,6 +328,11 @@ class GatewaySettings(BaseSettings):
     def authentication_configured(self) -> bool:
         return bool(self.auth_issuers_file or (self.auth_issuer and self.auth_audience))
 
+    @property
+    def exchange_configured(self) -> bool:
+        """Whether the gateway will mint per-upstream credentials (task 27)."""
+        return bool(self.auth_client_id and self.auth_client_secret)
+
     @model_validator(mode="after")
     def _identity_settings_are_coherent(self) -> GatewaySettings:
         """Refuse anything that would authenticate differently than it reads.
@@ -333,6 +374,37 @@ class GatewaySettings(BaseSettings):
 
         if self.auth_jwks_url and not self.auth_issuer:
             msg = "ACP_AUTH_JWKS_URL was set without ACP_AUTH_ISSUER, so it names keys for nobody"
+            raise ValueError(msg)
+
+        pair = {
+            "ACP_AUTH_CLIENT_ID": self.auth_client_id,
+            "ACP_AUTH_CLIENT_SECRET": self.auth_client_secret,
+        }
+        absent = [name for name, value in pair.items() if not value]
+        if absent and len(absent) != len(pair):
+            # Half of a client credential is not a weaker credential, it is a
+            # gateway that believes it mints per-upstream tokens and does not.
+            msg = (
+                "ACP_AUTH_CLIENT_ID and ACP_AUTH_CLIENT_SECRET are all-or-nothing; "
+                f"missing {', '.join(sorted(absent))}. Both together enable RFC 8693 "
+                "token exchange; neither leaves upstream calls uncredentialed."
+            )
+            raise ValueError(msg)
+
+        if self.exchange_configured and not self.authentication_configured:
+            msg = (
+                "token exchange is configured but no identity provider is. There is "
+                "no inbound token to exchange, so every call would reach its upstream "
+                "with no credential. Set ACP_AUTH_ISSUER and ACP_AUTH_AUDIENCE, or "
+                "ACP_AUTH_ISSUERS_FILE."
+            )
+            raise ValueError(msg)
+
+        if self.auth_token_endpoint and not self.auth_issuer:
+            msg = (
+                "ACP_AUTH_TOKEN_ENDPOINT applies to the single-issuer settings only; "
+                "per-issuer endpoints belong in ACP_AUTH_ISSUERS_FILE."
+            )
             raise ValueError(msg)
 
         if self.auth_resource and not self.authentication_configured:

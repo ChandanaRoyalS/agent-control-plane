@@ -39,7 +39,7 @@ from collections.abc import MutableMapping, Sequence
 from typing import Any
 
 from acp.exceptions import ACPError, AuthenticationError
-from acp.identity.principal import bind_principal
+from acp.identity.principal import bind_principal, bind_subject_token
 from acp.identity.resource import ProtectedResource
 from acp.identity.validator import TokenValidator
 from acp.observability import context
@@ -100,6 +100,7 @@ class AuthenticationMiddleware:
         # does not match and gets authenticated like everything else.
         if scope.get("path", "") in self._public:
             bind_principal(None)
+            bind_subject_token(None)
             context.bind(principal=ANONYMOUS)
             await self._app(scope, receive, send)
             return
@@ -109,6 +110,7 @@ class AuthenticationMiddleware:
             # unset, so `current_principal()` returns None because somebody
             # decided it should, not because nothing ran.
             bind_principal(None)
+            bind_subject_token(None)
             context.bind(principal=ANONYMOUS)
             await self._app(scope, receive, send)
             return
@@ -137,6 +139,10 @@ class AuthenticationMiddleware:
             return
 
         bind_principal(principal)
+        # Held apart from the principal, and read by exactly one module. See
+        # `principal._subject_token` for why the token is not a field on the
+        # thing that represents identity, and task 27 for what needs it.
+        bind_subject_token(token)
         context.bind(**principal.as_log_fields())
         await self._app(scope, receive, send)
 

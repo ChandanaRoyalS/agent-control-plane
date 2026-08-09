@@ -190,6 +190,36 @@ polarity — it is not a switch that turns authentication on, it is an assertion
 that a provider is configured, so forgetting it produces a gateway that will not
 start rather than one that will not check.
 
+### Per-upstream credentials
+
+With `ACP_AUTH_CLIENT_ID` set, the gateway stops forwarding anything. For each
+call it presents the caller's token to the authorization server and asks for a
+different one — same subject, audience narrowed to a single upstream, lifetime
+in minutes (RFC 8693). It holds no long-lived upstream credential, because there
+is none to hold.
+
+```bash
+make identity-smoke
+```
+
+```
+  ok   the upstream did NOT receive the caller's token — upstream saw '9f2c…', caller presented 'a71b…'
+  ok   the credential names exactly one upstream — aud=['acp-upstream-mock-a']
+  ok   the credential still names the human it was minted for — sub=alice, actor=acp-gateway
+  ok   each upstream receives its own credential
+```
+
+The first of those is the invariant the whole security model rests on, observed
+from outside the gateway process: the mock upstreams report the credential they
+were handed, so the fingerprint can be compared against the caller's own token
+rather than inferred from the code that built the request.
+
+The inbound token has to exist somewhere — RFC 8693 sends it as `subject_token`
+— so it lives in its own context variable with exactly one reader, rather than
+as a field on `Principal`. That makes the invariant a statement about one call
+site instead of about a value passed everywhere. See
+[ADR 0019](docs/decisions/0019-mint-a-credential-per-call-and-hold-none.md).
+
 ## Development
 
 ```bash

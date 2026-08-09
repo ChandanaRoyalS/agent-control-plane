@@ -6,6 +6,17 @@
 #
 # No secrets here. Credentials are read from the secrets directory
 # (/run/secrets by default), the way container runtimes mount them.
+#
+# `audience` (task 27) names an upstream to the authorization server. It is what
+# the gateway sends as RFC 8693's `audience` when exchanging the caller's token,
+# and what the minted credential carries in `aud` — which is what makes a token
+# for one upstream useless against another. Required on every upstream once
+# ACP_AUTH_CLIENT_ID is set; omitted here because the local development setup
+# runs without exchange.
+#
+#   - name: mock-a
+#     url: http://127.0.0.1:9101/mcp
+#     audience: acp-upstream-mock-a
 
 upstreams:
   - name: mock-a

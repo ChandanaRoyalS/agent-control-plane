@@ -33,6 +33,7 @@ from acp.observability import metrics, semconv, tracing
 from acp.upstream.config import UpstreamConfig
 from acp.upstream.envelope import routing_headers, with_envelope
 from acp.upstream.models import PROTOCOL_VERSION, CallToolResult, ListToolsResult
+from acp.upstream.protocol import Credentials
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +51,18 @@ class UpstreamClient:
     with no sockets, without this class needing any test-only branches.
     """
 
-    def __init__(self, config: UpstreamConfig, http: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        config: UpstreamConfig,
+        http: httpx.AsyncClient,
+        credentials: Credentials | None = None,
+    ) -> None:
         self.config = config
         self._http = http
+        # `None` when no exchange is configured, which is every deployment
+        # before task 27 and every test of the transport. Typed structurally
+        # (see `protocol.Credentials`) so this module never imports identity.
+        self._credentials = credentials
         # Monotonic per-client request IDs. JSON-RPC only requires that an id be
         # unique among in-flight requests on a connection, so a simple counter
         # is sufficient and makes correlating a response to a request trivial
@@ -62,9 +72,13 @@ class UpstreamClient:
     # -- lifecycle ---------------------------------------------------------
 
     @classmethod
-    async def connect(cls, config: UpstreamConfig) -> Self:
+    async def connect(cls, config: UpstreamConfig, credentials: Credentials | None = None) -> Self:
         """Build a client with a pool and timeouts derived from ``config``."""
-        return cls(config, httpx.AsyncClient(timeout=_timeout(config), limits=_limits(config)))
+        return cls(
+            config,
+            httpx.AsyncClient(timeout=_timeout(config), limits=_limits(config)),
+            credentials,
+        )
 
     async def aclose(self) -> None:
         """Close the connection pool."""
@@ -82,6 +96,22 @@ class UpstreamClient:
         await self.aclose()
 
     # -- MCP methods -------------------------------------------------------
+
+    async def _authorization(self) -> str | None:
+        """The credential for this call, if this deployment mints them.
+
+        Two conditions, and both must hold. No `credentials` means exchange is
+        not configured at all. No `audience` on the upstream means nobody said
+        what a credential for it would even be *for* — and rather than guess,
+        this sends none. Startup refuses that combination (see
+        `runtime.check_upstream_audiences`), so reaching here with exchange on
+        and an audience missing is not possible in a running gateway; the check
+        stays because a default that silently drops a credential is worse than
+        one that cannot happen.
+        """
+        if self._credentials is None or not self.config.audience:
+            return None
+        return await self._credentials.authorization_for(self.config.name, self.config.audience)
 
     async def list_tools(self) -> ListToolsResult:
         """Fetch the upstream's tool catalogue, with its freshness hints."""
@@ -187,6 +217,20 @@ class UpstreamClient:
         # headers cannot drift from what they are asserting about. A server
         # rejects a request whose header and body disagree.
         headers = routing_headers(method, body["params"])
+
+        # The credential is minted per call and lives only as long as this
+        # request. Obtained *before* the timer starts because a slow
+        # authorization server is not a slow upstream, and folding one into the
+        # other would put an identity outage in this upstream's latency
+        # histogram and, worse, on the way to opening its circuit breaker.
+        #
+        # `CredentialExchangeError` propagates from here untouched. It is
+        # neither a timeout nor an unavailability, so the guard does not count
+        # it as an upstream failure — which is right: the upstream has done
+        # nothing wrong and has not been contacted.
+        authorization = await self._authorization()
+        if authorization is not None:
+            headers["Authorization"] = authorization
 
         started = time.perf_counter()
         try:

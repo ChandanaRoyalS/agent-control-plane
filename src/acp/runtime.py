@@ -16,7 +16,7 @@ the ASGI app's own lifespan.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -39,6 +39,7 @@ from acp.identity import (
 )
 from acp.identity.issuers import registry_from_documents
 from acp.schema import DEFAULT_BASELINE_PATH, DriftDetector, SchemaSnapshot
+from acp.secrets import EmptyStore, EncryptedFileStore, SecretStore, read_key
 from acp.upstream import Upstream, UpstreamConfig, connect_upstream
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ async def gateway_from_configs(
     validator: TokenValidator | None = None,
     resource: ProtectedResource | None = None,
     credentials: ExchangedCredentials | None = None,
+    secrets: Mapping[str, str] | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -95,7 +97,12 @@ async def gateway_from_configs(
     clients: list[Upstream] = []
     try:
         for config in upstreams:
-            clients.append(await connect_upstream(config, credentials))
+            # Resolved before this point, so a missing secret is a startup
+            # failure rather than a request that reaches an upstream with no
+            # credential. `None` for every upstream that exchanges instead.
+            clients.append(
+                await connect_upstream(config, credentials, (secrets or {}).get(config.name))
+            )
         logger.info(
             "gateway.ready",
             extra={
@@ -351,6 +358,52 @@ def build_token_exchanger(
     )
 
 
+def build_secret_store(settings: GatewaySettings) -> SecretStore:
+    """Open the encrypted store, or return one that is honestly empty.
+
+    ``EmptyStore`` rather than ``None``, because "no store is configured" and "a
+    store is configured and does not contain that" are different mistakes with
+    different fixes, and a ``None`` here would collapse them into one branch that
+    could only say "missing".
+    """
+    if not settings.secret_store_configured:
+        return EmptyStore()
+
+    # Narrowed for mypy: `secret_store_configured` already proved both are set,
+    # but a property cannot tell the type checker that.
+    secrets_file = settings.secrets_file
+    key_file = settings.secret_key_file
+    if secrets_file is None or key_file is None:  # pragma: no cover — see above
+        return EmptyStore()
+
+    return EncryptedFileStore.open(secrets_file, read_key(key_file))
+
+
+async def resolve_upstream_secrets(
+    upstreams: Sequence[UpstreamConfig], store: SecretStore
+) -> dict[str, str]:
+    """Look up every referenced secret now, so none is looked up later.
+
+    At startup, before a port is bound, for the reason every other configuration
+    check in this module runs there: an upstream whose credential is missing is
+    one the gateway would otherwise reach with no credential at all, and it would
+    discover that on somebody's first real request.
+
+    It also means the request path holds a string rather than a store, which is
+    what keeps a secrets backend from becoming a dependency of every tool call.
+    """
+    resolved: dict[str, str] = {}
+    for config in upstreams:
+        if config.credential_ref:
+            resolved[config.name] = await store.get(config.credential_ref)
+    if resolved:
+        logger.info(
+            "secrets.resolved",
+            extra={"upstreams": sorted(resolved), "count": len(resolved)},
+        )
+    return resolved
+
+
 def check_upstream_audiences(upstreams: Sequence[UpstreamConfig], *, exchanging: bool) -> None:
     """Refuse to start when exchange is on and an upstream has no audience.
 
@@ -363,14 +416,17 @@ def check_upstream_audiences(upstreams: Sequence[UpstreamConfig], *, exchanging:
     """
     if not exchanging:
         return
-    missing = [u.name for u in upstreams if not u.audience]
+    # Two ways to be credentialed since task 29, and an upstream needs one of
+    # them: it exchanges (`audience`) or it presents something stored
+    # (`credential_ref`). The config model already refuses both at once.
+    missing = [u.name for u in upstreams if not u.audience and not u.credential_ref]
     if not missing:
         return
     msg = (
-        f"token exchange is configured, but these upstreams declare no `audience`: "
-        f"{', '.join(sorted(missing))}. Each one names the upstream to the "
-        f"authorization server (RFC 8707), and without it the gateway would reach "
-        f"that upstream with no credential at all."
+        f"token exchange is configured, but these upstreams are credentialed by "
+        f"neither route: {', '.join(sorted(missing))}. Give each an `audience` to "
+        f"mint a short-lived credential per call, or a `credential_ref` naming a "
+        f"secret in the store for an upstream that cannot exchange."
     )
     raise ConfigurationError(msg)
 
@@ -440,6 +496,9 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     validator = await build_token_validator(settings)
     exchanger = build_token_exchanger(settings, validator, upstreams)
     check_upstream_audiences(upstreams, exchanging=exchanger is not None)
+
+    store = build_secret_store(settings)
+    secrets = await resolve_upstream_secrets(upstreams, store)
     try:
         async with gateway_from_configs(
             upstreams,
@@ -454,11 +513,13 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             validator=validator,
             resource=build_protected_resource(settings, validator),
             credentials=ExchangedCredentials(exchanger) if exchanger else None,
+            secrets=secrets,
         ) as app:
             yield app
     finally:
         # The key cache owns an HTTP connection pool, for the same reason the
         # upstream clients do and with the same consequence for leaking it.
+        await store.aclose()
         if exchanger is not None:
             await exchanger.aclose()
         if validator is not None:

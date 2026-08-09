@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install check fmt lint types test cov clean image up down logs smoke \
-        identity-smoke token idp-reset probe-resource prove-passthrough
+        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -55,6 +55,9 @@ prove-passthrough:  ## Break the no-passthrough invariant on purpose, and check 
 
 probe-resource:  ## Measure what Keycloak does with RFC 8707's `resource`
 	uv run python scripts/probe_resource_indicator.py
+
+probe-cimd:  ## Measure whether Keycloak accepts a URL client_id (CIMD)
+	uv run python scripts/probe_cimd.py
 
 token:  ## Print an access token for alice (USER=bob for the other one)
 	@uv run python scripts/keycloak_token.py $(or $(USER),alice)

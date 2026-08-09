@@ -1,0 +1,70 @@
+The no-passthrough test, observed failing on demand.
+====================================================
+
+Reproduce with:
+
+    make prove-passthrough
+
+Why this file exists
+--------------------
+
+`tests/integration/test_no_passthrough.py` asserts that the inbound token never
+reaches an upstream. It passes. So would an empty file.
+
+A security test that has never been observed to fail is a claim about whoever
+wrote it, not a measurement of the system — and this project has already shipped
+that once: at task 15, 297 passing tests and 95% coverage certified an MCP client
+no real server would have accepted a single request from.
+
+So the harness writes the leak in, one form at a time, and checks that the suite
+goes red *and that the assertion meant to catch it is the one that fires*. A
+mutation caught by an unrelated test was caught by accident, and the accident may
+not recur next time somebody rearranges the code.
+
+Each mutation is a bug somebody could plausibly write. The first is the one that
+arrives as a compatibility request from an upstream team rather than as a
+mistake, which is what makes it the dangerous one.
+
+uv run python scripts/mutate_no_passthrough.py
+Breaking the no-passthrough invariant on purpose.
+
+  caught   forward the caller's token in a second header (also: test_a_static_credential_never_travels_with_the_callers_token)
+  caught   log the token alongside the exchange
+  caught   carry the token in the request envelope (also: test_a_static_credential_never_travels_with_the_callers_token)
+
+all 3 mutations were caught by the assertion meant to catch them
+
+What each line proves
+---------------------
+
+**forward the caller's token in a second header.** The compatibility-shim
+version: the upstream wanted `X-Forwarded-Authorization`, somebody obliged. It
+is caught twice, independently — by the sweep, which searches every header name
+and value rather than reading `Authorization` and stopping, and by the static
+one-reader check, because the leak needed a second caller of
+`current_subject_token` to exist at all.
+
+**log the token alongside the exchange.** The debugging line left in. A
+credential in a log has left the process as surely as one in a header, and it
+lands somewhere with longer retention and a wider audience.
+
+**carry the token in the request envelope.** `params._meta` is an extension
+point, and extension points attract passengers. A test that inspected headers
+would not have looked here.
+
+The `(also: …)` notes are other assertions that fired. They are recorded rather
+than required: relying on them would be relying on the accident.
+
+Safety
+------
+
+The harness edits source files in place and restores them in a `finally`, and it
+refuses to start unless the working tree is clean — so `git checkout .` is a
+complete recovery if it ever dies badly. It also neutralises `addopts`, which
+carries `--cov-fail-under=80`: running one file under that threshold fails for
+reasons unrelated to the mutation, and every mutation would then look caught.
+That is precisely the failure this script exists to detect in somebody else's
+test, and shipping it inside the detector would have been embarrassing.
+
+It runs in CI on every pull request. A step nobody runs is a step that stops
+being true.

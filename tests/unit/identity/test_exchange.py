@@ -8,7 +8,9 @@ different question, answered by `scripts/identity_smoke.py` against a real one.
 
 from __future__ import annotations
 
+import base64
 import json
+import logging
 from typing import Any
 
 import anyio
@@ -339,3 +341,149 @@ def test_the_form_is_url_encoded_not_json() -> None:
     assert request.headers["content-type"] == "application/x-www-form-urlencoded"
     with pytest.raises(json.JSONDecodeError):
         json.loads(request.content)
+
+
+# ---------------------------------------------------------------------------
+# Resource indicators, and checking what was actually granted — task 28
+# ---------------------------------------------------------------------------
+#
+# Measured, not assumed: Keycloak 26.7 accepts `resource` and discards it,
+# including when it contradicts `audience` (ADR 0020). So these split into two
+# groups — what the gateway *asks* for, and what it does with what it *gets*.
+# Only the second group is a control.
+
+
+def jwt_with(audience: list[str] | str) -> str:
+    """A JWT-shaped string carrying an `aud`. Unsigned; nothing verifies it."""
+    payload = base64.urlsafe_b64encode(json.dumps({"aud": audience}).encode()).decode().rstrip("=")
+    return f"header.{payload}.signature"
+
+
+def exchanger_with_peers(server: Server, peers: list[str]) -> TokenExchanger:
+    return TokenExchanger(
+        registry(),
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        peer_audiences=peers,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(server)),
+    )
+
+
+def exchange_with_peers(
+    server: Server, peers: list[str], *, audience: str = "acp-upstream-mock-a"
+) -> Any:
+    async def _run() -> Any:
+        exchanger = exchanger_with_peers(server, peers)
+        try:
+            return await exchanger.exchange(
+                subject_token=INBOUND, issuer=ISSUER, audience=audience, resource=RESOURCE
+            )
+        finally:
+            await exchanger.aclose()
+
+    return anyio.run(_run)
+
+
+RESOURCE = "https://mock-a.internal/mcp"
+PEERS = ["acp-upstream-mock-a", "acp-upstream-mock-b"]
+
+
+def test_the_resource_indicator_is_sent_when_configured() -> None:
+    """RFC 8707's parameter, sent because it is the specified way to name a
+    target and any conformant server acts on it. Sending it is *not* the
+    control — see below — but a gateway that only works against the one server
+    this project happens to run is not a gateway."""
+    server = Server(payload={"access_token": jwt_with("acp-upstream-mock-a")})
+
+    exchange_with_peers(server, PEERS)
+
+    assert server.form["resource"] == RESOURCE.replace(":", "%3A").replace("/", "%2F")
+
+
+def test_no_resource_is_sent_when_none_is_configured() -> None:
+    """An empty parameter is not the same as an absent one. `resource=` would be
+    a request to scope the token to nothing at all."""
+    server = Server(payload={"access_token": jwt_with("acp-upstream-mock-a")})
+
+    async def _run() -> Any:
+        exchanger = exchanger_with_peers(server, PEERS)
+        try:
+            return await exchanger.exchange(
+                subject_token=INBOUND, issuer=ISSUER, audience="acp-upstream-mock-a"
+            )
+        finally:
+            await exchanger.aclose()
+
+    anyio.run(_run)
+
+    assert "resource" not in server.form
+
+
+def test_a_credential_valid_at_two_upstreams_is_refused() -> None:
+    """The confused-deputy condition, stated exactly.
+
+    This is what a server that ignores the scope request actually returns —
+    measured against Keycloak, an exchange it declines to narrow comes back
+    carrying *every* audience the requester can reach, with no error. A gateway
+    that sent `resource` and trusted it would hand mock-a a credential that also
+    opens mock-b, and log a success.
+    """
+    server = Server(payload={"access_token": jwt_with(PEERS)})
+
+    with pytest.raises(CredentialExchangeError, match="also valid at"):
+        exchange_with_peers(server, PEERS)
+
+
+def test_a_credential_for_the_wrong_target_is_refused() -> None:
+    server = Server(payload={"access_token": jwt_with("acp-upstream-mock-b")})
+
+    with pytest.raises(CredentialExchangeError, match="not for"):
+        exchange_with_peers(server, PEERS)
+
+
+def test_audiences_that_are_not_upstreams_are_ignored() -> None:
+    """`account`, the requester's own client id, and whatever else a given server
+    adds. The check is about *this gateway's estate*, not about tidiness — which
+    is what stops it having false positives to tune away, and therefore what
+    stops it being switched off."""
+    server = Server(
+        payload={"access_token": jwt_with(["acp-upstream-mock-a", "account", "acp-gateway"])}
+    )
+
+    token = exchange_with_peers(server, PEERS)
+
+    assert token.audience == "acp-upstream-mock-a"
+
+
+def test_a_single_upstream_deployment_has_nothing_to_cross() -> None:
+    """An empty peer set is not a failure — it is a gateway with one upstream,
+    where a credential cannot be valid at a neighbour it does not have."""
+    server = Server(payload={"access_token": jwt_with(["acp-upstream-mock-a", "anything-else"])})
+
+    token = exchange_with_peers(server, [])
+
+    assert token.audience == "acp-upstream-mock-a"
+
+
+def test_an_opaque_credential_cannot_be_checked_and_says_so(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Refusing would rule out every authorization server that issues opaque
+    tokens, for a property the gateway cannot observe either way. Proceeding
+    silently would report a check that never ran. So: proceed, and say so."""
+    server = Server(payload={"access_token": "an-opaque-reference-token"})
+
+    with caplog.at_level(logging.WARNING, logger="acp.identity.exchange"):
+        token = exchange_with_peers(server, PEERS)
+
+    assert token.access_token == "an-opaque-reference-token"
+    assert any(r.message == "auth.scope_unverifiable" for r in caplog.records)
+
+
+def test_a_credential_with_no_audience_at_all_is_refused() -> None:
+    """Readable, and scoped to nothing. Distinct from unreadable: one is a token
+    this gateway cannot judge, the other is one it has judged and rejected."""
+    server = Server(payload={"access_token": jwt_with([])})
+
+    with pytest.raises(CredentialExchangeError, match="not for"):
+        exchange_with_peers(server, PEERS)

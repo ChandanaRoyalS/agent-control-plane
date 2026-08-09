@@ -30,12 +30,29 @@ upstream with no credential, which is a gateway that has silently stopped
 enforcing the thing it exists for, or to forward the caller's own token, which
 is the passthrough this phase exists to make impossible. Neither is a
 degradation worth having; refusing is.
+
+**Asking for a scope is not the same as getting one** (task 28). RFC 8707 §2
+says an authorization server that cannot honour a `resource` request SHOULD
+answer `invalid_target`. Keycloak 26.7, measured rather than assumed, accepts
+the parameter and discards it — including when it directly contradicts
+`audience`, where it returns a token for the *audience* and no error at all
+(`scripts/probe_resource_indicator.py`, ADR 0020).
+
+So the credential that comes back is checked against the one that was asked
+for. It must name the requested target, and it must not name any *other*
+upstream this gateway brokers for. That second half is the confused-deputy
+condition stated exactly: a credential that opens two doors is not a credential
+scoped to one, however it was requested.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import logging
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 import httpx
@@ -104,12 +121,19 @@ class TokenExchanger:
         *,
         client_id: str,
         client_secret: str,
+        peer_audiences: Iterable[str] = (),
         http: httpx.AsyncClient | None = None,
         request_timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         self.issuers = issuers
         self._client_id = client_id
         self._client_secret = client_secret
+        # Every audience this gateway brokers for. Used only to answer one
+        # question about a credential that has just been minted: does it also
+        # open somebody else's door? Empty is not a failure — it just means the
+        # cross-upstream check has nothing to compare against, which is the
+        # correct state for a single-upstream deployment.
+        self._peers = frozenset(peer_audiences)
         self._owns_http = http is None
         self._http = http or httpx.AsyncClient(timeout=request_timeout)
 
@@ -117,7 +141,9 @@ class TokenExchanger:
         if self._owns_http:
             await self._http.aclose()
 
-    async def exchange(self, *, subject_token: str, issuer: str, audience: str) -> ExchangedToken:
+    async def exchange(
+        self, *, subject_token: str, issuer: str, audience: str, resource: str = ""
+    ) -> ExchangedToken:
         """One exchange, against the issuer that minted the subject token."""
         registration = self.issuers.registration_for(issuer)
         endpoint = registration.token_endpoint
@@ -135,6 +161,11 @@ class TokenExchanger:
             "requested_token_type": ACCESS_TOKEN_TYPE,
             "audience": audience,
         }
+        if resource:
+            # RFC 8707. Sent because it is the specified way to name a target
+            # and any conformant server acts on it; not *relied* on, because the
+            # one server this project runs against does not. See `_verify_scope`.
+            form["resource"] = resource
         try:
             response = await self._http.post(
                 endpoint,
@@ -153,7 +184,9 @@ class TokenExchanger:
             msg = f"could not reach the token endpoint for {issuer!r}"
             raise CredentialProviderUnavailableError(msg) from exc
 
-        return self._token_from(response, issuer=issuer, audience=audience)
+        token = self._token_from(response, issuer=issuer, audience=audience)
+        self._verify_scope(token)
+        return token
 
     def _token_from(
         self, response: httpx.Response, *, issuer: str, audience: str
@@ -189,6 +222,76 @@ class TokenExchanger:
         return ExchangedToken(
             access_token=token, audience=audience, issuer=issuer, expires_at=expires_at
         )
+
+    def _verify_scope(self, token: ExchangedToken) -> None:
+        """Check the credential we were given against the one we asked for.
+
+        This is task 28's actual content. The parameter that requests a scope is
+        advisory — RFC 8707 §2 only *recommends* that a server which cannot
+        honour it answers `invalid_target`, and the server this project runs
+        against neither honours it nor complains. A control built on the request
+        would be a control that reports success when nothing happened.
+
+        Two conditions, and the second is the interesting one:
+
+        **The credential must name the target.** If it does not, whatever came
+        back is for something else, and sending it upstream would at best fail
+        confusingly and at worst succeed somewhere unintended.
+
+        **It must not name another upstream this gateway brokers for.** That is
+        the confused-deputy condition written out: a credential that opens two
+        doors is not scoped to one, and an upstream that receives it can replay
+        it against its neighbour as the caller. The measured Keycloak default —
+        an exchange with no `audience` returns *every* audience the requester
+        can reach — is exactly this failure, one missing config line away.
+
+        Audiences that are not upstreams (`account`, the requester's own client
+        id, whatever a given server adds) are ignored. The check is deliberately
+        about *this gateway's* estate rather than about tidiness, so it has no
+        false positives to tune away — which is what stops it being disabled.
+        """
+        audiences = _audiences_of(token.access_token)
+        if audiences is None:
+            # Opaque, or not a JWT. Nothing can be checked, and refusing would
+            # rule out every authorization server that issues opaque tokens for
+            # a property this gateway cannot observe either way. Said out loud
+            # rather than passed over — see SECURITY.md.
+            logger.warning(
+                "auth.scope_unverifiable",
+                extra={
+                    "audience": token.audience,
+                    "reason": "the exchanged credential is not a JWT",
+                    "consequence": "the gateway cannot confirm it is scoped to one upstream",
+                },
+            )
+            return
+
+        if token.audience not in audiences:
+            logger.warning(
+                "auth.scope_wrong_target",
+                extra={"requested": token.audience, "received": sorted(audiences)},
+            )
+            msg = (
+                f"the authorization server returned a credential that is not for {token.audience!r}"
+            )
+            raise CredentialExchangeError(msg)
+
+        crossed = (audiences & self._peers) - {token.audience}
+        if crossed:
+            logger.error(
+                "auth.scope_too_broad",
+                extra={
+                    "requested": token.audience,
+                    "also_valid_for": sorted(crossed),
+                    "consequence": "this credential would let one upstream act at another",
+                },
+            )
+            msg = (
+                f"the authorization server returned a credential for {token.audience!r} "
+                f"that is also valid at {len(crossed)} other upstream(s); it was asked "
+                f"for one and would open several"
+            )
+            raise CredentialExchangeError(msg)
 
     def _refused(
         self, response: httpx.Response, *, issuer: str, audience: str
@@ -238,7 +341,9 @@ class ExchangedCredentials:
     def __init__(self, exchanger: TokenExchanger) -> None:
         self._exchanger = exchanger
 
-    async def authorization_for(self, upstream: str, audience: str) -> str | None:
+    async def authorization_for(
+        self, upstream: str, audience: str, resource: str = ""
+    ) -> str | None:
         """A ``Bearer`` value for this upstream, or ``None`` when there is no caller.
 
         ``None`` happens on the background health prober's requests, which have
@@ -266,8 +371,45 @@ class ExchangedCredentials:
             subject_token=subject_token,
             issuer=principal.issuer,
             audience=audience,
+            resource=resource,
         )
         return f"Bearer {token.access_token}"
+
+
+def _audiences_of(token: str) -> frozenset[str] | None:
+    """The `aud` of a JWT, or ``None`` when it is not one.
+
+    Deliberately *not* verified. The signature is irrelevant to the question
+    being asked: this credential arrived over TLS from a token endpoint the
+    gateway authenticated to moments ago, and what is being read is not a trust
+    decision but a scope one — "is this the thing I asked for". Verifying it
+    would also be checking somebody else's audience, which is the upstream's
+    job and not ours.
+
+    ``None`` for anything unparseable, which the caller reports rather than
+    treats as empty. An empty audience set and an unreadable token are different
+    facts, and conflating them would turn "cannot check" into "checked, found
+    nothing wrong".
+    """
+    parts = token.split(".")
+    expected_segments = 3
+    if len(parts) != expected_segments:
+        return None
+    try:
+        segment = parts[1]
+        payload = base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))
+        claims = json.loads(payload)
+    except (ValueError, binascii.Error):
+        return None
+    if not isinstance(claims, dict):
+        return None
+
+    audience = claims.get("aud")
+    if isinstance(audience, str):
+        return frozenset({audience})
+    if isinstance(audience, list):
+        return frozenset(a for a in audience if isinstance(a, str))
+    return frozenset()
 
 
 def require_token_endpoints(issuers: IssuerRegistry) -> None:

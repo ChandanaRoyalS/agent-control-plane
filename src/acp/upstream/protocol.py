@@ -36,7 +36,7 @@ class Credentials(Protocol):
     holding one.
     """
 
-    async def authorization_for(self, upstream: str, audience: str) -> str | None:
+    async def authorization_for(self, upstream: str, audience: str, resource: str) -> str | None:
         """The header value for this call, or ``None`` to send none."""
         ...
 

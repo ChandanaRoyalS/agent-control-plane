@@ -164,6 +164,17 @@ jobs:
         # problems and the fix for one is nowhere near the fix for the other.
         run: python scripts/identity_smoke.py
 
+      - name: Measure Keycloak's RFC 8707 behaviour
+        # A measurement, not an assertion — it always exits 0. Task 28's
+        # implementation depends on whether Keycloak honours, ignores or rejects
+        # the `resource` parameter, and that is a question about somebody else's
+        # server which no amount of reading our own code can answer.
+        #
+        # It lives here because CI has Docker reliably and a laptop does not.
+        # Once the answer is recorded in an ADR this step goes away; a permanent
+        # step that can never fail is a step nobody reads.
+        run: python scripts/probe_resource_indicator.py
+
       - name: Logs on failure
         if: failure()
         # Keycloak included: when the identity smoke fails, the reason is

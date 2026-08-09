@@ -141,7 +141,19 @@ jobs:
           [ "$uid" = "10001" ]
 
       - name: Bring the stack up
-        run: docker compose up -d --wait
+        # `--wait gateway` rather than the whole project. Naming the one service
+        # that matters still starts everything it depends on — including waiting
+        # for the one-shot readiness gate to *complete* — while keeping a
+        # container that deliberately exits out of the set compose is asked to
+        # see running.
+        run: docker compose up -d --wait gateway
+
+      - name: Keycloak's log if it did not come up
+        if: failure()
+        # Separate from the catch-all below and printed first, because when this
+        # step's predecessor fails the reason is almost always in here, and
+        # scrolling past four other containers to find it costs minutes.
+        run: docker compose logs --no-color keycloak
 
       - name: Smoke test
         run: python scripts/compose_smoke.py

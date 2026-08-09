@@ -34,7 +34,7 @@ image:  ## Build the container images
 	docker compose build
 
 up:  ## Bring up the whole stack and wait until it is ready
-	docker compose up -d --wait
+	docker compose up -d --wait gateway
 	@echo "gateway :8080  admin :9090  jaeger :16686  keycloak :8081 (admin/admin)"
 	@echo "the gateway now authenticates — 'make token' for one, 'make identity-smoke' to prove it"
 
@@ -55,11 +55,12 @@ token:  ## Print an access token for alice (USER=bob for the other one)
 
 # Keycloak skips the import when the realm already exists, which is the right
 # default and the reason editing config/keycloak/acp-realm.json appears to do
-# nothing. The volume has to go before the committed realm is read again.
+# nothing. There is no database volume (see docker-compose.yml), so the realm
+# lives in the container's own layer and recreating the container is enough —
+# but a plain `restart` is not, which is the whole reason this target exists.
 idp-reset:  ## Re-import config/keycloak after editing it
 	docker compose rm -sf keycloak
-	docker volume rm -f acp_keycloak-data
-	docker compose up -d --wait keycloak-ready gateway
+	docker compose up -d --wait gateway
 
 clean:  ## Remove caches and build artifacts
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage coverage.xml

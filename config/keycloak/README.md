@@ -18,19 +18,29 @@ This is stated plainly because "committed secrets" is a real finding in real
 reviews, and the difference between this and the finding is whether anybody
 wrote down which one it is.
 
-## Editing it does nothing to a running stack
+## Editing it does nothing to a running container
 
 Keycloak **skips the import when the realm already exists**. That is the right
 default — it stops a restart from silently reverting whatever an operator did in
-the console — and it means changing this file has no effect until the volume is
-dropped:
+the console — and it means changing this file has no effect until the container
+is *recreated*. Restarting is not enough:
 
 ```bash
-make idp-reset      # down -v, then up: the realm is re-imported from this file
+make idp-reset      # rm -sf keycloak, then up: the realm is read again
 ```
 
 If a change to this file appears not to work, this is why, roughly nine times
 out of ten.
+
+There is deliberately **no volume for Keycloak's database**, so the realm lives
+in the container's own layer and any recreated container re-imports it. Two
+reasons, one found the hard way. A named volume at `/opt/keycloak/data/h2` — a
+directory the image does not contain — is created by Docker as `root:root`, and
+Keycloak runs as uid 1000: it dies on boot with `AccessDeniedException` after
+two minutes of JDBC retries. That was the first CI run of this stack. And
+persisting it was worth little regardless, because a database that survives
+means console edits diverge silently from the file in git, which is the state
+this directory exists to prevent.
 
 ## What is in it, and why
 

@@ -59,13 +59,15 @@ KEYCLOAK_SERVICE = """
       # a config source an application can rewrite is a config source that tells
       # you nothing about what it was configured with.
       - ./config/keycloak:/opt/keycloak/data/import:ro
-      # Dev mode keeps its H2 database under data/. Named, so a restart does not
-      # silently discard whatever was clicked in the console — and so
-      # `make idp-reset` has something definite to remove when the committed
-      # realm changes. Keycloak skips the import when the realm already exists,
-      # which is the right default and the reason editing the realm file appears
-      # to do nothing until the volume goes.
-      - keycloak-data:/opt/keycloak/data/h2
+      #
+      # There is deliberately no volume for the database. Dev mode keeps H2 under
+      # /opt/keycloak/data/h2 — a directory the image does not contain, so a named
+      # volume mounted there is created by Docker as root:root, and Keycloak, which
+      # runs as uid 1000, dies on boot with AccessDeniedException.
+      #
+      # Persisting it was worth little anyway. The committed realm is the source of
+      # truth, and a surviving database means console edits diverge silently from
+      # the file in git.
     ports:
       # The admin console: http://localhost:8081 (admin / admin).
       - "8081:8080"
@@ -110,7 +112,10 @@ KEYCLOAK_SERVICE = """
                 last = type(exc).__name__
             print(f"keycloak: waiting ({last})", flush=True)
             time.sleep(2)
-        sys.exit(f"keycloak did not serve {url} within 180s; last: {last}")
+        sys.exit(
+            f"keycloak did not serve {url} within 180s; last attempt: {last}. "
+            "`docker compose logs keycloak` is where the reason is."
+        )
 """
 
 GATEWAY_ENV = """      # -- identity, against the real thing (task 26) ----------------------
@@ -137,16 +142,6 @@ GATEWAY_ENV = """      # -- identity, against the real thing (task 26) ---------
 
 GATEWAY_DEPENDS = """      keycloak-ready:
         condition: service_completed_successfully
-"""
-
-VOLUMES_BLOCK = """
-# ---------------------------------------------------------------------------
-# Volumes
-# ---------------------------------------------------------------------------
-volumes:
-  # Keycloak's dev-mode database. See the comment on the service for why this
-  # is named rather than anonymous, and what `make idp-reset` is for.
-  keycloak-data:
 """
 
 
@@ -183,12 +178,6 @@ def main() -> int:
     if anchor not in text:
         fail("could not find the trace backend section")
     text = text.replace(anchor, KEYCLOAK_SERVICE + "\n" + anchor, 1)
-
-    # 4. Top-level volumes. Appended, because there is no existing key to anchor
-    #    to and compose does not care about ordering between top-level keys.
-    if "\nvolumes:\n" in text:
-        fail("this file already has a top-level `volumes:` key; merge by hand")
-    text = text.rstrip("\n") + "\n" + VOLUMES_BLOCK
 
     PATH.write_text(text, encoding="utf-8")
     print("docker-compose.yml patched: keycloak, keycloak-ready, gateway identity settings.")

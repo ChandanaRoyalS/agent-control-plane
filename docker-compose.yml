@@ -213,13 +213,19 @@ services:
       # a config source an application can rewrite is a config source that tells
       # you nothing about what it was configured with.
       - ./config/keycloak:/opt/keycloak/data/import:ro
-      # Dev mode keeps its H2 database under data/. Named, so a restart does not
-      # silently discard whatever was clicked in the console — and so
-      # `make idp-reset` has something definite to remove when the committed
-      # realm changes. Keycloak skips the import when the realm already exists,
-      # which is the right default and the reason editing the realm file appears
-      # to do nothing until the volume goes.
-      - keycloak-data:/opt/keycloak/data/h2
+      #
+      # There is deliberately no volume for the database. Dev mode keeps H2 under
+      # /opt/keycloak/data/h2 — a directory the image does not contain, so a named
+      # volume mounted there is created by Docker as root:root, and Keycloak, which
+      # runs as uid 1000, dies on boot with AccessDeniedException. That is what the
+      # first CI run of this stack found, after two minutes of JDBC retries.
+      #
+      # Persisting it was worth little anyway. The committed realm is the source of
+      # truth, and a surviving database means console edits diverge silently from
+      # the file in git. Without one, every recreated container re-imports the
+      # realm and there is one fewer piece of state to explain. A container that is
+      # merely restarted still keeps its database, which is why `make idp-reset`
+      # recreates rather than restarts.
     ports:
       # The admin console: http://localhost:8081 (admin / admin).
       - "8081:8080"
@@ -264,7 +270,10 @@ services:
                 last = type(exc).__name__
             print(f"keycloak: waiting ({last})", flush=True)
             time.sleep(2)
-        sys.exit(f"keycloak did not serve {url} within 180s; last: {last}")
+        sys.exit(
+            f"keycloak did not serve {url} within 180s; last attempt: {last}. "
+            "`docker compose logs keycloak` is where the reason is."
+        )
 
   # -------------------------------------------------------------------------
   # Trace backend
@@ -296,11 +305,3 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
-
-# ---------------------------------------------------------------------------
-# Volumes
-# ---------------------------------------------------------------------------
-volumes:
-  # Keycloak's dev-mode database. See the comment on the service for why this
-  # is named rather than anonymous, and what `make idp-reset` is for.
-  keycloak-data:

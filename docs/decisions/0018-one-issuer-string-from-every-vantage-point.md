@@ -197,5 +197,29 @@ argument it lacks, which is the moment somebody adds one. The fakes in
 given, so the next such addition is a test that asserts rather than one that
 explodes.
 
+**Keycloak has no database volume, and the first CI run is why.** A named volume
+at `/opt/keycloak/data/h2` — a path the image does not contain — is created by
+Docker as `root:root`; Keycloak runs as uid 1000 and died on boot with
+`AccessDeniedException` after two minutes of JDBC retries, while the readiness
+gate polled a port nothing was listening on.
+
+The instinct is to fix the ownership. The better answer was to ask what the
+volume was for: persisting a database whose contents are supposed to *be* the
+committed realm file. Keeping it means console edits diverge silently from git,
+which is the state a committed realm exists to prevent. Removing it deletes a
+failure mode and a source of confusion together, and every recreated container
+re-imports the realm.
+
+Worth stating because the diagnosis was cheap by construction: the readiness
+gate logged its reason on every attempt, and ninety identical `URLError` lines —
+rather than `404` — said "Keycloak is not listening" instead of "the realm did
+not import". Those are different bugs in different files. A healthcheck built
+out of Keycloak's own shell would have reported neither.
+
+**`up --wait` names the gateway rather than the project.** A container that
+deliberately exits has no business in a set compose is asked to see *running*.
+Naming the one service that matters still starts its whole dependency chain,
+including waiting for the readiness gate to complete.
+
 **CI grew a minute.** The `image` job now boots Keycloak, imports a realm, waits
 for it, and runs both smoke tests. The timeout went from 15 minutes to 20.

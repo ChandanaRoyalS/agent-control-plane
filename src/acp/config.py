@@ -271,6 +271,21 @@ class GatewaySettings(BaseSettings):
     Refused at startup if readable beyond its owner.
     """
 
+    auth_credential_cache_max_entries: int = Field(default=1024, gt=0)
+    """Ceiling on cached exchanged credentials (task 30).
+
+    A security limit before it is a memory one. Unbounded, this grows with every
+    distinct (token, upstream) pair the gateway has seen — which an
+    authenticated caller with a token mint can drive in a loop. A bound turns
+    that into eviction of somebody else's entry, costing an exchange rather than
+    the process.
+
+    Set to a very small number to make caching effectively per-request; there is
+    deliberately no boolean to turn it off, because a cache that can be disabled
+    by configuration is one where "is it on?" becomes a question during an
+    incident.
+    """
+
     auth_required: bool = True
     """Refuse to start without an identity provider.
 

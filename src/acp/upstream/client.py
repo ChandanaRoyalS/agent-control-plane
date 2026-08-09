@@ -56,9 +56,15 @@ class UpstreamClient:
         config: UpstreamConfig,
         http: httpx.AsyncClient,
         credentials: Credentials | None = None,
+        secret: str | None = None,
     ) -> None:
         self.config = config
         self._http = http
+        # Resolved once, at startup, by whoever built this client — not looked
+        # up per request. A store lookup on the request path would put a failure
+        # mode (missing secret) somewhere it cannot be fixed, and startup is
+        # where every other configuration problem in this project surfaces.
+        self._secret = secret
         # `None` when no exchange is configured, which is every deployment
         # before task 27 and every test of the transport. Typed structurally
         # (see `protocol.Credentials`) so this module never imports identity.
@@ -72,12 +78,18 @@ class UpstreamClient:
     # -- lifecycle ---------------------------------------------------------
 
     @classmethod
-    async def connect(cls, config: UpstreamConfig, credentials: Credentials | None = None) -> Self:
+    async def connect(
+        cls,
+        config: UpstreamConfig,
+        credentials: Credentials | None = None,
+        secret: str | None = None,
+    ) -> Self:
         """Build a client with a pool and timeouts derived from ``config``."""
         return cls(
             config,
             httpx.AsyncClient(timeout=_timeout(config), limits=_limits(config)),
             credentials,
+            secret,
         )
 
     async def aclose(self) -> None:
@@ -97,23 +109,37 @@ class UpstreamClient:
 
     # -- MCP methods -------------------------------------------------------
 
-    async def _authorization(self) -> str | None:
-        """The credential for this call, if this deployment mints them.
+    async def _credential(self) -> tuple[str, str] | None:
+        """The header and value this call carries, if any.
 
-        Two conditions, and both must hold. No `credentials` means exchange is
-        not configured at all. No `audience` on the upstream means nobody said
-        what a credential for it would even be *for* — and rather than guess,
-        this sends none. Startup refuses that combination (see
-        `runtime.check_upstream_audiences`), so reaching here with exchange on
-        and an audience missing is not possible in a running gateway; the check
-        stays because a default that silently drops a credential is worse than
-        one that cannot happen.
+        Two mechanisms, and the config model makes them mutually exclusive
+        (`UpstreamConfig._one_way_to_be_credentialed`), so the order here decides
+        nothing — it is written static-first only because that branch is the one
+        that cannot fail.
+
+        A *static* credential was resolved from the store at startup. It goes in
+        whatever header this upstream wants, because an API key that insists on
+        `X-API-Key` is not an unusual upstream, it is most of them.
+
+        An *exchanged* credential is minted now, per call, and always in
+        `Authorization` — RFC 6750 defines exactly one place for a bearer token
+        and an upstream that wanted it elsewhere would not be speaking OAuth.
+
+        Neither means no credential. Startup refuses that combination once
+        exchange is configured; the branch stays because a default that silently
+        drops a credential is worse than one that cannot be reached.
         """
+        if self._secret is not None:
+            scheme = self.config.credential_scheme
+            value = f"{scheme} {self._secret}" if scheme else self._secret
+            return self.config.credential_header, value
+
         if self._credentials is None or not self.config.audience:
             return None
-        return await self._credentials.authorization_for(
+        authorization = await self._credentials.authorization_for(
             self.config.name, self.config.audience, self.config.resource
         )
+        return ("Authorization", authorization) if authorization is not None else None
 
     async def list_tools(self) -> ListToolsResult:
         """Fetch the upstream's tool catalogue, with its freshness hints."""
@@ -230,9 +256,9 @@ class UpstreamClient:
         # neither a timeout nor an unavailability, so the guard does not count
         # it as an upstream failure — which is right: the upstream has done
         # nothing wrong and has not been contacted.
-        authorization = await self._authorization()
-        if authorization is not None:
-            headers["Authorization"] = authorization
+        credential = await self._credential()
+        if credential is not None:
+            headers[credential[0]] = credential[1]
 
         started = time.perf_counter()
         try:

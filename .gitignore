@@ -9,6 +9,7 @@ dist/
 # Environments
 .venv/
 venv/
+.python-version
 
 # Testing and coverage
 .pytest_cache/
@@ -28,7 +29,15 @@ htmlcov/
 !.env.example
 *.pem
 *.key
-secrets/
+/secrets/
+
+# The encrypted secret store and the one key that opens it (task 29). The store
+# is ciphertext, so committing it would not expose a value directly — and it
+# would put every credential the gateway holds into every clone, every fork and
+# every backup, waiting for the key to leak once. Neither belongs in git.
+*.enc
+config/secret.key
+config/secrets.enc
 
 # Editors
 .vscode/

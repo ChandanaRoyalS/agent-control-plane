@@ -247,6 +247,30 @@ class GatewaySettings(BaseSettings):
     ran. With an issuers file, put ``token_endpoint`` on the entry that needs it.
     """
 
+    secrets_file: Path | None = None
+    """The encrypted secret store (task 29).
+
+    Holds credentials for upstreams that cannot take part in token exchange —
+    an API key issued out of band, an appliance that will never speak RFC 8693.
+    Everything that *can* exchange should, because a credential minted per call
+    and thrown away is not a secret anybody has to store.
+
+    Absent means no store, which is the right state for a deployment where every
+    upstream exchanges. An upstream referencing a secret with no store
+    configured is a startup failure.
+    """
+
+    secret_key_file: Path | None = None
+    """The one key that opens ``secrets_file``.
+
+    Its own file, referenced by path, so it can come from wherever a runtime
+    puts secrets — a Kubernetes secret mount, a Docker secret, a tmpfs populated
+    at boot — rather than from somewhere a person edits. The store's honest
+    claim is that it turned many secrets into one; this is the one.
+
+    Refused at startup if readable beyond its owner.
+    """
+
     auth_required: bool = True
     """Refuse to start without an identity provider.
 
@@ -329,6 +353,10 @@ class GatewaySettings(BaseSettings):
         return bool(self.auth_issuers_file or (self.auth_issuer and self.auth_audience))
 
     @property
+    def secret_store_configured(self) -> bool:
+        return self.secrets_file is not None and self.secret_key_file is not None
+
+    @property
     def exchange_configured(self) -> bool:
         """Whether the gateway will mint per-upstream credentials (task 27)."""
         return bool(self.auth_client_id and self.auth_client_secret)
@@ -404,6 +432,19 @@ class GatewaySettings(BaseSettings):
             msg = (
                 "ACP_AUTH_TOKEN_ENDPOINT applies to the single-issuer settings only; "
                 "per-issuer endpoints belong in ACP_AUTH_ISSUERS_FILE."
+            )
+            raise ValueError(msg)
+
+        store = {
+            "ACP_SECRETS_FILE": self.secrets_file,
+            "ACP_SECRET_KEY_FILE": self.secret_key_file,
+        }
+        half = [name for name, value in store.items() if value is None]
+        if half and len(half) != len(store):
+            msg = (
+                "ACP_SECRETS_FILE and ACP_SECRET_KEY_FILE are all-or-nothing; "
+                f"missing {', '.join(sorted(half))}. An encrypted store with no key "
+                "cannot be opened, and a key with no store opens nothing."
             )
             raise ValueError(msg)
 

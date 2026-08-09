@@ -40,7 +40,9 @@ def build_upstream(client: UpstreamClient) -> Upstream:
 
 
 async def connect_upstream(
-    config: UpstreamConfig, credentials: Credentials | None = None
+    config: UpstreamConfig,
+    credentials: Credentials | None = None,
+    secret: str | None = None,
 ) -> Upstream:
     """Open a pool to ``config`` and return the fully wrapped upstream.
 
@@ -50,4 +52,4 @@ async def connect_upstream(
     longer than it lives. The client is the only layer that knows a request is
     actually about to leave the process.
     """
-    return build_upstream(await UpstreamClient.connect(config, credentials))
+    return build_upstream(await UpstreamClient.connect(config, credentials, secret))

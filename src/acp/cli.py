@@ -29,6 +29,7 @@ from acp.exceptions import ACPError
 from acp.observability import configure_logging, configure_tracing
 from acp.runtime import gateway_from_settings
 from acp.schema import SchemaSnapshot, diff
+from acp.secrets import cli as secrets_cli
 from acp.upstream import ListToolsResult, UpstreamClient, UpstreamConfig
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--upstreams-file", help="override ACP_UPSTREAMS_FILE")
 
     _add_schemas_commands(subparsers)
+    _add_secrets_commands(subparsers)
 
     return parser
 
@@ -95,6 +97,84 @@ def _add_schemas_commands(subparsers: Any) -> None:
 
     check = verbs.add_parser("check", help="compare against the baseline; exit 1 on drift")
     _add_baseline_arguments(check)
+
+
+def _add_secrets_commands(subparsers: Any) -> None:
+    """``acp secrets init | set | list`` (task 29).
+
+    Argparse wiring only. Every decision lives in ``acp.secrets.cli``, where a
+    test can reach it — this module imports the MCP SDK, so anything written
+    here is untestable and untype-checkable in the environment it is authored
+    in, which is how three bugs have shipped so far.
+
+    There is no ``get``. A command that prints a credential to a terminal is one
+    that eventually prints it into a screen-share, a scrollback buffer or a
+    support ticket, and the store exists so the value has one destination.
+    """
+    secrets = subparsers.add_parser(
+        "secrets", help="manage the encrypted store for upstreams that cannot exchange"
+    )
+    verbs = secrets.add_subparsers(dest="secrets_command", metavar="<verb>")
+
+    for verb, help_text in (
+        ("init", "generate a key and an empty store"),
+        ("set", "add or replace one secret, read from a prompt or stdin"),
+        ("list", "show the names in the store, never the values"),
+    ):
+        sub = verbs.add_parser(verb, help=help_text)
+        sub.add_argument(
+            "--secrets-file",
+            type=Path,
+            default=Path("config/secrets.enc"),
+            help="the encrypted store (default: %(default)s)",
+        )
+        sub.add_argument(
+            "--key-file",
+            type=Path,
+            default=Path("config/secret.key"),
+            help="the key that opens it (default: %(default)s)",
+        )
+        if verb == "set":
+            sub.add_argument("name", help="the name an upstream's `credential_ref` points at")
+        if verb == "init":
+            sub.add_argument(
+                "--force",
+                action="store_true",
+                help=(
+                    "overwrite an existing key. Every secret in the current store "
+                    "becomes permanently unreadable"
+                ),
+            )
+
+
+def _secrets_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    """Dispatch to ``acp.secrets.cli``, turning its errors into exit codes."""
+    verb = getattr(args, "secrets_command", None)
+    if verb is None:
+        parser.parse_args([args.command, "--help"])
+        return USAGE_ERROR
+
+    try:
+        if verb == "init":
+            secrets_cli.initialise(args.key_file, args.secrets_file, force=args.force)
+            print(f"wrote {args.key_file} and {args.secrets_file}")  # noqa: T201
+            print("keep the key out of git; `acp secrets set <name>` adds to the store")  # noqa: T201
+            return 0
+
+        if verb == "set":
+            value = secrets_cli.read_value()
+            held = secrets_cli.put(args.key_file, args.secrets_file, args.name, value)
+            print(f"stored {args.name!r}; the store now holds: {', '.join(held)}")  # noqa: T201
+            return 0
+
+        if verb == "list":
+            for name in secrets_cli.names(args.key_file, args.secrets_file):
+                print(name)  # noqa: T201
+            return 0
+    except ACPError as exc:
+        return _usage_error(exc.message)
+
+    return _usage_error(f"unknown verb: {verb}")
 
 
 def _add_baseline_arguments(parser: argparse.ArgumentParser) -> None:
@@ -140,6 +220,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "schemas":
         return _schemas_command(parser, args)
+
+    if args.command == "secrets":
+        return _secrets_command(parser, args)
 
     return _upstream_command(args)
 

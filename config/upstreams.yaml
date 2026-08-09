@@ -17,6 +17,24 @@
 #   - name: mock-a
 #     url: http://127.0.0.1:9101/mcp
 #     audience: acp-upstream-mock-a
+#
+# An upstream that *cannot* take part in token exchange — an API key issued out
+# of band, an appliance that will never speak RFC 8693 — uses the other door
+# (task 29). `credential_ref` names a secret in the encrypted store; the value
+# never appears here, because a credential in this file is a credential in git,
+# in every backup of it, and in the diff of whoever added it.
+#
+# `audience` and `credential_ref` are alternatives, not a pair. Setting both is
+# refused: two mechanisms each wanting to own the same header, resolved by
+# whichever branch runs first, is a coin toss decided in code.
+#
+#   - name: legacy-crm
+#     url: https://crm.internal/mcp
+#     credential_ref: legacy-crm-api-key
+#     credential_header: X-API-Key     # `Authorization` is wrong for most APIs
+#     credential_scheme: ""            # empty sends the value bare
+#
+# Populate it with:  acp secrets init  &&  acp secrets set legacy-crm-api-key
 
 upstreams:
   - name: mock-a

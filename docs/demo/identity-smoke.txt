@@ -1,4 +1,4 @@
-Thirteen assertions against a real Keycloak, from outside every container.
+Fourteen assertions against a real Keycloak, from outside every container.
 =========================================================================
 
 Captured verbatim from the `image · compose · smoke` job of CI run 31294xxxxx
@@ -34,11 +34,12 @@ it before the container started.
   ok   the credential names exactly one upstream — aud=['acp-upstream-mock-a']
   ok   the credential still names the human it was minted for — upstream saw sub='78dbdf38-ae8f-49f4-8156-c6ff8cecdccd', actor='acp-gateway'
   ok   each upstream receives its own credential — mock-a aud=['acp-upstream-mock-a'] mock-b aud=['acp-upstream-mock-b']
+  ok   neither credential is valid at the other upstream — mock-a aud=['acp-upstream-mock-a'] mock-b aud=['acp-upstream-mock-b']
 
 all identity checks passed
 
 
-The four lines worth reading twice
+The five lines worth reading twice
 ----------------------------------
 
 **"a genuine token from an untrusted authorization server is refused."**
@@ -71,6 +72,15 @@ upstream's ability to log *who the work was actually for*. Keycloak's standard
 token exchange emits no RFC 8693 `act` claim of its own, so the committed realm
 adds it with a hardcoded mapper; this line is that workaround being checked
 rather than assumed.
+
+
+**"neither credential is valid at the other upstream."**
+Added in task 28, and the reason it is a separate line from the one above is
+that RFC 8707's `resource` parameter — the specified way to ask for exactly this
+— is accepted and silently discarded by this server (`make probe-resource`,
+ADR 0020). Asserting that the parameter was *sent* would pass against a server
+that throws it away. This asserts the property instead: the two audiences do not
+intersect, so a compromised mock-a holds nothing that works at mock-b.
 
 
 Notes

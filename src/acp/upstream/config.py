@@ -72,6 +72,37 @@ class UpstreamConfig(BaseModel):
     the request was honoured.
     """
 
+    credential_ref: str = ""
+    """Name of a secret in the store to send to this upstream (task 29).
+
+    The other door, for an upstream that cannot take part in token exchange —
+    an API key issued out of band, a vendor appliance that will never speak
+    RFC 8693. Before task 29 such an upstream could not be configured at all,
+    because task 27 made `audience` mandatory once exchange was on.
+
+    A *reference*, never a value. A credential in this file is a credential in
+    git, in every backup of the config directory, and in the diff of whoever
+    added it. What lives here is a name; the value lives in the store.
+
+    Mutually exclusive with `audience`: an upstream is credentialed one way or
+    the other, and a config declaring both is one where nobody can say which
+    credential the upstream actually receives.
+    """
+
+    credential_header: str = "Authorization"
+    """Which header carries the static credential.
+
+    `Authorization` is right for anything OAuth-shaped and wrong for a great
+    many real APIs, which want `X-API-Key` or worse. Configurable because the
+    alternative is a gateway that can only broker for servers that agreed on a
+    convention — and the whole premise is standing in front of systems that did
+    not agree on anything.
+    """
+
+    credential_scheme: str = "Bearer"
+    """Prefix before the secret. Empty sends the value bare, which is what an
+    `X-API-Key` header wants and what `Authorization` never does."""
+
     connect_timeout: float = Field(default=3.0, gt=0)
     """Seconds to establish a TCP connection. Short: an unreachable host should
     fail fast so a circuit breaker can open, not tie up a worker."""
@@ -172,6 +203,27 @@ class UpstreamConfig(BaseModel):
     anything, and inferring consent from silence is how a gateway serves a
     catalogue its owner never sanctioned.
     """
+
+    @model_validator(mode="after")
+    def _one_way_to_be_credentialed(self) -> UpstreamConfig:
+        """`audience` and `credential_ref` are alternatives, not a pair.
+
+        Both set is not a richer configuration, it is an ambiguous one: two
+        mechanisms that each want to own the `Authorization` header, resolved by
+        whichever branch happens to run first. That is a coin toss decided in
+        code rather than by the person deploying it, and the failure it produces
+        — an upstream reached with the wrong credential — looks like an
+        authorization bug three systems away.
+        """
+        if self.audience and self.credential_ref:
+            msg = (
+                f"upstream {self.name!r} sets both `audience` and `credential_ref`. "
+                f"The first mints a short-lived credential per call (RFC 8693); the "
+                f"second sends a stored static one. Pick the first unless this "
+                f"upstream cannot do it."
+            )
+            raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def _bulkhead_fits_the_pool(self) -> UpstreamConfig:

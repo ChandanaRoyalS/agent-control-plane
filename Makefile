@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install check fmt lint types test cov clean image up down logs smoke \
-        identity-smoke token idp-reset probe-resource
+        identity-smoke token idp-reset probe-resource prove-passthrough
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -49,6 +49,9 @@ smoke:  ## Assert the composed stack actually works
 
 identity-smoke:  ## Assert the identity stack works against the real Keycloak
 	uv run python scripts/identity_smoke.py
+
+prove-passthrough:  ## Break the no-passthrough invariant on purpose, and check the test notices
+	uv run python scripts/mutate_no_passthrough.py
 
 probe-resource:  ## Measure what Keycloak does with RFC 8707's `resource`
 	uv run python scripts/probe_resource_indicator.py

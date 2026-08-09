@@ -46,6 +46,13 @@ jobs:
       - name: Test
         run: uv run pytest
 
+      # A security test that has never been seen to fail is a claim about
+      # whoever wrote it. This breaks the no-passthrough invariant three ways and
+      # fails the build if the suite does not notice — and if an anchor has
+      # drifted, it fails loudly rather than quietly proving nothing.
+      - name: Prove the no-passthrough test can fail
+        run: uv run python scripts/mutate_no_passthrough.py
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

@@ -22,7 +22,7 @@ from mcp.shared.exceptions import MCPError
 from starlette.applications import Starlette
 
 from acp import __version__
-from acp.exceptions import ACPError
+from acp.exceptions import ACPError, PolicyDeniedError
 from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.registry import UpstreamRegistry
 from acp.identity import (
@@ -31,7 +31,9 @@ from acp.identity import (
     TokenValidator,
     metadata_route,
 )
+from acp.identity.principal import current_principal
 from acp.observability import RequestContextMiddleware
+from acp.policy import Policy, enforce_call
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +63,7 @@ def to_mcp_error(exc: ACPError) -> MCPError:
     return MCPError(rendered["code"], rendered["message"], rendered["data"])
 
 
-def build_server(registry: UpstreamRegistry) -> Server[None]:
+def build_server(registry: UpstreamRegistry, *, policy: Policy | None = None) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
     The handlers are closures over ``registry`` rather than methods on a class
@@ -122,6 +124,17 @@ def build_server(registry: UpstreamRegistry) -> Server[None]:
         _ctx: ServerRequestContext[None, Any],
         params: types.CallToolRequestParams,
     ) -> types.CallToolResult:
+        if policy is not None:
+            # Fail-closed: a loaded policy means authorization is
+            # expected. A missing principal here is a misconfiguration
+            # (policy set, auth not), and must deny rather than permit.
+            principal = current_principal()
+            if principal is None:
+                raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
+            try:
+                enforce_call(policy, principal, params.name)
+            except ACPError as exc:
+                raise to_mcp_error(exc) from exc
         try:
             result = await registry.call_tool(params.name, params.arguments or {})
         except ACPError as exc:
@@ -143,6 +156,7 @@ def build_app(
     allowed_origins: Sequence[str] = (),
     validator: TokenValidator | None = None,
     resource: ProtectedResource | None = None,
+    policy: Policy | None = None,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -169,7 +183,7 @@ def build_app(
         allowed_hosts=list(allowed_hosts),
         allowed_origins=list(allowed_origins),
     )
-    app = build_server(registry).streamable_http_app(
+    app = build_server(registry, policy=policy).streamable_http_app(
         stateless_http=True,
         json_response=True,
         transport_security=security,

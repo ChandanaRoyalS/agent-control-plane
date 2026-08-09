@@ -34,6 +34,7 @@ the error message calls that case out by name.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
@@ -50,16 +51,39 @@ OIDC_SEGMENT = ".well-known/openid-configuration"
 """OpenID Connect Discovery 1.0 §4 — appended to the issuer."""
 
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
-"""The only hosts allowed to serve metadata over plain HTTP.
+"""Hosts allowed to serve metadata over plain HTTP without anyone asking.
 
 RFC 8414 §2 requires the issuer to use ``https``, and it is right to: metadata
 fetched over HTTP can be rewritten in flight, and this document is what decides
-which keys the gateway will trust. The exception exists because a Keycloak in
-`docker compose` on a laptop is genuinely reachable only at
-``http://localhost:8080`` and refusing that would mean nobody can run the demo.
+which keys the gateway will trust. Loopback is exempt because traffic that never
+leaves the machine has no in-flight to be rewritten in.
+
+Note what this does *not* cover: one container talking to another. When Keycloak
+arrived in Compose (task 26) the issuer became ``http://keycloak:8080`` — not
+loopback, not TLS, and refused by this rule. That is the rule working correctly,
+and the answer is ``insecure_hosts`` below rather than a wider default.
 """
 
 DEFAULT_TIMEOUT = 5.0
+
+
+def plaintext_permitted(hostname: str | None, insecure_hosts: Iterable[str] = ()) -> bool:
+    """Whether this host may serve its metadata over plain HTTP.
+
+    ``insecure_hosts`` is an operator-named list, empty by default, and it is the
+    escape hatch built on purpose so that nobody builds a worse one by accident.
+    The alternatives actually on the table when Keycloak arrived were adding
+    ``keycloak`` to ``LOOPBACK_HOSTS`` — a lie, and one that would ship to every
+    deployment — or turning certificate verification off, which is broader than
+    this, quieter than this, and invisible in a config file. See ADR 0018.
+
+    Naming a host here is a decision rather than a default: it appears in
+    configuration as a hostname somebody typed, and startup logs a warning for
+    every entry.
+    """
+    if hostname is None:
+        return False
+    return hostname in LOOPBACK_HOSTS or hostname in set(insecure_hosts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +108,7 @@ async def discover(
     # is an httpx connection timeout being passed to a client, which is the
     # thing ASYNC109 tells you to use instead.
     request_timeout: float = DEFAULT_TIMEOUT,
+    insecure_hosts: Iterable[str] = (),
 ) -> ProviderMetadata:
     """Fetch and validate an authorization server's metadata.
 
@@ -92,7 +117,7 @@ async def discover(
     gateway that starts with an unverified idea of which keys to trust has
     already lost the property this module exists to provide.
     """
-    _reject_unusable_issuer(issuer)
+    _reject_unusable_issuer(issuer, insecure_hosts)
 
     owns_client = client is None
     http = client or httpx.AsyncClient(timeout=request_timeout, follow_redirects=False)
@@ -135,7 +160,7 @@ def candidate_urls(issuer: str) -> list[str]:
     return [inserted, appended]
 
 
-def _reject_unusable_issuer(issuer: str) -> None:
+def _reject_unusable_issuer(issuer: str, insecure_hosts: Iterable[str] = ()) -> None:
     parts = urlsplit(issuer)
     if parts.query or parts.fragment:
         # RFC 8414 §2. A query string in an identifier means two spellings of
@@ -145,11 +170,14 @@ def _reject_unusable_issuer(issuer: str) -> None:
     if not parts.netloc:
         msg = f"issuer {issuer!r} is not an absolute URL"
         raise ConfigurationError(msg)
-    if parts.scheme != "https" and parts.hostname not in LOOPBACK_HOSTS:
+    if parts.scheme != "https" and not plaintext_permitted(parts.hostname, insecure_hosts):
         msg = (
             f"issuer {issuer!r} must use https (RFC 8414 §2). Metadata fetched over "
             f"plain HTTP can be rewritten in transit, and this document decides "
-            f"which signing keys the gateway trusts."
+            f"which signing keys the gateway trusts. If this is a development "
+            f"identity provider on a private network, name its host in "
+            f"ACP_AUTH_INSECURE_ISSUER_HOSTS — deliberately, and knowing that every "
+            f"start logs a warning naming it."
         )
         raise ConfigurationError(msg)
 

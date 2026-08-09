@@ -26,8 +26,11 @@ from starlette.routing import Route
 from acp.identity import (
     AuthenticationMiddleware,
     JwksCache,
+    ProtectedResource,
     TokenPolicy,
     TokenValidator,
+    metadata_route,
+    protected_resource,
     single_issuer,
 )
 from acp.identity.principal import current_principal
@@ -58,11 +61,17 @@ async def whoami(_request: Request) -> JSONResponse:
     )
 
 
-def build(validator: TokenValidator | None) -> Starlette:
-    app = Starlette(routes=[Route("/whoami", whoami, methods=["GET"])])
+def build(validator: TokenValidator | None, resource: ProtectedResource | None = None) -> Starlette:
+    routes = [Route("/whoami", whoami, methods=["GET"])]
+    if resource is not None:
+        # Mirrors `build_app`: the same object serves the document and defines
+        # the exemption, so a test cannot accidentally check one without the
+        # other being true.
+        routes.insert(0, metadata_route(resource))
+    app = Starlette(routes=routes)
     # Same order as `build_app`: authentication added first, so it runs *inside*
     # the request-context middleware and a rejected request still gets an ID.
-    app.add_middleware(AuthenticationMiddleware, validator=validator)
+    app.add_middleware(AuthenticationMiddleware, validator=validator, resource=resource)
     app.add_middleware(RequestContextMiddleware)
     return app
 
@@ -85,11 +94,13 @@ def validator_for(keypair: Keypair, provider_status: int = 200) -> TokenValidato
     )
 
 
-def get(app: Starlette, headers: dict[str, str] | None = None) -> httpx.Response:
+def get(
+    app: Starlette, headers: dict[str, str] | None = None, path: str = "/whoami"
+) -> httpx.Response:
     async def _run() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://gw") as client:
-            return await client.get("/whoami", headers=headers or {})
+            return await client.get(path, headers=headers or {})
 
     response: httpx.Response = anyio.run(_run)
     return response
@@ -319,3 +330,121 @@ def test_the_context_is_not_left_bound_between_requests(keypair: Keypair) -> Non
     context.clear()
 
     assert get(app).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Protected resource metadata — RFC 9728, task 24
+# ---------------------------------------------------------------------------
+
+RESOURCE = "https://gw.corp.test/mcp"
+METADATA_PATH = "/.well-known/oauth-protected-resource/mcp"
+
+
+def resource_for(*servers: str) -> ProtectedResource:
+    return protected_resource(RESOURCE, authorization_servers=servers or (ISSUER,))
+
+
+def test_the_metadata_document_is_readable_without_a_token(keypair: Keypair) -> None:
+    """The one thing this endpoint has to be. It answers "how do I authenticate
+    here", so requiring authentication to read it is a loop with no entry — a
+    client that could satisfy the 401 would not need the document."""
+    app = build(validator_for(keypair), resource_for())
+
+    response = get(app, path=METADATA_PATH)
+
+    assert response.status_code == 200
+    assert response.json()["resource"] == RESOURCE
+    assert response.json()["authorization_servers"] == [ISSUER]
+
+
+def test_the_exemption_covers_that_path_and_nothing_else(keypair: Keypair) -> None:
+    """Exact string equality against one path, never a prefix test. A
+    `startswith` allow-list is a bypass waiting to be found — the guard reads
+    "public" and the router reads something else about the same string — and
+    exact matching fails closed for every spelling the path is not.
+    """
+    app = build(validator_for(keypair), resource_for())
+
+    for path in (
+        "/whoami",
+        METADATA_PATH + "/",
+        METADATA_PATH + "/../../whoami",
+        METADATA_PATH.upper(),
+        "/.well-known/oauth-protected-resource",
+    ):
+        assert get(app, path=path).status_code == 401, f"{path} was served without a token"
+
+
+def test_the_challenge_points_at_the_document(keypair: Keypair) -> None:
+    """RFC 9728 §5.1. This is what turns a 401 from a refusal into an
+    instruction: the client has never heard of this gateway, reads the URL,
+    fetches the document and learns where to get a token."""
+    response = get(build(validator_for(keypair), resource_for()))
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == (
+        f'Bearer resource_metadata="https://gw.corp.test{METADATA_PATH}"'
+    )
+
+
+def test_an_invalid_token_gets_both_parameters(keypair: Keypair) -> None:
+    """`error` and `resource_metadata` together, comma-separated as RFC 7235
+    auth-params are. A client whose token was rejected needs to know both that
+    it was rejected and where to get another one."""
+    token = keypair.sign(claims(aud="somewhere-else"))
+
+    response = get(
+        build(validator_for(keypair), resource_for()), {"authorization": f"Bearer {token}"}
+    )
+
+    assert response.headers["www-authenticate"] == (
+        f'Bearer error="invalid_token", resource_metadata="https://gw.corp.test{METADATA_PATH}"'
+    )
+
+
+def test_without_a_document_the_challenge_names_no_url(keypair: Keypair) -> None:
+    """Unchanged from task 22, and deliberately so. A challenge pointing at a
+    URL that answers 404 is worse than one pointing at nothing, because it
+    sends the client down a discovery path that ends nowhere."""
+    response = get(build(validator_for(keypair)))
+
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_reading_the_document_still_produces_a_correlatable_log_line() -> None:
+    """An unauthenticated endpoint is the one an attacker probes first, so it
+    has to appear in the log with a request ID and an explicit `anonymous`
+    principal — not be quietly absent because the middleware returned early."""
+    app = build(None, resource_for())
+
+    entries = emitted_lines(app)
+    entry = next(e for e in entries if e["event"] == "http.request")
+
+    assert entry["principal"] == "anonymous"
+    assert entry["request_id"]
+
+
+def test_the_document_does_not_leak_what_the_gateway_brokers(keypair: Keypair) -> None:
+    """It is public by design — an authorization server's own metadata is too —
+    but "public by design" is a licence for exactly the fields RFC 9728 defines.
+    Upstream names and tool names belong to the authenticated catalogue, and
+    ADR 0010 already put that class of information on a loopback listener.
+    """
+    body = get(build(validator_for(keypair), resource_for()), path=METADATA_PATH).text
+
+    assert set(json.loads(body)) <= {
+        "resource",
+        "authorization_servers",
+        "bearer_methods_supported",
+        "resource_name",
+        "scopes_supported",
+        "resource_documentation",
+    }
+
+
+def test_the_document_is_cacheable(keypair: Keypair) -> None:
+    """Without this a client re-fetches it after every 401, and a 401 is the
+    normal state of a client whose token has just expired."""
+    response = get(build(validator_for(keypair), resource_for()), path=METADATA_PATH)
+
+    assert "max-age" in response.headers["cache-control"]

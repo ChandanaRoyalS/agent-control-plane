@@ -37,8 +37,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from acp.exceptions import AuthenticationError, ConfigurationError
+from acp.identity.discovery import plaintext_permitted
 from acp.identity.keys import (
     DEFAULT_CACHE_TTL,
     DEFAULT_MIN_REFRESH_INTERVAL,
@@ -136,6 +138,7 @@ def registry_from_documents(
     leeway: float,
     cache_ttl: float = DEFAULT_CACHE_TTL,
     min_refresh_interval: float = DEFAULT_MIN_REFRESH_INTERVAL,
+    insecure_hosts: Iterable[str] = (),
 ) -> list[IssuerRegistration]:
     """Build registrations from parsed configuration, without touching the network.
 
@@ -149,6 +152,7 @@ def registry_from_documents(
         issuer = _required(document, "issuer", label)
         audience = _required(document, "audience", label)
         jwks_url = _required(document, "jwks_url", label)
+        _reject_plaintext_keys(jwks_url, label, insecure_hosts)
         algorithms = document.get("algorithms") or list(default_algorithms)
         if not isinstance(algorithms, list):
             msg = f"issuer {label!r}: `algorithms` must be a list"
@@ -166,6 +170,27 @@ def registry_from_documents(
             )
         )
     return registrations
+
+
+def _reject_plaintext_keys(jwks_url: str, label: object, insecure_hosts: Iterable[str]) -> None:
+    """The same https rule discovery applies to metadata, applied to the keys.
+
+    Discovery already refuses a plaintext issuer, but a configured `jwks_url`
+    skips discovery entirely — so until task 26 this check existed on one of the
+    two paths into the same decision, which is the shape of a control that looks
+    present and is not. A key set fetched over plain HTTP can be replaced in
+    transit by an attacker's key set, and every token afterwards verifies
+    perfectly against it.
+    """
+    parts = urlsplit(jwks_url)
+    if parts.scheme == "https" or plaintext_permitted(parts.hostname, insecure_hosts):
+        return
+    msg = (
+        f"issuer {label!r}: `jwks_url` {jwks_url!r} must use https. A key set fetched "
+        f"over plain HTTP can be swapped in transit, and every token afterwards "
+        f"verifies perfectly against the attacker's keys."
+    )
+    raise ConfigurationError(msg)
 
 
 def _required(document: Mapping[str, object], field: str, label: object) -> str:

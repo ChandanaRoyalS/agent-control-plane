@@ -29,8 +29,10 @@ from acp.gateway import UpstreamRegistry, build_app
 from acp.health import DEFAULT_INTERVAL, HealthMonitor
 from acp.identity import (
     IssuerRegistry,
+    ProtectedResource,
     TokenValidator,
     discover,
+    protected_resource,
 )
 from acp.identity.issuers import registry_from_documents
 from acp.schema import DEFAULT_BASELINE_PATH, DriftDetector, SchemaSnapshot
@@ -78,6 +80,7 @@ async def gateway_from_configs(
     detect_drift: bool = False,
     baseline_file: Path | None = None,
     validator: TokenValidator | None = None,
+    resource: ProtectedResource | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -133,6 +136,7 @@ async def gateway_from_configs(
             allowed_hosts=allowed_hosts or ("127.0.0.1", "localhost"),
             allowed_origins=allowed_origins,
             validator=validator,
+            resource=resource,
         )
         # Attached rather than yielded, so the signature every existing caller
         # and test depends on is unchanged. The probe loop itself is started by
@@ -176,7 +180,37 @@ async def build_token_validator(settings: GatewaySettings) -> TokenValidator | N
     bound.
     """
     if not settings.authentication_configured:
+        if settings.auth_required:
+            # Fatal, before a port is bound and before an upstream pool is
+            # opened. Deliberately here rather than in the settings validator:
+            # the claim is that this gateway must not *serve* unauthenticated,
+            # and enforcing it at construction made `acp schemas capture` — a
+            # local command with no connection to authentication — refuse to run.
+            msg = (
+                "ACP_AUTH_REQUIRED is set and no identity provider is configured, "
+                "so this gateway would serve every request as `anonymous`. Set "
+                "ACP_AUTH_ISSUER and ACP_AUTH_AUDIENCE, or ACP_AUTH_ISSUERS_FILE "
+                "for several servers. To run unauthenticated on purpose — a real "
+                "mode, and a loud one — set ACP_AUTH_REQUIRED=false."
+            )
+            raise ConfigurationError(msg)
         return None
+
+    for host in settings.auth_insecure_issuer_hosts:
+        # One line per host, at WARNING, on every start. The whole justification
+        # for having an escape hatch at all is that it cannot be used quietly —
+        # see ADR 0018 for the two worse hatches this exists instead of.
+        logger.warning(
+            "auth.plaintext_issuer_permitted",
+            extra={
+                "host": host,
+                "reason": "named in ACP_AUTH_INSECURE_ISSUER_HOSTS",
+                "consequence": (
+                    "metadata and signing keys for this host are fetched over plain "
+                    "HTTP and can be replaced in transit"
+                ),
+            },
+        )
 
     documents = _issuer_documents(settings)
     resolved = [await _with_keys(document, settings) for document in documents]
@@ -186,6 +220,7 @@ async def build_token_validator(settings: GatewaySettings) -> TokenValidator | N
         leeway=settings.auth_leeway,
         cache_ttl=settings.auth_jwks_cache_ttl,
         min_refresh_interval=settings.auth_jwks_min_refresh_interval,
+        insecure_hosts=settings.auth_insecure_issuer_hosts,
     )
     registry = IssuerRegistry(registrations)
 
@@ -198,6 +233,78 @@ async def build_token_validator(settings: GatewaySettings) -> TokenValidator | N
         },
     )
     return TokenValidator(issuers=registry)
+
+
+def build_protected_resource(
+    settings: GatewaySettings, validator: TokenValidator | None
+) -> ProtectedResource | None:
+    """Assemble the RFC 9728 document, or ``None`` when there is nothing to say.
+
+    The authorization servers are not configured separately — they are the
+    registry's issuers. Two lists that had to be kept in step would eventually
+    not be, and the failure mode is a client sent to an authorization server
+    this gateway does not actually trust, which looks from the client's side
+    like its own token being inexplicably rejected.
+
+    Nothing here is fatal on its own; a gateway with no metadata document
+    authenticates exactly as strictly. What it must not do is be *silent* about
+    either degraded case, because both produce a client that cannot log in for
+    reasons visible only from here.
+    """
+    if validator is None:
+        # Config already refuses a resource identifier with no issuer, so this
+        # is the plain unauthenticated case. `auth.disabled` has been said.
+        return None
+
+    if not settings.auth_resource:
+        logger.warning(
+            "auth.resource_metadata_disabled",
+            extra={
+                "reason": "ACP_AUTH_RESOURCE is not set",
+                "consequence": (
+                    "clients cannot discover this gateway's authorization servers "
+                    "and must be configured with them by hand"
+                ),
+            },
+        )
+        return None
+
+    resource = protected_resource(
+        settings.auth_resource,
+        authorization_servers=validator.issuers.issuers,
+    )
+
+    audiences = {registration.audience for registration in validator.issuers}
+    if settings.auth_resource not in audiences:
+        # Every step of discovery works and the last one fails: the client reads
+        # this document, asks the authorization server for `resource=<this>`,
+        # receives a token whose `aud` is `<this>`, and the gateway rejects it
+        # for carrying the wrong audience. A warning rather than a refusal
+        # because plenty of authorization servers identify a resource by an
+        # opaque client ID rather than by its URL, and that is a legitimate
+        # deployment — it simply requires the client to be told, which is the
+        # thing this document was meant to stop being necessary.
+        logger.warning(
+            "auth.resource_audience_mismatch",
+            extra={
+                "resource": settings.auth_resource,
+                "audiences": sorted(audiences),
+                "consequence": (
+                    "a client following the published metadata will request this "
+                    "resource as its audience and receive a token this gateway rejects"
+                ),
+            },
+        )
+
+    logger.info(
+        "auth.resource_metadata",
+        extra={
+            "resource": resource.resource,
+            "metadata_url": resource.metadata_url,
+            "authorization_servers": list(resource.authorization_servers),
+        },
+    )
+    return resource
 
 
 def _issuer_documents(settings: GatewaySettings) -> list[dict[str, Any]]:
@@ -235,7 +342,11 @@ async def _with_keys(document: dict[str, Any], settings: GatewaySettings) -> dic
         return document
 
     issuer = str(document.get("issuer") or "")
-    metadata = await discover(issuer, request_timeout=settings.auth_discovery_timeout)
+    metadata = await discover(
+        issuer,
+        request_timeout=settings.auth_discovery_timeout,
+        insecure_hosts=settings.auth_insecure_issuer_hosts,
+    )
     return {**document, "jwks_url": metadata.jwks_uri}
 
 
@@ -260,6 +371,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             allowed_hosts=allowed_hosts_for(settings.allowed_hosts, settings.port),
             allowed_origins=settings.allowed_origins,
             validator=validator,
+            resource=build_protected_resource(settings, validator),
         ) as app:
             yield app
     finally:

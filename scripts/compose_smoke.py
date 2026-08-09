@@ -8,11 +8,18 @@ This is what CI runs, and deliberately the same thing a human runs. A build
 that produces an image nobody exercises is a build that reports success about a
 tarball.
 
-Five checks, and the last two are the ones worth having. Anyone can assert that
+Six checks, and the last three are the ones worth having. Anyone can assert that
 a container started. Asserting that a *real* MCP request crosses the gateway
-into a containerised upstream and comes back with six qualified tools, and that
-the spans for it arrived in a separate container's trace backend, is asserting
-that the system is assembled rather than merely running.
+into a containerised upstream and comes back with six qualified tools, that the
+spans for it arrived in a separate container's trace backend, and that the same
+request without a credential is refused, is asserting that the system is
+assembled rather than merely running.
+
+Since task 26 the composed gateway authenticates, so the request path here needs
+a real token from the composed Keycloak. That is deliberate rather than
+incidental: it means this file cannot pass against a stack whose authentication
+is broken, which is the only way a smoke test stays honest as the system grows a
+security boundary. The identity-specific assertions live in `identity_smoke.py`.
 
 Written in Python rather than bash with `jq` because it has to parse JSON, an
 SSE frame, and make assertions about both — and because the host is guaranteed
@@ -29,6 +36,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from keycloak_token import access_token
+
 GATEWAY = os.environ.get("ACP_SMOKE_GATEWAY", "http://127.0.0.1:8080")
 ADMIN = os.environ.get("ACP_SMOKE_ADMIN", "http://127.0.0.1:9090")
 JAEGER = os.environ.get("ACP_SMOKE_JAEGER", "http://127.0.0.1:16686")
@@ -37,6 +46,8 @@ PROTOCOL_VERSION = "2026-07-28"
 EXPECTED_TOOLS = 6
 """Three tools on each mock. A number, not a `> 0`, because "some tools came
 back" would pass just as happily with one upstream silently missing."""
+
+UNAUTHORIZED = 401
 
 SERVER_ERROR = 500
 """Anything below this means something answered, which is all `wait_for` asks."""
@@ -75,7 +86,12 @@ def wait_for(url: str, *, seconds: float = 60.0) -> bool:
     return False
 
 
-def mcp_request(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+def mcp_request(
+    method: str,
+    params: dict[str, Any] | None = None,
+    *,
+    token: str | None = None,
+) -> dict[str, Any]:
     """One real MCP request, with the envelope a real server demands.
 
     The `_meta` keys and the `Mcp-Method` header are not optional decoration:
@@ -104,11 +120,27 @@ def mcp_request(method: str, params: dict[str, Any] | None = None) -> dict[str, 
             "Accept": "application/json, text/event-stream",
             "MCP-Protocol-Version": PROTOCOL_VERSION,
             "Mcp-Method": method,
+            **({"Authorization": f"Bearer {token}"} if token else {}),
         },
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
         return _decode(response.read().decode())
+
+
+def refused_without_a_token() -> tuple[bool, str, str]:
+    """The composed gateway sets ACP_AUTH_REQUIRED, so this must be a 401.
+
+    Cheap, and it is the check that would catch the worst possible regression in
+    this project: a gateway that starts believing it authenticates and serves
+    anyway. Nothing else in this file would notice, because everything else
+    sends a valid token.
+    """
+    try:
+        mcp_request("tools/list")
+    except urllib.error.HTTPError as exc:
+        return exc.code == UNAUTHORIZED, "an unauthenticated request is refused", f"HTTP {exc.code}"
+    return False, "an unauthenticated request is refused", "it was served"
 
 
 def _decode(payload: str) -> dict[str, Any]:
@@ -154,8 +186,14 @@ def main() -> int:
         f"baseline={schemas['baseline']} drift={schemas['drift']}",
     )
 
-    # 4 — a real request, all the way through
-    result = mcp_request("tools/list").get("result", {})
+    # 4 — a real request, all the way through, with a real credential
+    try:
+        token = access_token("alice")
+    except (RuntimeError, urllib.error.URLError, OSError) as exc:
+        report(False, "obtained a token from Keycloak", str(exc))
+        return 1
+
+    result = mcp_request("tools/list", token=token).get("result", {})
     tools = [t["name"] for t in result.get("tools", [])]
     report(
         len(tools) == EXPECTED_TOOLS and all("__" in name for name in tools),
@@ -165,6 +203,9 @@ def main() -> int:
 
     # 5 — and the spans for it reached a different container
     report(*_traces_arrived())
+
+    # 6 — and the same request without the credential does not work
+    report(*refused_without_a_token())
 
     print()
     if failures:

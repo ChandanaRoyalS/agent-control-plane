@@ -66,6 +66,14 @@ distinguishable. The full reasoning is in
   proceeds, because refusing would rule out a whole class of provider for a
   property it cannot observe either way.
 
+- **Anything that can read the secret key file, or the running process.** The
+  encrypted store ([ADR 0021](docs/decisions/0021-one-backend-behind-a-seam.md))
+  reduces many secrets to one key; it does not remove that key. Root on the box,
+  a core dump, or read access to the key file gets everything. The decrypted
+  values live in memory for the process's lifetime and are not wiped, because
+  Python offers no way to reliably zero a `str` and a `del` would be theatre.
+  The claim is "fewer places for a credential to be lying around", not "safe".
+
 - **A malicious operator.** Anyone who can change the configuration, the schema
   baseline or the policy files can change what the gateway permits. The controls
   here are arranged so that doing so leaves a reviewable trail — the schema
@@ -92,6 +100,7 @@ alternatives that were rejected and why:
 - [0018](docs/decisions/0018-one-issuer-string-from-every-vantage-point.md) — an issuer is an identity and not an address; and why the plain-HTTP escape hatch is narrow, named and logged rather than absent
 - [0019](docs/decisions/0019-mint-a-credential-per-call-and-hold-none.md) — the gateway holds no upstream credential; the inbound token reaches exactly one module, whose only destination is the issuer that minted it
 - [0020](docs/decisions/0020-check-the-scope-you-were-granted.md) — RFC 8707's parameter is a request, not a guarantee; the control is checking the credential that came back names one upstream and no other
+- [0021](docs/decisions/0021-one-backend-behind-a-seam.md) — an encrypted store turns many secrets into one key and says so; references live in config, values never do
 
 ## Supported versions
 

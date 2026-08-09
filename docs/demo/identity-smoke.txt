@@ -1,0 +1,89 @@
+Thirteen assertions against a real Keycloak, from outside every container.
+=========================================================================
+
+Captured verbatim from the `image · compose · smoke` job of CI run 31294xxxxx
+(PR #24, task 27). Reproduce with:
+
+    make up
+    make identity-smoke
+
+Why this file exists
+--------------------
+
+Every identity test in this repository before task 26 validated a token this
+repository signed, against a key set this repository served, from an issuer this
+repository invented. That proves the code is self-consistent. It cannot prove
+the code is right — a mock that agrees with your client proves only that you
+wrote both.
+
+This is the same system with a real authorization server on the other end, a
+committed realm, two invented users, and a gateway that has never seen any of
+it before the container started.
+
+
+  ok   the gateway publishes RFC 9728 metadata, unauthenticated — HTTP 200, authorization_servers=['http://keycloak:8080/realms/acp']
+  ok   an unauthenticated request is challenged, with a discovery URL — HTTP 401: ***"http://localhost:8080/.well-known/oauth-protected-resource/mcp"
+  ok   Keycloak's metadata declares the issuer the gateway trusts — declared='http://keycloak:8080/realms/acp' expected='http://keycloak:8080/realms/acp'
+  ok   Keycloak mints the issuer and audience the gateway expects — iss='http://keycloak:8080/realms/acp' aud=['http://localhost:8080/mcp', 'acp-gateway']
+  ok   a real token for alice reaches the upstreams — HTTP 200, 6 tools
+  ok   a real token for bob reaches the upstreams — HTTP 200, 6 tools
+  ok   a genuine token from an untrusted authorization server is refused — HTTP 401 (master realm, correctly signed, not registered)
+  ok   a tampered signature is refused — HTTP 401
+  ok   the upstream is reached with a credential — HTTP 200, present=True
+  ok   the upstream did NOT receive the caller's token — upstream saw 'd273b4843fd523c8', caller presented '5631c02440fc791f'
+  ok   the credential names exactly one upstream — aud=['acp-upstream-mock-a']
+  ok   the credential still names the human it was minted for — upstream saw sub='78dbdf38-ae8f-49f4-8156-c6ff8cecdccd', actor='acp-gateway'
+  ok   each upstream receives its own credential — mock-a aud=['acp-upstream-mock-a'] mock-b aud=['acp-upstream-mock-b']
+
+all identity checks passed
+
+
+The four lines worth reading twice
+----------------------------------
+
+**"a genuine token from an untrusted authorization server is refused."**
+Not a forgery and not a tampered signature: a real, correctly signed, unexpired
+token, minted moments earlier by Keycloak's own `master` realm — an
+authorization server this gateway simply never agreed to trust. ADR 0016 argues
+that pooling trusted keys and reading `iss` afterwards lets one server mint
+another's principals. This is that argument checked against something that did
+not come out of this repository.
+
+**"the upstream did NOT receive the caller's token."**
+The invariant the whole security model rests on, observed from outside the
+gateway process. Every other assertion of it in this repo inspects a request the
+gateway built, using the same code path that builds it. This one asks the
+upstream what actually arrived: the mock fleet reports a SHA-256 fingerprint of
+the credential it was handed, and it does not match the fingerprint of the token
+alice presented. Two independent observations of the same claim.
+
+**"the credential names exactly one upstream."**
+`aud=['acp-upstream-mock-a']`, and mock-b's says `acp-upstream-mock-b`. A token
+minted for one upstream is useless against its neighbour, so an upstream that is
+compromised — or merely curious — cannot replay what it was given. That is the
+confused-deputy defence, and it is what RFC 8707 resource indicators exist for.
+
+**"the credential still names the human it was minted for."**
+`sub` is alice's Keycloak subject; `actor` is `acp-gateway`. Delegation, not
+impersonation. An exchanged token whose subject had become the gateway would
+have thrown away the only thing this entire phase exists to preserve — the
+upstream's ability to log *who the work was actually for*. Keycloak's standard
+token exchange emits no RFC 8693 `act` claim of its own, so the committed realm
+adds it with a hardcoded mapper; this line is that workaround being checked
+rather than assumed.
+
+
+Notes
+-----
+
+`***` on the second line is GitHub Actions' own log masking, not the gateway's.
+The header reads `Bearer resource_metadata="…"`.
+
+The subject is a Keycloak UUID rather than `alice@example.test` because
+`sub` in an OIDC token is the stable internal identifier, not the username —
+which is the correct thing for an upstream to key on, since usernames change.
+
+`tools/call` rather than `tools/list` in the last five checks, deliberately.
+With the health prober running, the catalogue cache is permanently warm and a
+`tools/list` may never reach an upstream at all — the same property that made
+the request-path fan-out invisible in traces until probing was turned off.

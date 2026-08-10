@@ -22,7 +22,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# A rule name is a label for humans and for the audit log (task 37): which rule
+# A rule name is a label for humans and for the audit log (a later task): which rule
 # allowed this call. Constrained to the same shape as an upstream name so it is
 # safe to put in a log field, a metric label, or a span attribute without
 # quoting — lowercase alphanumeric with single hyphens.

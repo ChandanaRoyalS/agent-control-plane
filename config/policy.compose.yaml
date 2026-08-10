@@ -1,0 +1,24 @@
+# The policy the composed stack runs under — permissive by design.
+#
+# `config/policy.yaml` is the illustrative example: a narrow deny in front of
+# scoped allows, showing the shape a real policy takes. This file is different
+# on purpose. The compose stack exists to prove the whole path works end to end,
+# and the smoke test (scripts/compose_smoke.py) authenticates against the
+# composed Keycloak and expects to see every tool the upstreams expose.
+#
+# The rule below is an unconditional allow: no `subjects`, `actors`, or `tools`,
+# which the evaluator treats as "matches anything" (an unset field is not a
+# constraint). That is deliberate. A Keycloak `sub` is a generated UUID, not a
+# username, so a subject-scoped rule could not name the smoke user without
+# pinning that UUID into the repo; the compose stack only needs "an
+# authenticated caller sees the whole catalogue", which this expresses directly.
+# Authentication is still required — filtering runs after the middleware, so an
+# unauthenticated request is still refused (the smoke test checks that too).
+#
+# Keeping this separate from policy.yaml means the example stays realistic while
+# the smoke test gets a full catalogue — the same split already used for
+# upstreams.yaml vs upstreams.compose.yaml.
+
+rules:
+  - name: allow-any-authenticated-caller
+    effect: allow

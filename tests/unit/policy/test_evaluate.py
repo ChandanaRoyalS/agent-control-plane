@@ -140,3 +140,89 @@ def test_decision_reason_text() -> None:
     assert "default" in Decision(allowed=False, rule=None).reason
     assert Decision(allowed=True, rule="r").reason == "allowed by rule 'r'"
     assert Decision(allowed=False, rule="r").reason == "denied by rule 'r'"
+
+
+# --- argument-level rules (task 37) ---
+
+
+def _arg_policy() -> Policy:
+    return Policy(
+        rules=(
+            Rule(
+                name="public-docs-only",
+                effect=Effect.ALLOW,
+                tools=("mock-a__read_document",),
+                args={"doc_id": ("public-handbook", "public-faq")},
+            ),
+        )
+    )
+
+
+def test_a_matching_argument_allows() -> None:
+    decision = evaluate(
+        _arg_policy(), _principal(), "mock-a__read_document", {"doc_id": "public-handbook"}
+    )
+    assert decision.allowed is True
+    assert decision.rule == "public-docs-only"
+
+
+def test_an_argument_value_outside_the_set_denies() -> None:
+    """The tool and subject match, but the argument value is not allowed — the
+    rule does not match, so the request falls through to the deny default."""
+    decision = evaluate(
+        _arg_policy(), _principal(), "mock-a__read_document", {"doc_id": "secret-memo"}
+    )
+    assert decision.allowed is False
+    assert decision.rule is None
+
+
+def test_a_missing_constrained_argument_denies() -> None:
+    """A rule that constrains an argument cannot match a call that omits it —
+    'set means one of these' the same way a named actor cannot match None."""
+    decision = evaluate(_arg_policy(), _principal(), "mock-a__read_document", {})
+    assert decision.allowed is False
+
+
+def test_unset_args_matches_any_call() -> None:
+    """A rule with no argument constraints matches regardless of arguments — the
+    field is backward-compatible with every pre-task-37 rule."""
+    policy = Policy(rules=(Rule(name="any", effect=Effect.ALLOW, tools=("mock-a__search",)),))
+    assert evaluate(policy, _principal(), "mock-a__search", {"q": "anything"}).allowed
+    assert evaluate(policy, _principal(), "mock-a__search").allowed
+
+
+def test_argument_values_compare_by_string_form() -> None:
+    """Policy values are strings; a numeric or boolean argument matches by its
+    string form, keeping the exact-match model predictable across JSON types."""
+    policy = Policy(
+        rules=(
+            Rule(
+                name="limit-ten",
+                effect=Effect.ALLOW,
+                tools=("mock-a__search",),
+                args={"limit": ("10",)},
+            ),
+        )
+    )
+    assert evaluate(policy, _principal(), "mock-a__search", {"limit": 10}).allowed
+    assert not evaluate(policy, _principal(), "mock-a__search", {"limit": 20}).allowed
+
+
+def test_multiple_constrained_arguments_are_anded() -> None:
+    """Every constrained argument must hold — like the other match fields."""
+    policy = Policy(
+        rules=(
+            Rule(
+                name="two-args",
+                effect=Effect.ALLOW,
+                tools=("mock-a__read_document",),
+                args={"doc_id": ("public",), "format": ("pdf",)},
+            ),
+        )
+    )
+    assert evaluate(
+        policy, _principal(), "mock-a__read_document", {"doc_id": "public", "format": "pdf"}
+    ).allowed
+    assert not evaluate(
+        policy, _principal(), "mock-a__read_document", {"doc_id": "public", "format": "docx"}
+    ).allowed

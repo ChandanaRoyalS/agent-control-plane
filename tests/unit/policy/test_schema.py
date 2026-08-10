@@ -126,3 +126,28 @@ def test_extra_fields_are_forbidden_on_a_policy() -> None:
     bad: dict[str, Any] = {"rules": [], "default": "allow"}
     with pytest.raises(ValidationError):
         Policy.model_validate(bad)
+
+
+# --- args field (task 37) ---
+
+
+def test_args_defaults_to_empty() -> None:
+    """A rule without args constrains no arguments — backward compatible."""
+    rule = Rule(name="r", effect=Effect.ALLOW)
+    assert rule.args == {}
+
+
+def test_args_accepts_a_mapping_of_name_to_values() -> None:
+    rule = Rule(
+        name="r",
+        effect=Effect.ALLOW,
+        tools=("mock-a__read_document",),
+        args={"doc_id": ("public-handbook", "public-faq")},
+    )
+    assert rule.args["doc_id"] == ("public-handbook", "public-faq")
+
+
+def test_unknown_rule_field_is_still_forbidden_with_args_present() -> None:
+    """extra=forbid still holds — args does not loosen the schema."""
+    with pytest.raises(ValidationError):
+        Rule(name="r", effect=Effect.ALLOW, argz={"x": ("y",)})  # type: ignore[call-arg]

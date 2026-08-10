@@ -102,6 +102,21 @@ class Rule(BaseModel):
     """Which qualified tool names (`upstream__tool`, ADR 0003) this rule
     matches. Empty means any tool."""
 
+    args: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    """Argument constraints, by argument name. Each entry maps an argument to the
+    values it may take: the rule matches only when the call supplies that
+    argument and its value is one of the listed ones. An unset ``args`` (the
+    empty default) constrains nothing, so a rule keeps matching every call the
+    way it did before this field existed — the same "unset means anything"
+    semantics as `subjects` and `tools`, one level deeper.
+
+    This is exact-value matching only, deliberately: it extends the membership
+    model already in use rather than introducing operators, globs, or ranges,
+    which would be a richer matcher and a later task. It is checked at *call*
+    time, where the arguments exist; `tools/list` has no arguments, so a rule
+    with `args` still makes its tool *visible*, and the argument check happens
+    when the call is actually made (see `visible_tools` and `enforce_call`)."""
+
     @field_validator("name")
     @classmethod
     def _validate_name(cls, value: str) -> str:

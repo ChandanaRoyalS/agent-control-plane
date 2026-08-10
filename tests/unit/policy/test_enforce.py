@@ -85,3 +85,37 @@ def test_first_match_wins_through_enforcement() -> None:
     with pytest.raises(PolicyDeniedError):
         enforce_call(policy, _principal(), "mock-a__delete")
     enforce_call(policy, _principal(), "mock-a__search")  # does not raise
+
+
+# --- argument-level enforcement (task 37) ---
+
+
+def test_enforce_denies_when_an_argument_is_not_allowed() -> None:
+    """A tool the subject may call, but with a forbidden argument value, is
+    refused — the argument check reaches the request path through enforce."""
+    policy = Policy(
+        rules=(
+            Rule(
+                name="public-only",
+                effect=Effect.ALLOW,
+                tools=("mock-a__read_document",),
+                args={"doc_id": ("public",)},
+            ),
+        )
+    )
+    with pytest.raises(PolicyDeniedError):
+        enforce_call(policy, _principal(), "mock-a__read_document", {"doc_id": "secret"})
+
+
+def test_enforce_allows_when_the_argument_matches() -> None:
+    policy = Policy(
+        rules=(
+            Rule(
+                name="public-only",
+                effect=Effect.ALLOW,
+                tools=("mock-a__read_document",),
+                args={"doc_id": ("public",)},
+            ),
+        )
+    )
+    enforce_call(policy, _principal(), "mock-a__read_document", {"doc_id": "public"})

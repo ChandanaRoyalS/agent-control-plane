@@ -3,20 +3,22 @@
 # `config/policy.yaml` is the illustrative example: a narrow deny in front of
 # scoped allows, showing the shape a real policy takes. This file is different
 # on purpose. The compose stack exists to prove the whole path works end to end,
-# and the smoke test (scripts/compose_smoke.py) authenticates as `alice` and
-# expects to see every tool the upstreams expose. With catalogue filtering live
-# (task 35), that only holds if the policy grants alice all of them — so this
-# fixture does exactly that, and nothing more.
+# and the smoke test (scripts/compose_smoke.py) authenticates against the
+# composed Keycloak and expects to see every tool the upstreams expose.
 #
-# Keeping it separate from policy.yaml means the example stays realistic while
-# the smoke test gets a full catalogue, the same split already used for
+# The rule below is an unconditional allow: no `subjects`, `actors`, or `tools`,
+# which the evaluator treats as "matches anything" (an unset field is not a
+# constraint). That is deliberate. A Keycloak `sub` is a generated UUID, not a
+# username, so a subject-scoped rule could not name the smoke user without
+# pinning that UUID into the repo; the compose stack only needs "an
+# authenticated caller sees the whole catalogue", which this expresses directly.
+# Authentication is still required — filtering runs after the middleware, so an
+# unauthenticated request is still refused (the smoke test checks that too).
+#
+# Keeping this separate from policy.yaml means the example stays realistic while
+# the smoke test gets a full catalogue — the same split already used for
 # upstreams.yaml vs upstreams.compose.yaml.
-#
-# The six qualified tool names are the real ones the mocks expose
-# (<upstream>__<tool>, ADR 0003): mock-a read_document/search/create_ticket and
-# mock-b search/summarize/list_channels.
 
 rules:
-  - name: allow-alice-everything
+  - name: allow-any-authenticated-caller
     effect: allow
-    subjects: [alice]

@@ -4,7 +4,7 @@ Built on the SDK's low-level ``Server`` rather than the high-level
 ``MCPServer`` — see ADR 0005. The distinction matters more than it looks.
 ``MCPServer`` registers tools statically with decorators, which models a tool
 *provider*. A gateway is a tool *broker*: its catalogue is computed on every
-request, merged from live upstreams and (from task 37) filtered by what the
+request, merged from live upstreams and (from task 35) filtered by what the
 calling principal is entitled to see. ``Server`` takes ``on_list_tools`` and
 ``on_call_tool`` as per-request async handlers, which is exactly that shape.
 """

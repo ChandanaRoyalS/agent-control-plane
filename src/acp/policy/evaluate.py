@@ -36,7 +36,7 @@ class Decision:
     """The outcome of evaluating one request against a policy.
 
     Carries the rule that decided it, or ``None`` when nothing matched and the
-    deny default applied. The name is what the audit log (task 37) records: a
+    deny default applied. The name is what the audit log (a later task) records: a
     decision nobody can attribute to a rule is a decision nobody can explain.
     """
 

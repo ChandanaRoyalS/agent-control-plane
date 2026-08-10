@@ -1,0 +1,21 @@
+# Per-tool call costs (Phase 4, task 39). Optional: without this file, every
+# call costs one token and rate limiting behaves exactly as it did before.
+#
+# Each entry weights how much of a principal's budget a call to that tool draws.
+# An expensive tool — a large search, a write, anything that costs real money or
+# time upstream — should cost more than a cheap lookup, so a budget can throttle
+# the expensive calls without strangling the cheap ones. Names are qualified
+# (upstream__tool, ADR 0003). Costs are non-negative; zero is a free call.
+#
+# `default` is charged for any tool not listed here.
+
+default: 1.0
+
+costs:
+  # A search is heavier than a plain read — it fans out and ranks.
+  mock-a__search: 3.0
+  mock-b__search: 3.0
+  # Summarisation calls a model: the most expensive thing on offer here.
+  mock-b__summarize: 10.0
+  # Creating a ticket writes state; charge more than a read, less than a model.
+  mock-a__create_ticket: 5.0

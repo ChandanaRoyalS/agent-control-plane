@@ -6,7 +6,15 @@ calling without bound. Quotas, cost accounting, and result caching join here as
 the phase lands.
 """
 
+from acp.budget.cost import CostTable
 from acp.budget.enforce import enforce_rate_limit
+from acp.budget.loader import load_costs
 from acp.budget.ratelimit import RateLimiter, TokenBucket
 
-__all__ = ["RateLimiter", "TokenBucket", "enforce_rate_limit"]
+__all__ = [
+    "CostTable",
+    "RateLimiter",
+    "TokenBucket",
+    "enforce_rate_limit",
+    "load_costs",
+]

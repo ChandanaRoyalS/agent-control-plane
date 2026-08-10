@@ -23,7 +23,7 @@ from typing import Any
 
 from starlette.applications import Starlette
 
-from acp.budget import RateLimiter
+from acp.budget import CostTable, RateLimiter, load_costs
 from acp.config import GatewaySettings, allowed_hosts_for, load_issuers, load_upstreams
 from acp.exceptions import ConfigurationError
 from acp.gateway import UpstreamRegistry, build_app
@@ -93,6 +93,7 @@ async def gateway_from_configs(
     secrets: Mapping[str, str] | None = None,
     policy: Policy | None = None,
     limiter: RateLimiter | None = None,
+    costs: CostTable | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -156,6 +157,7 @@ async def gateway_from_configs(
             resource=resource,
             policy=policy,
             limiter=limiter,
+            costs=costs,
         )
         # Attached rather than yielded, so the signature every existing caller
         # and test depends on is unchanged. The probe loop itself is started by
@@ -514,6 +516,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         if settings.rate_limit_enabled
         else None
     )
+    costs = load_costs(settings.cost_file) if settings.cost_file is not None else None
     validator = await build_token_validator(settings)
     exchanger = build_token_exchanger(settings, validator, upstreams)
     check_upstream_audiences(upstreams, exchanging=exchanger is not None)
@@ -537,6 +540,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             secrets=secrets,
             policy=policy,
             limiter=limiter,
+            costs=costs,
         ) as app:
             yield app
     finally:

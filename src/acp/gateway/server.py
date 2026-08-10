@@ -24,7 +24,7 @@ from mcp.shared.exceptions import MCPError
 from starlette.applications import Starlette
 
 from acp import __version__
-from acp.budget import RateLimiter, enforce_rate_limit
+from acp.budget import CostTable, RateLimiter, enforce_rate_limit
 from acp.exceptions import ACPError, PolicyDeniedError
 from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.registry import UpstreamRegistry
@@ -71,6 +71,7 @@ def build_server(
     *,
     policy: Policy | None = None,
     limiter: RateLimiter | None = None,
+    costs: CostTable | None = None,
 ) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
@@ -161,8 +162,9 @@ def build_server(
             # (auth off) there is no per-caller budget to charge.
             subject = principal.subject if principal is not None else None
             if subject is not None:
+                cost = costs.cost_of(params.name) if costs is not None else 1.0
                 try:
-                    enforce_rate_limit(limiter, subject, time.monotonic())
+                    enforce_rate_limit(limiter, subject, time.monotonic(), cost)
                 except ACPError as exc:
                     raise to_mcp_error(exc) from exc
         try:
@@ -188,6 +190,7 @@ def build_app(
     resource: ProtectedResource | None = None,
     policy: Policy | None = None,
     limiter: RateLimiter | None = None,
+    costs: CostTable | None = None,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -214,7 +217,7 @@ def build_app(
         allowed_hosts=list(allowed_hosts),
         allowed_origins=list(allowed_origins),
     )
-    app = build_server(registry, policy=policy, limiter=limiter).streamable_http_app(
+    app = build_server(registry, policy=policy, limiter=limiter, costs=costs).streamable_http_app(
         stateless_http=True,
         json_response=True,
         transport_security=security,

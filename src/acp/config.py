@@ -140,6 +140,11 @@ class GatewaySettings(BaseSettings):
     rate_limit_refill_per_second: float = Field(default=1.0, gt=0)
     """The sustained rate, in calls per second, at which a principal's budget
     refills once the burst is spent."""
+
+    cost_file: Path | None = None
+    """Optional path to a per-tool cost table (``config/costs.yaml``). When set,
+    a call's budget draw is weighted by the tool's cost; unset, every call costs
+    one, exactly as rate limiting alone behaves."""
     """Path to the policy rulebook (task 32), resolved relative to the
     process's working directory.
 

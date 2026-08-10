@@ -59,3 +59,30 @@ def test_limits_are_per_principal() -> None:
     enforce_rate_limit(limiter, "bob", T0)  # bob unaffected by alice
     with pytest.raises(RateLimitExceededError):
         enforce_rate_limit(limiter, "alice", T0)
+
+
+# --- cost-weighted enforcement (task 39) ---
+
+
+def test_a_costly_call_debits_more_than_one() -> None:
+    """A call costing 5 drains a 10-capacity bucket in two, not ten."""
+    limiter = RateLimiter(capacity=10, refill_per_second=0.0)
+    enforce_rate_limit(limiter, "alice", T0, cost=5.0)
+    enforce_rate_limit(limiter, "alice", T0, cost=5.0)
+    with pytest.raises(RateLimitExceededError):
+        enforce_rate_limit(limiter, "alice", T0, cost=5.0)
+
+
+def test_a_free_call_never_exhausts_the_budget() -> None:
+    """A zero-cost call draws nothing, so it always passes."""
+    limiter = RateLimiter(capacity=1, refill_per_second=0.0)
+    for _ in range(100):
+        enforce_rate_limit(limiter, "alice", T0, cost=0.0)
+
+
+def test_the_default_cost_is_one() -> None:
+    """Called without a cost, enforcement charges one — task 38 behaviour."""
+    limiter = RateLimiter(capacity=1, refill_per_second=0.0)
+    enforce_rate_limit(limiter, "alice", T0)
+    with pytest.raises(RateLimitExceededError):
+        enforce_rate_limit(limiter, "alice", T0)

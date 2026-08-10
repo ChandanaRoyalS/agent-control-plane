@@ -143,7 +143,7 @@ def build_server(registry: UpstreamRegistry, *, policy: Policy | None = None) ->
             if principal is None:
                 raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
             try:
-                enforce_call(policy, principal, params.name)
+                enforce_call(policy, principal, params.name, params.arguments or {})
             except ACPError as exc:
                 raise to_mcp_error(exc) from exc
         try:

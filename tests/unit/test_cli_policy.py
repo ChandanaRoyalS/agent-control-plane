@@ -135,3 +135,90 @@ def test_missing_policy_file_is_usage_error(
     )
     assert code == 2
     assert "could not load policy" in capsys.readouterr().err
+
+
+def test_explain_with_a_matching_arg_allows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    policy = tmp_path / "p.yaml"
+    policy.write_text(
+        "rules:\n"
+        "  - name: public-only\n"
+        "    effect: allow\n"
+        "    tools: [mock-a__read_document]\n"
+        "    args:\n"
+        "      doc_id: [public]\n",
+        encoding="utf-8",
+    )
+    code = main(
+        [
+            "policy",
+            "explain",
+            "--policy",
+            str(policy),
+            "--subject",
+            "alice",
+            "--tool",
+            "mock-a__read_document",
+            "--arg",
+            "doc_id=public",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.startswith("ALLOW")
+    assert "doc_id=public" in out
+
+
+def test_explain_with_a_forbidden_arg_denies(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    policy = tmp_path / "p.yaml"
+    policy.write_text(
+        "rules:\n"
+        "  - name: public-only\n"
+        "    effect: allow\n"
+        "    tools: [mock-a__read_document]\n"
+        "    args:\n"
+        "      doc_id: [public]\n",
+        encoding="utf-8",
+    )
+    code = main(
+        [
+            "policy",
+            "explain",
+            "--policy",
+            str(policy),
+            "--subject",
+            "alice",
+            "--tool",
+            "mock-a__read_document",
+            "--arg",
+            "doc_id=secret",
+        ]
+    )
+    assert code == 1
+    assert capsys.readouterr().out.startswith("DENY")
+
+
+def test_explain_rejects_a_malformed_arg(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    policy = tmp_path / "p.yaml"
+    policy.write_text("rules:\n  - name: any\n    effect: allow\n", encoding="utf-8")
+    code = main(
+        [
+            "policy",
+            "explain",
+            "--policy",
+            str(policy),
+            "--subject",
+            "alice",
+            "--tool",
+            "t",
+            "--arg",
+            "no-equals-sign",
+        ]
+    )
+    assert code == 2
+    assert "KEY=VALUE" in capsys.readouterr().err

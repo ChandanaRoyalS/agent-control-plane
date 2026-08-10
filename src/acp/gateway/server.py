@@ -12,6 +12,7 @@ calling principal is entitled to see. ``Server`` takes ``on_list_tools`` and
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
@@ -23,6 +24,7 @@ from mcp.shared.exceptions import MCPError
 from starlette.applications import Starlette
 
 from acp import __version__
+from acp.budget import RateLimiter, enforce_rate_limit
 from acp.exceptions import ACPError, PolicyDeniedError
 from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.registry import UpstreamRegistry
@@ -64,7 +66,12 @@ def to_mcp_error(exc: ACPError) -> MCPError:
     return MCPError(rendered["code"], rendered["message"], rendered["data"])
 
 
-def build_server(registry: UpstreamRegistry, *, policy: Policy | None = None) -> Server[None]:
+def build_server(
+    registry: UpstreamRegistry,
+    *,
+    policy: Policy | None = None,
+    limiter: RateLimiter | None = None,
+) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
     The handlers are closures over ``registry`` rather than methods on a class
@@ -135,17 +142,29 @@ def build_server(registry: UpstreamRegistry, *, policy: Policy | None = None) ->
         _ctx: ServerRequestContext[None, Any],
         params: types.CallToolRequestParams,
     ) -> types.CallToolResult:
+        principal = current_principal()
         if policy is not None:
             # Fail-closed: a loaded policy means authorization is
             # expected. A missing principal here is a misconfiguration
             # (policy set, auth not), and must deny rather than permit.
-            principal = current_principal()
             if principal is None:
                 raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
             try:
                 enforce_call(policy, principal, params.name, params.arguments or {})
             except ACPError as exc:
                 raise to_mcp_error(exc) from exc
+
+        if limiter is not None:
+            # After authorization: a denied call must not spend budget,
+            # and rate-limiting a call we would refuse anyway is wasted
+            # work. Keyed on the principal's subject; with no principal
+            # (auth off) there is no per-caller budget to charge.
+            subject = principal.subject if principal is not None else None
+            if subject is not None:
+                try:
+                    enforce_rate_limit(limiter, subject, time.monotonic())
+                except ACPError as exc:
+                    raise to_mcp_error(exc) from exc
         try:
             result = await registry.call_tool(params.name, params.arguments or {})
         except ACPError as exc:
@@ -168,6 +187,7 @@ def build_app(
     validator: TokenValidator | None = None,
     resource: ProtectedResource | None = None,
     policy: Policy | None = None,
+    limiter: RateLimiter | None = None,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -194,7 +214,7 @@ def build_app(
         allowed_hosts=list(allowed_hosts),
         allowed_origins=list(allowed_origins),
     )
-    app = build_server(registry, policy=policy).streamable_http_app(
+    app = build_server(registry, policy=policy, limiter=limiter).streamable_http_app(
         stateless_http=True,
         json_response=True,
         transport_security=security,

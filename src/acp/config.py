@@ -128,6 +128,18 @@ class GatewaySettings(BaseSettings):
     working directory."""
 
     policy_file: Path = Path("config/policy.yaml")
+
+    rate_limit_enabled: bool = False
+    """Whether per-principal rate limiting is enforced. Off by default, opt-in
+    like policy: a gateway with no budget configured behaves exactly as before."""
+
+    rate_limit_capacity: float = Field(default=60.0, gt=0)
+    """The burst ceiling: the most calls a principal may make back-to-back before
+    the sustained rate applies. Also the value the bucket refills toward."""
+
+    rate_limit_refill_per_second: float = Field(default=1.0, gt=0)
+    """The sustained rate, in calls per second, at which a principal's budget
+    refills once the burst is spent."""
     """Path to the policy rulebook (task 32), resolved relative to the
     process's working directory.
 

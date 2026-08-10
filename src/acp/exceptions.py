@@ -342,3 +342,24 @@ class PolicyDeniedError(ACPError):
 
     code = -32040
     recoverable = False
+
+
+class RateLimitExceededError(ACPError):
+    """The caller has made too many requests and must slow down.
+
+    ``recoverable`` is **true**, and unlike an expired token it recovers on its
+    own: the bucket refills with the passage of time, so the identical request
+    will succeed once enough of it has passed. That is genuinely different advice
+    from a policy denial — "wait, then retry" rather than "stop" — and the flag
+    is what tells the agent which. The first budget defence (Phase 4): a runaway
+    or compromised agent cannot spend without bound, because each principal draws
+    from a bucket that fills at a fixed rate.
+
+    Carries ``retry_after`` seconds in ``details`` — a hint, not a promise, of
+    how long until a token is available. It is safe to expose: it reveals only
+    the shape of the limit the caller is already hitting, not anything about
+    other callers or the policy.
+    """
+
+    code = -32050
+    recoverable = True

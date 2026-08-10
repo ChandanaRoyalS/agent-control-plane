@@ -66,6 +66,7 @@ services:
       # settings as JSON, not as comma-separated text.
       ACP_ALLOWED_HOSTS: '["localhost","127.0.0.1","gateway","acp-gateway"]'
       ACP_UPSTREAMS_FILE: /app/config/upstreams.compose.yaml
+      ACP_POLICY_FILE: /app/config/policy.compose.yaml
       ACP_SCHEMA_BASELINE_FILE: /app/config/schema-baseline.json
       ACP_HEALTH_PROBE_INTERVAL: "5.0"
       # Interpolated so probing can be turned off from the shell without

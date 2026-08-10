@@ -1,0 +1,22 @@
+# The policy the composed stack runs under — permissive by design.
+#
+# `config/policy.yaml` is the illustrative example: a narrow deny in front of
+# scoped allows, showing the shape a real policy takes. This file is different
+# on purpose. The compose stack exists to prove the whole path works end to end,
+# and the smoke test (scripts/compose_smoke.py) authenticates as `alice` and
+# expects to see every tool the upstreams expose. With catalogue filtering live
+# (task 35), that only holds if the policy grants alice all of them — so this
+# fixture does exactly that, and nothing more.
+#
+# Keeping it separate from policy.yaml means the example stays realistic while
+# the smoke test gets a full catalogue, the same split already used for
+# upstreams.yaml vs upstreams.compose.yaml.
+#
+# The six qualified tool names are the real ones the mocks expose
+# (<upstream>__<tool>, ADR 0003): mock-a read_document/search/create_ticket and
+# mock-b search/summarize/list_channels.
+
+rules:
+  - name: allow-alice-everything
+    effect: allow
+    subjects: [alice]

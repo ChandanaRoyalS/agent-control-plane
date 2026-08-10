@@ -14,6 +14,7 @@ here and testable, and ``server.on_call_tool`` holds only the one-line call.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 
 from acp.exceptions import PolicyDeniedError
 from acp.identity.principal import Principal
@@ -23,7 +24,12 @@ from acp.policy.schema import Policy
 logger = logging.getLogger(__name__)
 
 
-def enforce_call(policy: Policy, principal: Principal, tool: str) -> None:
+def enforce_call(
+    policy: Policy,
+    principal: Principal,
+    tool: str,
+    arguments: Mapping[str, object] | None = None,
+) -> None:
     """Allow the call to proceed, or raise ``PolicyDeniedError``.
 
     Returns ``None`` when the policy allows ``principal`` to call ``tool``. On a
@@ -38,7 +44,7 @@ def enforce_call(policy: Policy, principal: Principal, tool: str) -> None:
     an undifferentiated refusal — the same split ``AuthenticationError`` makes
     between its logged reason and its wire message.
     """
-    decision = evaluate(policy, principal, tool)
+    decision = evaluate(policy, principal, tool, arguments)
     if decision.allowed:
         return
     logger.info(

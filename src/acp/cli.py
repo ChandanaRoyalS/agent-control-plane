@@ -74,6 +74,22 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _parse_args(pairs: list[str]) -> dict[str, str]:
+    """Turn ``["k=v", ...]`` into a mapping, for the simulator's --arg flag.
+
+    Splits on the first ``=`` only, so a value may itself contain ``=``. A pair
+    without an ``=`` is a usage error rather than a silently-empty value.
+    """
+    out: dict[str, str] = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key:
+            msg = f"--arg must be KEY=VALUE, got {pair!r}"
+            raise ValueError(msg)
+        out[key] = value
+    return out
+
+
 def _add_policy_commands(subparsers: Any) -> None:
     """``acp policy explain`` (task 36): the policy simulator.
 
@@ -92,6 +108,13 @@ def _add_policy_commands(subparsers: Any) -> None:
     explain.add_argument("--subject", required=True, help="the human subject")
     explain.add_argument("--actor", help="the acting agent's subject, if delegated")
     explain.add_argument("--tool", required=True, help="qualified tool name")
+    explain.add_argument(
+        "--arg",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="a call argument, repeatable; e.g. --arg doc_id=public",
+    )
 
 
 # The issuer on a simulated principal: never validated, never trusted. The
@@ -110,15 +133,22 @@ def _policy_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -
     except ACPError as exc:
         return _usage_error(f"could not load policy: {exc.message}")
 
+    try:
+        arguments = _parse_args(args.arg)
+    except ValueError as exc:
+        return _usage_error(str(exc))
+
     actor = Actor(subject=args.actor) if args.actor else None
     principal = Principal(subject=args.subject, issuer=SIMULATED_ISSUER, actor=actor)
-    decision = evaluate(policy, principal, args.tool)
+    decision = evaluate(policy, principal, args.tool, arguments)
 
     verdict = "ALLOW" if decision.allowed else "DENY"
     print(f"{verdict}  {args.tool}")  # noqa: T201
     print(f"  subject: {args.subject}")  # noqa: T201
     if args.actor:
         print(f"  actor:   {args.actor}")  # noqa: T201
+    for key, value in arguments.items():
+        print(f"  arg:     {key}={value}")  # noqa: T201
     matched = decision.rule if decision.rule is not None else "(none - deny default)"
     print(f"  rule:    {matched}")  # noqa: T201
     print(f"  reason:  {decision.reason}")  # noqa: T201

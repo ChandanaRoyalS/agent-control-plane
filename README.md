@@ -381,7 +381,7 @@ naming.
 |---|---|---|
 | 1 · Foundation | **complete** | Resilient, observable, aggregating passthrough |
 | 2 · Identity | planned | Delegated auth, scoped per-upstream token exchange |
-| 3 · Policy | planned | Deny-by-default engine, catalog filtering, simulator |
+| 3 · Policy | in progress | Deny-by-default engine, catalogue filtering, and simulator shipped; argument-level rules next |
 | 4 · Budgets | planned | Quotas, rate limits, cost accounting, result caching |
 | 5 · Firewall | planned | Injection defense with a measured detection rate |
 | 6 · Approvals | planned | Human-in-the-loop via multi-round-trip requests |

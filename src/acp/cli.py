@@ -5,7 +5,7 @@ real upstream from a terminal and watch what it does. That matters more than it
 sounds: a proxy you can only exercise through its own test suite is a proxy you
 cannot debug when something odd happens against a real server.
 
-Subcommands land here as the phases do — ``policy simulate`` in task 38,
+Subcommands land here as the phases do — ``policy explain`` (task 36),
 ``audit verify`` in task 57.
 """
 
@@ -26,7 +26,10 @@ from acp import __version__
 from acp.admin import build_admin_app
 from acp.config import load_settings, load_upstreams
 from acp.exceptions import ACPError
+from acp.identity.principal import Actor, Principal
 from acp.observability import configure_logging, configure_tracing
+from acp.policy import evaluate
+from acp.policy.loader import load_policy
 from acp.runtime import gateway_from_settings
 from acp.schema import SchemaSnapshot, diff
 from acp.secrets import cli as secrets_cli
@@ -66,8 +69,60 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_schemas_commands(subparsers)
     _add_secrets_commands(subparsers)
+    _add_policy_commands(subparsers)
 
     return parser
+
+
+def _add_policy_commands(subparsers: Any) -> None:
+    """``acp policy explain`` (task 36): the policy simulator.
+
+    One evaluator, two paths. A live request reaches ``evaluate`` through the
+    gateway; this reaches the same ``evaluate`` from a terminal, so the
+    simulator and the gateway cannot disagree. No token, no upstream, no call.
+    """
+    policy = subparsers.add_parser("policy", help="inspect and simulate policy")
+    actions = policy.add_subparsers(dest="policy_command", metavar="<action>")
+
+    explain = actions.add_parser(
+        "explain",
+        help="show what the policy would decide for a synthetic request",
+    )
+    explain.add_argument("--policy", required=True, help="path to the policy file")
+    explain.add_argument("--subject", required=True, help="the human subject")
+    explain.add_argument("--actor", help="the acting agent's subject, if delegated")
+    explain.add_argument("--tool", required=True, help="qualified tool name")
+
+
+# The issuer on a simulated principal: never validated, never trusted. The
+# simulator evaluates policy over an identity you describe; it does not
+# authenticate one.
+SIMULATED_ISSUER = "urn:acp:simulator"
+
+
+def _policy_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    if args.policy_command != "explain":
+        parser.parse_args(["policy", "--help"])
+        return USAGE_ERROR
+
+    try:
+        policy = load_policy(Path(args.policy))
+    except ACPError as exc:
+        return _usage_error(f"could not load policy: {exc.message}")
+
+    actor = Actor(subject=args.actor) if args.actor else None
+    principal = Principal(subject=args.subject, issuer=SIMULATED_ISSUER, actor=actor)
+    decision = evaluate(policy, principal, args.tool)
+
+    verdict = "ALLOW" if decision.allowed else "DENY"
+    print(f"{verdict}  {args.tool}")  # noqa: T201
+    print(f"  subject: {args.subject}")  # noqa: T201
+    if args.actor:
+        print(f"  actor:   {args.actor}")  # noqa: T201
+    matched = decision.rule if decision.rule is not None else "(none - deny default)"
+    print(f"  rule:    {matched}")  # noqa: T201
+    print(f"  reason:  {decision.reason}")  # noqa: T201
+    return 0 if decision.allowed else 1
 
 
 def _add_schemas_commands(subparsers: Any) -> None:
@@ -223,6 +278,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "secrets":
         return _secrets_command(parser, args)
+
+    if args.command == "policy":
+        return _policy_command(parser, args)
 
     return _upstream_command(args)
 

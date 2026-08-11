@@ -165,6 +165,20 @@ class GatewaySettings(BaseSettings):
     authenticated caller chooses the keys, so an unbounded cache is a memory
     target rather than a cache."""
 
+    provenance_framing_enabled: bool = False
+    """Whether every tool result is fenced as retrieved data before the model
+    reads it (task 46, ADR 0037).
+
+    Off by default because it is a visible change to the wire — a caller
+    receives two more content blocks than the upstream sent — and a deployment
+    should turn that on deliberately rather than discover it.
+
+    It is the half of the firewall with no false-positive rate: framing judges
+    nothing, so it cannot be wrong about a document. What it costs is two blocks
+    and a little of the model's context; what it buys is that a retrieved
+    paragraph no longer arrives looking like something the user said.
+    """
+
     quota_enabled: bool = False
     """Whether per-principal quotas are enforced. Off by default, opt-in like
     rate limiting: a gateway with no quota configured behaves exactly as before."""

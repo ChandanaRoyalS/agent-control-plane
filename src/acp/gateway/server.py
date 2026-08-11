@@ -32,6 +32,7 @@ from acp.budget import (
     enforce_rate_limit,
 )
 from acp.exceptions import ACPError, PolicyDeniedError
+from acp.firewall import frame
 from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.naming import upstream_of
 from acp.gateway.registry import UpstreamRegistry
@@ -103,6 +104,16 @@ def _result_key(
     )
 
 
+def _framed(result: CallToolResult, tool: str, provenance: bool) -> CallToolResult:
+    """The result the caller receives: fenced when provenance framing is on.
+
+    Applied at the point of return and nowhere else, so both the cache-hit and
+    cache-miss paths get their own fresh delimiter, and the cache never holds
+    one. See ADR 0037.
+    """
+    return frame(result, tool=tool) if provenance else result
+
+
 def _served_from_cache(results: ResultCache, key: ResultKey, tool: str) -> CallToolResult | None:
     """A held result for this key, with the hit or miss recorded either way."""
     held = results.get(key)
@@ -122,6 +133,7 @@ def build_server(
     quota: QuotaCounter | None = None,
     cacheable: CacheableTools | None = None,
     results: ResultCache | None = None,
+    provenance: bool = False,
 ) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
@@ -251,7 +263,10 @@ def build_server(
         if cache_key is not None and results is not None:
             held = _served_from_cache(results, cache_key, params.name)
             if held is not None:
-                return to_mcp_call_tool_result(held)
+                # Framed here rather than before storing: a cached fence is a
+                # fence the attacker has already seen, and a per-result nonce
+                # replayed from a cache entry is a per-entry one (ADR 0037).
+                return to_mcp_call_tool_result(_framed(held, params.name, provenance))
 
         try:
             result = await registry.call_tool(params.name, arguments)
@@ -262,7 +277,7 @@ def build_server(
             # `put` refuses an `is_error` result itself, so a failed tool call
             # cannot be cached even from here.
             results.put(cache_key, result, ttl=ttl)
-        return to_mcp_call_tool_result(result)
+        return to_mcp_call_tool_result(_framed(result, params.name, provenance))
 
     return Server(
         SERVER_NAME,
@@ -285,6 +300,7 @@ def build_app(
     quota: QuotaCounter | None = None,
     cacheable: CacheableTools | None = None,
     results: ResultCache | None = None,
+    provenance: bool = False,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -319,6 +335,7 @@ def build_app(
         quota=quota,
         cacheable=cacheable,
         results=results,
+        provenance=provenance,
     ).streamable_http_app(
         stateless_http=True,
         json_response=True,

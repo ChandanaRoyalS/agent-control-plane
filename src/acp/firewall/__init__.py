@@ -14,14 +14,18 @@ believing — are tasks 48 to 52.
 """
 
 from acp.firewall.findings import Confidence, Family, Finding
+from acp.firewall.provenance import Fence, fence_for, frame
 from acp.firewall.screen import Screener, Screening, ScreenPolicy, screen_policy_for
 
 __all__ = [
     "Confidence",
     "Family",
+    "Fence",
     "Finding",
     "ScreenPolicy",
     "Screener",
     "Screening",
+    "fence_for",
+    "frame",
     "screen_policy_for",
 ]

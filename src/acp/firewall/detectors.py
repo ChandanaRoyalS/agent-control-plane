@@ -229,7 +229,14 @@ def disallowed_url(text: str, allowed_hosts: AbstractSet[str] = frozenset()) -> 
 # ---------------------------------------------------------------------------
 
 _BASE64_RUN: Final = re.compile(r"[A-Za-z0-9+/]{24,4000}={0,2}")
-MIN_DECODED = 12
+"""Twenty-four characters is the length floor, and it is the *only* one.
+
+An earlier draft also carried a `MIN_DECODED = 12` guard on the decoded bytes.
+It could never fire — twenty-four base64 characters decode to eighteen bytes —
+so it was a bound that looked like a control and was unreachable, which is worse
+than no bound at all because a reader trusts it. Coverage found it: a `continue`
+no input could reach. One floor, stated once, in the place that enforces it.
+"""
 
 
 def encoded_payload(text: str) -> Iterator[Finding]:
@@ -255,8 +262,6 @@ def encoded_payload(text: str) -> Iterator[Finding]:
         try:
             raw = base64.b64decode(candidate, validate=True)
         except (binascii.Error, ValueError):
-            continue
-        if len(raw) < MIN_DECODED:
             continue
         try:
             decoded = raw.decode("utf-8")

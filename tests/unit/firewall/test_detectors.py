@@ -24,7 +24,14 @@ from acp.firewall.detectors import (
     strip_invisible,
     tool_name_mention,
 )
-from acp.firewall.findings import MAX_EVIDENCE, Confidence, Family, Finding, redact
+from acp.firewall.findings import (
+    MAX_EVIDENCE,
+    Confidence,
+    Family,
+    Finding,
+    describe,
+    redact,
+)
 
 ZWSP = "\u200b"
 RLO = "\u202e"
@@ -278,3 +285,40 @@ def test_a_finding_redacts_at_construction() -> None:
 
     assert "\n" not in finding.evidence
     assert "\x1b" not in finding.evidence
+
+
+# ---------------------------------------------------------------------------
+# The edges coverage pointed at
+# ---------------------------------------------------------------------------
+
+
+def test_a_character_with_no_unicode_name_falls_back_to_its_codepoint() -> None:
+    """Private-use and unassigned codepoints have no name. The fallback is
+    unhelpful but honest; raising here would let one odd character take down the
+    screening of an otherwise ordinary document."""
+    assert describe("\ue000") == "U+E000"
+
+
+def test_a_malformed_url_has_no_host_rather_than_raising() -> None:
+    """`urlsplit` raises on some malformed authorities. A detector that raised
+    would hand a hostile document a way to abort screening — put one bad URL at
+    the top and the rest goes unexamined."""
+    assert list(disallowed_url("https://[oops", frozenset())) == []
+
+
+def test_a_relative_image_is_not_an_external_one() -> None:
+    """No host means nothing was reached out to, so there is nothing to report.
+    Worth asserting because the natural way to write this check treats an empty
+    host as "not in the allow-list"."""
+    assert list(external_image("![logo](/assets/logo.png)", frozenset({"docs.corp"}))) == []
+
+
+def test_a_finding_labels_itself_for_a_log_line() -> None:
+    finding = Finding(
+        detector="external_image",
+        family=Family.EXFILTRATION,
+        confidence=Confidence.HIGH,
+        evidence="https://evil.test/p",
+    )
+
+    assert finding.label == "external_image (exfiltration, high)"

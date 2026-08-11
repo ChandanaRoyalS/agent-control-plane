@@ -98,6 +98,7 @@ async def gateway_from_configs(
     quota: QuotaCounter | None = None,
     cacheable: CacheableTools | None = None,
     results: ResultCache | None = None,
+    provenance: bool = False,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -165,6 +166,7 @@ async def gateway_from_configs(
             quota=quota,
             cacheable=cacheable,
             results=results,
+            provenance=provenance,
         )
         # Attached rather than yielded, so the signature every existing caller
         # and test depends on is unchanged. The probe loop itself is started by
@@ -573,6 +575,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             quota=quota,
             cacheable=cacheable,
             results=results,
+            provenance=settings.provenance_framing_enabled,
         ) as app:
             yield app
     finally:

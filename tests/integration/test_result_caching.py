@@ -139,6 +139,7 @@ def conversation(
     *,
     policy: Policy | None = None,
     cacheable: CacheableTools | None = None,
+    queries: list[str] | None = None,
 ) -> list[str]:
     """Drive several calls through one gateway process, returning what each
     caller received.
@@ -147,8 +148,9 @@ def conversation(
     the failure worth testing for only exists across calls that share a process
     *and* differ in who made them.
 
-    Each entry is ``(token, tool)``; the arguments are identical throughout, so
-    that the only thing varying between two calls is who is making them.
+    Each entry is ``(token, tool)``. The arguments are identical throughout
+    unless ``queries`` says otherwise, so that the only thing varying between two
+    calls is who is making them — which is what makes a leak attributable.
     """
     table = cacheable or CacheableTools(ttls={CACHED_TOOL: 30.0})
 
@@ -172,14 +174,15 @@ def conversation(
             await stack.enter_async_context(app.router.lifespan_context(app))
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as agent:
-                for token, tool in calls:
+                for index, (token, tool) in enumerate(calls):
+                    query = queries[index] if queries is not None else "retention"
                     response = await agent.post(
                         "/mcp",
                         json={
                             "jsonrpc": "2.0",
                             "id": 1,
                             "method": "tools/call",
-                            "params": {"name": tool, "arguments": {"query": "retention"}},
+                            "params": {"name": tool, "arguments": {"query": query}},
                         },
                         headers={**MCP_HEADERS, "authorization": f"Bearer {token}"},
                     )
@@ -246,6 +249,39 @@ def test_the_same_caller_is_served_from_the_cache(keypair: Keypair) -> None:
 # ---------------------------------------------------------------------------
 # What is not cached
 # ---------------------------------------------------------------------------
+
+
+def test_the_same_caller_asking_a_different_question_gets_a_different_answer(
+    keypair: Keypair,
+) -> None:
+    """The arguments are part of the key, asserted through the gateway.
+
+    `tests/unit/results/test_cache.py` proves the *hash* changes when the
+    arguments change. That is a fact about a hash, and it holds even if the
+    gateway never passes the arguments in — `on_call_tool` could hand `key_for`
+    an empty dict on every call and every other test in this repository would
+    still pass, because every other test asks the same question twice.
+
+    So this one asks two different questions and requires two different answers.
+    It is the only assertion that fails when the *wiring* drops the arguments
+    rather than the key.
+
+    Added because `scripts/mutate_result_cache.py` removed the arguments from
+    the key on its first run and nothing went red. The harness found a hole in
+    the suite it was written to check, which is the entire reason for having it.
+    """
+    upstream = CountingUpstream()
+    alice = keypair.sign(claims(sub=ALICE))
+
+    received = conversation(
+        upstream,
+        keypair,
+        [(alice, CACHED_TOOL), (alice, CACHED_TOOL)],
+        queries=["retention", "churn"],
+    )
+
+    assert upstream.calls == 2, "a different question was answered from the old entry"
+    assert received[0] != received[1]
 
 
 def test_a_tool_not_declared_cacheable_always_reaches_its_upstream(keypair: Keypair) -> None:

@@ -80,7 +80,14 @@ MUTATIONS: tuple[Mutation, ...] = (
         # isolation test is *not* the one that should catch it. Listed against
         # the same-caller test, because the observable failure is a caller being
         # handed their own answer to a question they did not ask.
-        caught_by=frozenset({"test_the_same_caller_is_served_from_the_cache"}),
+        # Not the same-caller test, which was the first guess and was wrong:
+        # dropping the arguments makes the key *broader*, so two identical calls
+        # still hit and that test still passes. What catches it is a caller
+        # asking two *different* questions — an assertion that did not exist
+        # until this harness ran and found nothing went red.
+        caught_by=frozenset(
+            {"test_the_same_caller_asking_a_different_question_gets_a_different_answer"}
+        ),
         suite=SUITE,
     ),
 )

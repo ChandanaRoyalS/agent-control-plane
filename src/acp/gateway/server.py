@@ -24,7 +24,13 @@ from mcp.shared.exceptions import MCPError
 from starlette.applications import Starlette
 
 from acp import __version__
-from acp.budget import CostTable, RateLimiter, enforce_rate_limit
+from acp.budget import (
+    CostTable,
+    QuotaCounter,
+    RateLimiter,
+    enforce_quota,
+    enforce_rate_limit,
+)
 from acp.exceptions import ACPError, PolicyDeniedError
 from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.registry import UpstreamRegistry
@@ -72,6 +78,7 @@ def build_server(
     policy: Policy | None = None,
     limiter: RateLimiter | None = None,
     costs: CostTable | None = None,
+    quota: QuotaCounter | None = None,
 ) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
@@ -155,16 +162,26 @@ def build_server(
             except ACPError as exc:
                 raise to_mcp_error(exc) from exc
 
-        if limiter is not None:
-            # After authorization: a denied call must not spend budget,
-            # and rate-limiting a call we would refuse anyway is wasted
-            # work. Keyed on the principal's subject; with no principal
-            # (auth off) there is no per-caller budget to charge.
-            subject = principal.subject if principal is not None else None
-            if subject is not None:
-                cost = costs.cost_of(params.name) if costs is not None else 1.0
+        # After authorization: a denied call must not spend budget, and
+        # charging a call we would refuse anyway is wasted work. Both budgets
+        # key on the principal's subject; with no principal (auth off) there is
+        # no per-caller budget to charge, so both are skipped. The cost is
+        # resolved once and shared by both.
+        subject = principal.subject if principal is not None else None
+        if subject is not None and (limiter is not None or quota is not None):
+            cost = costs.cost_of(params.name) if costs is not None else 1.0
+            if limiter is not None:
+                # A monotonic clock for the rate: a wall-clock jump must not
+                # hand out or withhold burst allowance.
                 try:
                     enforce_rate_limit(limiter, subject, time.monotonic(), cost)
+                except ACPError as exc:
+                    raise to_mcp_error(exc) from exc
+            if quota is not None:
+                # Wall-clock time for the window: a daily quota aligns to real
+                # calendar time, not to how long the process has been running.
+                try:
+                    enforce_quota(quota, subject, time.time(), cost)
                 except ACPError as exc:
                     raise to_mcp_error(exc) from exc
         try:
@@ -191,6 +208,7 @@ def build_app(
     policy: Policy | None = None,
     limiter: RateLimiter | None = None,
     costs: CostTable | None = None,
+    quota: QuotaCounter | None = None,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -217,7 +235,9 @@ def build_app(
         allowed_hosts=list(allowed_hosts),
         allowed_origins=list(allowed_origins),
     )
-    app = build_server(registry, policy=policy, limiter=limiter, costs=costs).streamable_http_app(
+    app = build_server(
+        registry, policy=policy, limiter=limiter, costs=costs, quota=quota
+    ).streamable_http_app(
         stateless_http=True,
         json_response=True,
         transport_security=security,

@@ -145,6 +145,18 @@ class GatewaySettings(BaseSettings):
     """Optional path to a per-tool cost table (``config/costs.yaml``). When set,
     a call's budget draw is weighted by the tool's cost; unset, every call costs
     one, exactly as rate limiting alone behaves."""
+
+    quota_enabled: bool = False
+    """Whether per-principal quotas are enforced. Off by default, opt-in like
+    rate limiting: a gateway with no quota configured behaves exactly as before."""
+
+    quota_limit: float = Field(default=10000.0, gt=0)
+    """The most a principal may spend within one window, in the same cost units
+    as rate limiting (one per call unless a cost table weights it)."""
+
+    quota_window_seconds: float = Field(default=86400.0, gt=0)
+    """The window length in seconds over which ``quota_limit`` applies; the tally
+    resets at each window boundary. Defaults to a day."""
     """Path to the policy rulebook (task 32), resolved relative to the
     process's working directory.
 

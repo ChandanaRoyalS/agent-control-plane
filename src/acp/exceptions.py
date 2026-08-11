@@ -363,3 +363,22 @@ class RateLimitExceededError(ACPError):
 
     code = -32050
     recoverable = True
+
+
+class QuotaExceededError(ACPError):
+    """The caller has used up their allowance for the current window.
+
+    ``recoverable`` is **true**, like a rate-limit error, but the wait is longer
+    and coarser: not "a token will refill in a moment" but "your quota resets when
+    this window ends". The identical call succeeds once the window rolls over.
+    Where the rate limiter stops a fast flood, the quota stops a slow drain that
+    never trips the rate limiter but would still run up unbounded spend across the
+    window (Phase 4).
+
+    Carries ``retry_after`` seconds — the time until the window resets — in
+    ``details``. Safe to expose: it describes only the window the caller is
+    already in, nothing about other callers or the size of anyone else's budget.
+    """
+
+    code = -32051
+    recoverable = True

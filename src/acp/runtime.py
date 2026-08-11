@@ -42,6 +42,7 @@ from acp.identity.cache import CredentialCache
 from acp.identity.issuers import registry_from_documents
 from acp.policy import Policy
 from acp.policy.loader import load_policy
+from acp.results import CacheableTools, ResultCache, load_cacheable
 from acp.schema import DEFAULT_BASELINE_PATH, DriftDetector, SchemaSnapshot
 from acp.secrets import EmptyStore, EncryptedFileStore, SecretStore, read_key
 from acp.upstream import Upstream, UpstreamConfig, connect_upstream
@@ -95,6 +96,8 @@ async def gateway_from_configs(
     limiter: RateLimiter | None = None,
     costs: CostTable | None = None,
     quota: QuotaCounter | None = None,
+    cacheable: CacheableTools | None = None,
+    results: ResultCache | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -160,6 +163,8 @@ async def gateway_from_configs(
             limiter=limiter,
             costs=costs,
             quota=quota,
+            cacheable=cacheable,
+            results=results,
         )
         # Attached rather than yielded, so the signature every existing caller
         # and test depends on is unchanged. The probe loop itself is started by
@@ -519,6 +524,20 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         else None
     )
     costs = load_costs(settings.cost_file) if settings.cost_file is not None else None
+    cacheable = load_cacheable(settings.cache_file) if settings.cache_file is not None else None
+    # The cache is built only when something is actually cacheable. A table that
+    # names no tools produces no cache at all, so "configured but empty" and
+    # "not configured" are the same runtime shape rather than two paths that
+    # have to stay in step.
+    results = ResultCache(max_entries=settings.result_cache_max_entries) if cacheable else None
+    if cacheable is not None:
+        logger.info(
+            "gateway.result_cache_configured",
+            extra={
+                "tools": list(cacheable.names),
+                "max_entries": settings.result_cache_max_entries,
+            },
+        )
     quota = (
         QuotaCounter(
             limit=settings.quota_limit,
@@ -552,6 +571,8 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             limiter=limiter,
             costs=costs,
             quota=quota,
+            cacheable=cacheable,
+            results=results,
         ) as app:
             yield app
     finally:

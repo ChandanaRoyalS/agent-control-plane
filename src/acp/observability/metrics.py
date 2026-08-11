@@ -107,6 +107,7 @@ class _Collectors:
     bulkhead_in_flight: Any
     bulkhead_capacity: Any
     credential_cache: Any
+    result_cache: Any
     schema_drift: Any
     schema_drift_outstanding: Any
 
@@ -180,6 +181,18 @@ def _build() -> _Collectors | None:
             # — a hostile upstream chooses its own tool names, and a label value
             # chosen by the thing being monitored is unbounded by construction.
             ["upstream", "kind"],
+            namespace=NAMESPACE,
+            registry=registry,
+        ),
+        result_cache=Counter(
+            "result_cache_total",
+            "Tool-result cache lookups, by outcome.",
+            # `outcome` only. The principal is unbounded by construction, and it
+            # is also a disclosure: a per-principal hit-rate series on a scrape
+            # endpoint is a record of who asked for what and when. The tool name
+            # is bounded but omitted for the same reason — hit rate per tool is a
+            # tuning question, and this counter answers a correctness one.
+            ["outcome"],
             namespace=NAMESPACE,
             registry=registry,
         ),
@@ -279,6 +292,20 @@ def observe_bulkhead(*, upstream: str, in_flight: int, capacity: int) -> None:
         return
     _C.bulkhead_in_flight.labels(upstream).set(in_flight)
     _C.bulkhead_capacity.labels(upstream).set(capacity)
+
+
+def record_result_cache(*, outcome: str) -> None:
+    """One tool-result cache lookup (task 43).
+
+    The interesting failure is silent in both directions. A key too *specific*
+    still returns correct results and simply never hits, so the estate serves
+    every call and nobody notices. A key too *broad* is a data breach whose only
+    artefact is its absence. Neither shows up in an error rate; the hit ratio is
+    the only place either becomes visible.
+    """
+    if _C is None:
+        return
+    _C.result_cache.labels(outcome).inc()
 
 
 def record_credential_cache(*, outcome: str) -> None:

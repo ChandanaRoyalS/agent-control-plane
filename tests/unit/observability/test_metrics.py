@@ -114,6 +114,7 @@ def test_recording_works_without_the_library_installed() -> None:
     metrics.observe_breaker(upstream="mock-a", state="open")
     metrics.observe_bulkhead(upstream="mock-a", in_flight=2, capacity=20)
     metrics.record_credential_cache(outcome="hit")
+    metrics.record_result_cache(outcome="hit")
 
 
 def test_rendering_always_returns_a_body_and_a_content_type() -> None:

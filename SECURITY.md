@@ -91,6 +91,18 @@ distinguishable. The full reasoning is in
   precisely so the gateway does not hold credentials for callers who have gone
   away.
 
+- **A cached result outliving an upstream entitlement change.** Since
+  [ADR 0035](docs/decisions/0035-a-result-cache-key-that-cannot-serve-the-wrong-person.md)
+  a tool result may be held for up to its configured ttl, capped at 300 seconds.
+  If a principal loses access to the *tool*, policy refuses them before the cache
+  is consulted and nothing stale is served. But if they keep the tool and lose
+  access to some records *inside* it, the gateway cannot see that change, and a
+  held result may be served for the remainder of its ttl. The ttl ceiling is that
+  exposure window, which is why it is bounded in code rather than in
+  configuration. Cache hits also do not reach the upstream, so an upstream's own
+  record of who read what becomes incomplete for any tool opted in — which is a
+  reason not to opt one in.
+
 - **A malicious operator.** Anyone who can change the configuration, the schema
   baseline or the policy files can change what the gateway permits. The controls
   here are arranged so that doing so leaves a reviewable trail — the schema
@@ -120,6 +132,7 @@ alternatives that were rejected and why:
 - [0021](docs/decisions/0021-one-backend-behind-a-seam.md) — an encrypted store turns many secrets into one key and says so; references live in config, values never do
 - [0022](docs/decisions/0022-a-cache-key-that-cannot-be-wrong.md) — a credential cache keyed on the request rather than on claims, because keying it on the upstream serves one caller's credential to the next and passes every functional test
 - [0023](docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md) — the no-passthrough invariant swept across every path, two static alarms that fail when a new path appears, and a mutation harness in CI that breaks the invariant on purpose to prove the test can fail
+- [0035](docs/decisions/0035-a-result-cache-key-that-cannot-serve-the-wrong-person.md) — a result cache key that cannot serve the wrong person, and why this one cache sits *inside* the policy check rather than outside it
 
 ## Supported versions
 

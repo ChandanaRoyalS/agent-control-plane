@@ -59,6 +59,10 @@ class Mutation:
     anchor: str
     replacement: str
     caught_by: frozenset[str]
+    suite: str = SUITE
+    """Which suite must notice. Defaulted, so the passthrough mutations read as
+    they always did, and settable so a sibling harness can reuse this machinery
+    for a different invariant rather than copying the plumbing."""
 
 
 MUTATIONS: tuple[Mutation, ...] = (
@@ -125,7 +129,7 @@ def working_tree_is_clean() -> bool:
     return result.returncode == 0 and not result.stdout.strip()
 
 
-def failing_tests() -> set[str]:
+def failing_tests(suite: str = SUITE) -> set[str]:
     """Which tests in the suite failed, by name.
 
     Names rather than a count, because "something failed" is not evidence that
@@ -143,7 +147,7 @@ def failing_tests() -> set[str]:
             sys.executable,
             "-m",
             "pytest",
-            SUITE,
+            suite,
             "-q",
             "--no-header",
             "-p",
@@ -212,7 +216,7 @@ def main() -> int:
         path = ROOT / mutation.path
         original = apply(mutation)
         try:
-            failed = failing_tests()
+            failed = failing_tests(mutation.suite)
         finally:
             path.write_text(original, encoding="utf-8")
 

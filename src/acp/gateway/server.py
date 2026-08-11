@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -33,6 +33,7 @@ from acp.budget import (
 )
 from acp.exceptions import ACPError, PolicyDeniedError
 from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
+from acp.gateway.naming import upstream_of
 from acp.gateway.registry import UpstreamRegistry
 from acp.identity import (
     AuthenticationMiddleware,
@@ -40,9 +41,11 @@ from acp.identity import (
     TokenValidator,
     metadata_route,
 )
-from acp.identity.principal import current_principal
-from acp.observability import RequestContextMiddleware
+from acp.identity.principal import Principal, current_principal
+from acp.observability import RequestContextMiddleware, metrics
 from acp.policy import Policy, enforce_call, visible_tools
+from acp.results import CacheableTools, ResultCache, ResultKey, key_for
+from acp.upstream.models import CallToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +75,44 @@ def to_mcp_error(exc: ACPError) -> MCPError:
     return MCPError(rendered["code"], rendered["message"], rendered["data"])
 
 
+def _result_key(
+    *,
+    principal: Principal | None,
+    tool: str,
+    arguments: Mapping[str, Any],
+    ttl: float | None,
+    results: ResultCache | None,
+) -> ResultKey | None:
+    """The cache key for this call, or ``None`` when it must not be cached.
+
+    ``None`` for four separate reasons, and each is a deliberate refusal rather
+    than a missing feature: the tool is not declared cacheable, no cache is
+    configured, there is no principal to key on, or the arguments will not
+    encode. The third is the one worth naming — an unauthenticated deployment
+    gets no result caching at all, because a shared entry is exactly the bug, and
+    the control that would make it safe is the one that is absent.
+    """
+    if ttl is None or results is None or principal is None:
+        return None
+    return key_for(
+        subject=principal.subject,
+        actor=principal.actor.subject if principal.actor else None,
+        upstream=upstream_of(tool),
+        tool=tool,
+        arguments=arguments,
+    )
+
+
+def _served_from_cache(results: ResultCache, key: ResultKey, tool: str) -> CallToolResult | None:
+    """A held result for this key, with the hit or miss recorded either way."""
+    held = results.get(key)
+    results.record(hit=held is not None)
+    metrics.record_result_cache(outcome="hit" if held is not None else "miss")
+    if held is not None:
+        logger.debug("gateway.result_cache_hit", extra={"tool": tool, "key": key.short})
+    return held
+
+
 def build_server(
     registry: UpstreamRegistry,
     *,
@@ -79,6 +120,8 @@ def build_server(
     limiter: RateLimiter | None = None,
     costs: CostTable | None = None,
     quota: QuotaCounter | None = None,
+    cacheable: CacheableTools | None = None,
+    results: ResultCache | None = None,
 ) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
@@ -184,10 +227,41 @@ def build_server(
                     enforce_quota(quota, subject, time.time(), cost)
                 except ACPError as exc:
                     raise to_mcp_error(exc) from exc
+        # The result cache, and its position in this function is the whole
+        # security argument (ADR 0035). Everywhere else in this codebase caching
+        # is outermost, because a hit should cost nothing — ADR 0006 argues it
+        # explicitly. Here that instinct is a vulnerability: a result cache
+        # consulted before authorization serves a caller the policy would have
+        # refused, and the denial never runs at all.
+        #
+        # So it sits *after* policy and *after* budget. After policy, because a
+        # denied call must never be answered from memory. After budget, because
+        # a caller repeating themselves is still making a call — otherwise the
+        # cheapest way to stay under a quota is to ask the same question twice,
+        # and ADR 0033's cost table quietly stops meaning anything.
+        arguments = params.arguments or {}
+        ttl = cacheable.ttl_for(params.name) if cacheable is not None else None
+        cache_key = _result_key(
+            principal=principal,
+            tool=params.name,
+            arguments=arguments,
+            ttl=ttl,
+            results=results,
+        )
+        if cache_key is not None and results is not None:
+            held = _served_from_cache(results, cache_key, params.name)
+            if held is not None:
+                return to_mcp_call_tool_result(held)
+
         try:
-            result = await registry.call_tool(params.name, params.arguments or {})
+            result = await registry.call_tool(params.name, arguments)
         except ACPError as exc:
             raise to_mcp_error(exc) from exc
+
+        if cache_key is not None and results is not None and ttl is not None:
+            # `put` refuses an `is_error` result itself, so a failed tool call
+            # cannot be cached even from here.
+            results.put(cache_key, result, ttl=ttl)
         return to_mcp_call_tool_result(result)
 
     return Server(
@@ -209,6 +283,8 @@ def build_app(
     limiter: RateLimiter | None = None,
     costs: CostTable | None = None,
     quota: QuotaCounter | None = None,
+    cacheable: CacheableTools | None = None,
+    results: ResultCache | None = None,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -236,7 +312,13 @@ def build_app(
         allowed_origins=list(allowed_origins),
     )
     app = build_server(
-        registry, policy=policy, limiter=limiter, costs=costs, quota=quota
+        registry,
+        policy=policy,
+        limiter=limiter,
+        costs=costs,
+        quota=quota,
+        cacheable=cacheable,
+        results=results,
     ).streamable_http_app(
         stateless_http=True,
         json_response=True,

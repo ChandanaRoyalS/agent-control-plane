@@ -53,6 +53,12 @@ jobs:
       - name: Prove the no-passthrough test can fail
         run: uv run python scripts/mutate_no_passthrough.py
 
+      # The result cache's isolation has no symptom when it breaks: the leaked
+      # answer is served, read, and recorded nowhere. So the test that guards it
+      # is itself tested, on every pull request.
+      - name: Prove the result-cache isolation test can fail
+        run: uv run python scripts/mutate_result_cache.py
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

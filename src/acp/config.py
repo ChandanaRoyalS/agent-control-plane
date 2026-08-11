@@ -146,6 +146,25 @@ class GatewaySettings(BaseSettings):
     a call's budget draw is weighted by the tool's cost; unset, every call costs
     one, exactly as rate limiting alone behaves."""
 
+    cache_file: Path | None = None
+    """Optional path to the cacheable-tools table (``config/cache.yaml``).
+
+    When set, results of the tools it names may be served from memory to the
+    *same principal* for the ttl it gives. Unset, nothing is cached and every
+    call reaches its upstream, exactly as before.
+
+    There is deliberately no ``cache_enabled`` boolean. Caching is on for the
+    tools the file names and off for everything else, so the file *is* the
+    switch — a boolean would be a second place for the answer to live, and the
+    failure mode of forgetting one is a tool cached that nobody meant to cache
+    (ADR 0035).
+    """
+
+    result_cache_max_entries: int = Field(default=512, gt=0)
+    """How many results to hold. A security limit before a memory one: an
+    authenticated caller chooses the keys, so an unbounded cache is a memory
+    target rather than a cache."""
+
     quota_enabled: bool = False
     """Whether per-principal quotas are enforced. Off by default, opt-in like
     rate limiting: a gateway with no quota configured behaves exactly as before."""

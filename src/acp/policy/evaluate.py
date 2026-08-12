@@ -58,6 +58,28 @@ class Decision:
         return f"{verb} by rule {self.rule!r}"
 
 
+def matches_without_arguments(rule: Rule, subject: str, actor: str | None, tool: str) -> bool:
+    """Does this rule's *identity and tool* section hold, ignoring arguments?
+
+    Split out rather than inlined because a second caller needs exactly this
+    question and no more: header-based pre-dispatch authorization (ADR 0043)
+    runs before a body exists, so it can know who is calling and which tool, and
+    cannot know the arguments. Asking the full matcher there would mean asking
+    about arguments that have not been read, and a rule constraining one would
+    answer "no match" for a call it may well permit.
+
+    Public, and named for what it answers rather than for who calls it, because
+    the alternative was a private helper imported across modules or a second
+    copy of these three lines — and a second copy of the match is exactly what
+    ADR 0030 exists to prevent.
+    """
+    if rule.subjects and subject not in rule.subjects:
+        return False
+    if rule.actors and (actor is None or actor not in rule.actors):
+        return False
+    return not (rule.tools and tool not in rule.tools)
+
+
 def _rule_matches(
     rule: Rule,
     subject: str,
@@ -74,11 +96,7 @@ def _rule_matches(
     means one of these" claim as the other fields, so a missing argument is not a
     match any more than a missing actor is.
     """
-    if rule.subjects and subject not in rule.subjects:
-        return False
-    if rule.actors and (actor is None or actor not in rule.actors):
-        return False
-    if rule.tools and tool not in rule.tools:
+    if not matches_without_arguments(rule, subject, actor, tool):
         return False
     for name, allowed in rule.args.items():
         if name not in arguments:

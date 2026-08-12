@@ -14,10 +14,12 @@ from functools import cached_property
 from pathlib import Path
 from typing import Final
 
+from acp.corpus.attack import Attack, AttackFamily, Expectation, parse_attack
 from acp.corpus.document import Document, Source, parse
 from acp.exceptions import ConfigurationError
 
 BENIGN: Final = "benign"
+ATTACK: Final = "attack"
 SUFFIX: Final = ".txt"
 
 
@@ -129,3 +131,80 @@ def load_corpus(directory: Path) -> Corpus:
             documents.append(document)
 
     return Corpus(documents=tuple(documents))
+
+
+@dataclass(frozen=True)
+class AttackCorpus:
+    """Every attack loaded, with the slices the harness asks for.
+
+    Deliberately a separate type from `Corpus` rather than a flag on it. The two
+    answer different questions — one is "how often is this wrong about a
+    document somebody needed", the other is "how much does it catch" — and a
+    single type carrying both would let a caller compute one from the other's
+    documents without noticing.
+    """
+
+    attacks: tuple[Attack, ...]
+
+    def __len__(self) -> int:
+        return len(self.attacks)
+
+    @cached_property
+    def families(self) -> tuple[AttackFamily, ...]:
+        return tuple(sorted({attack.family for attack in self.attacks}))
+
+    def of_family(self, family: AttackFamily) -> tuple[Attack, ...]:
+        return tuple(attack for attack in self.attacks if attack.family is family)
+
+    def expecting(self, expect: Expectation) -> tuple[Attack, ...]:
+        return tuple(attack for attack in self.attacks if attack.expect is expect)
+
+    @cached_property
+    def undetectable(self) -> tuple[Attack, ...]:
+        """The attacks this project asserts it cannot catch.
+
+        The most valuable slice in the corpus and the one a less honest project
+        omits. A detection rate computed without these is a rate over the
+        attacks somebody already knew how to find.
+        """
+        return self.expecting(Expectation.UNDETECTED)
+
+    def counts(self) -> dict[str, int]:
+        return {str(family): len(self.of_family(family)) for family in self.families}
+
+
+def load_attacks(root: Path | None = None) -> AttackCorpus:
+    """Load every adversarial document, or raise naming the file that stopped it."""
+    directory = (root or default_root()) / ATTACK
+    if not directory.is_dir():
+        msg = (
+            f"attack corpus {str(directory)!r} does not exist. The corpus is part "
+            f"of the source checkout and is not packaged with the distribution — "
+            f"see `acp.corpus.loader.default_root`."
+        )
+        raise ConfigurationError(msg)
+
+    families = sorted(child for child in directory.iterdir() if child.is_dir())
+    if not families:
+        msg = f"attack corpus {str(directory)!r} contains no family subdirectories"
+        raise ConfigurationError(msg)
+
+    attacks: list[Attack] = []
+    seen: set[str] = set()
+    for family_dir in families:
+        files = sorted(family_dir.glob(f"*{SUFFIX}"))
+        if not files:
+            msg = (
+                f"attack family {family_dir.name!r} has no documents. An empty family "
+                f"is a slice the harness will report a rate for from nothing."
+            )
+            raise ConfigurationError(msg)
+        for path in files:
+            attack = parse_attack(path, path.read_text(encoding="utf-8"), family=family_dir.name)
+            if attack.id in seen:
+                msg = f"duplicate attack id {attack.id!r}"
+                raise ConfigurationError(msg)
+            seen.add(attack.id)
+            attacks.append(attack)
+
+    return AttackCorpus(attacks=tuple(attacks))

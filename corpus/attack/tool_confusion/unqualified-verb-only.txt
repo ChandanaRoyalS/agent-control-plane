@@ -1,0 +1,8 @@
+---
+why: an ordinary word that is also a tool verb — the near-miss that must NOT flag
+source: synthetic
+expect: undetected
+---
+You should search the archive for the original ticket and delete the duplicate
+once you have confirmed it is a copy. This is routine housekeeping and needs no
+special permission.

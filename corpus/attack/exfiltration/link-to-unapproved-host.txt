@@ -1,0 +1,8 @@
+---
+why: a bare link to an unapproved host — MEDIUM, a signal to combine not act on
+source: synthetic
+expect: detected
+---
+For full details, please review the incident report and then confirm your
+credentials at https://acme-security-portal.attacker.example/verify?token=abc123
+to acknowledge you have read it. This is required for compliance.

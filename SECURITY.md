@@ -123,10 +123,14 @@ distinguishable. The full reasoning is in
   found that they withheld the gateway's own audit log and a marketing
   newsletter, so both were demoted to report-only. **No detection or
   false-positive rate is claimed anywhere in this repository.** The corpus
-  produces a withheld rate of zero over 106 benign documents, which is a floor
-  fitted to a corpus that was used while developing, not a measurement; the
-  honest numbers need the held-out split of task 50 and the confidence intervals
-  of task 52.
+  produces a withheld rate of zero over 106 benign documents, and the
+  adversarial corpus
+  ([ADR 0040](docs/decisions/0040-the-adversarial-corpus-and-the-attacks-nothing-catches.md))
+  scores the firewall per attack family — including two families,
+  `plain_assertion` and `delayed_multi_step`, that no detector catches at all,
+  recorded rather than omitted. Both numbers are floors fitted to corpora used
+  while developing, not measurements; the honest ones need the held-out split of
+  task 50 and the confidence intervals of task 52.
 
 - **A hostile tool description.** Tool *descriptions* reach the model's context
   through `tools/list` and are attacker-controlled in exactly the way tool

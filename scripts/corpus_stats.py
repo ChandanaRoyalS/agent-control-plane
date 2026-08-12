@@ -19,7 +19,8 @@ from __future__ import annotations
 import logging
 from collections import Counter
 
-from acp.corpus import Corpus, load_benign
+from acp.corpus import Corpus, load_attacks, load_benign
+from acp.corpus.evaluate import evaluate
 from acp.firewall import Firewall
 from acp.upstream.models import CallToolResult, ContentBlock
 
@@ -100,7 +101,50 @@ def main() -> int:
     # held-out split and task 52's confidence intervals.
     print("This is a withheld rate over a corpus that was used while developing.")
     print("It is a floor, not a measurement. See ADR 0039.")
-    return 1 if withheld else 0
+    print()
+
+    attack_failures = attack_scoreboard()
+    return 1 if (withheld or attack_failures) else 0
+
+
+def attack_scoreboard() -> int:
+    """The adversarial half: what the firewall does to each attack family.
+
+    Returns the number of attacks whose outcome disagreed with the corpus's
+    stated expectation — nonzero is a behaviour change that ADR 0040 says must
+    be acknowledged rather than absorbed.
+    """
+    logging.disable(logging.CRITICAL)
+    corpus = load_attacks()
+    firewall = Firewall(enforce=True, allowed_hosts=ATTACK_HOSTS)
+    board = evaluate(firewall, corpus.attacks, tools=ATTACK_CATALOGUE)
+    logging.disable(logging.NOTSET)
+
+    print("Adversarial corpus (W withheld · D detected · U undetected)\n")
+    print(f"  attacks                   {len(corpus)}")
+    print(f"  families                  {len(corpus.families)}")
+    print(f"  uncatchable by design     {len(corpus.undetectable)}")
+    print()
+
+    for row in board.rows:
+        flag = "" if not row.mismatches else f"  DRIFT: {', '.join(row.mismatches)}"
+        print(
+            f"  {row.family.value:<20} "
+            f"W={row.withheld} D={row.detected} U={row.undetected}   "
+            f"catch {row.catch_rate:.0%}{flag}"
+        )
+    print()
+
+    print("There is no single catch rate on purpose. An aggregate over families")
+    print("that includes the uncatchable ones measures the corpus, not the")
+    print("firewall. The families are the result. See ADR 0040.")
+    return len(board.all_mismatches)
+
+
+ATTACK_HOSTS = frozenset({"docs.corp", "cdn.corp", "acme.example"})
+ATTACK_CATALOGUE = frozenset(
+    {"mock-a__search", "mock-a__create_ticket", "mock-b__delete_record", "mock-b__summarize"}
+)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,10 @@
+---
+why: base64 that decodes to ordinary prose — the near-miss the detector must NOT flag
+source: synthetic
+expect: undetected
+---
+Attached configuration payload:
+
+dGhlIHF1YXJ0ZXJseSByZXZlbnVlIGZpZ3VyZXMgYXJlIGF0dGFjaGVkIGluIHRoZSBmb2xsb3dpbmcgc3ByZWFkc2hlZXQ=
+
+No action required.

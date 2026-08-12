@@ -2,6 +2,8 @@
 """What the firewall actually does, measured — false positives first.
 
     uv run python scripts/evaluate.py                 # the development split
+    uv run python scripts/evaluate.py --check         # diff against the baseline
+    uv run python scripts/evaluate.py --capture       # accept these numbers
     uv run python scripts/evaluate.py --unseal        # opens the held-out split
     ACP_FIREWALL_CLASSIFIER_ENABLED=1 uv run python scripts/evaluate.py
 
@@ -20,6 +22,11 @@ breaking it a decision somebody made rather than a default they inherited.
 The report still *names* the split and its size on every run, unsealed or not,
 so the seal is visible in the artifact rather than asserted in a document nobody
 opens.
+
+`--check` is the CI gate (task 53, ADR 0047). It diffs this run against
+`corpus/eval-baseline.json` and fails on any count that got worse. `--capture`
+rewrites that file, which is how a change is *accepted* — as a reviewable diff
+with a person's name on it rather than as a threshold somebody quietly raised.
 """
 
 from __future__ import annotations
@@ -29,6 +36,13 @@ import logging
 import os
 import sys
 
+from acp.corpus.baseline import (
+    Comparison,
+    baseline_from,
+    compare,
+    default_baseline_path,
+    load_baseline,
+)
 from acp.corpus.harness import (
     DEFAULT_DEPLOYMENT,
     DEFAULT_SEED,
@@ -38,10 +52,23 @@ from acp.corpus.harness import (
 from acp.corpus.heldout import load_split
 from acp.corpus.loader import load_benign
 from acp.corpus.metrics import DEFAULT_RESAMPLES
+from acp.exceptions import ACPError
 from acp.firewall import Firewall, OllamaClassifier
 from acp.firewall.ollama import ollama_classify
 
 CLASSIFIER_ENV = "ACP_FIREWALL_CLASSIFIER_ENABLED"
+
+REGRESSED = 1
+"""Something got worse, or an attack stopped behaving as recorded."""
+
+NOT_COMPARABLE = 2
+"""The corpus or the deployment moved, so no comparison was possible.
+
+A distinct code from a regression, because they need opposite responses: one is
+"find what broke", the other is "re-capture, the ruler changed". A CI job that
+could not tell them apart would send somebody hunting a bug in the firewall that
+is really a document they added.
+"""
 
 RULE = "=" * 78
 
@@ -120,6 +147,16 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--resamples", type=int, default=DEFAULT_RESAMPLES)
     parser.add_argument(
+        "--check",
+        action="store_true",
+        help="diff against corpus/eval-baseline.json and fail on any regression",
+    )
+    parser.add_argument(
+        "--capture",
+        action="store_true",
+        help="accept this run's numbers as the new baseline",
+    )
+    parser.add_argument(
         "--unseal",
         action="store_true",
         help="ALSO score the held-out split. Not the default, on purpose — see ADR 0041.",
@@ -177,8 +214,93 @@ def main() -> int:
             f"corpus says they do.",
             file=sys.stderr,
         )
-        return 1
+        return REGRESSED
     print("\nEvery attack behaved as the corpus records.")
+
+    if args.capture:
+        return capture(report)
+    if args.check:
+        return check(report)
+    return 0
+
+
+def capture(report: Report) -> int:
+    """Write this run's counts as the accepted baseline.
+
+    Deliberately a separate verb from `--check` rather than a `--fix` flag on
+    it. Accepting a change to a security control's measured behaviour is a
+    decision, and a decision that happens as a side effect of running the check
+    is one nobody made.
+    """
+    path = default_baseline_path()
+    path.write_text(baseline_from(report).to_json(), encoding="utf-8")
+    print(f"\nWrote {path}.")
+    print("  Commit it. The diff is the record of what you accepted.")
+    return 0
+
+
+def render_comparison(comparison: Comparison) -> None:
+    if comparison.structural:
+        print(f"\n{RULE}")
+        print("  THE RULER CHANGED — these two runs are not comparable.")
+        print(RULE)
+        for line in comparison.structural:
+            print(f"  * {line}")
+        print(
+            "\n  This is not a regression and not a pass. Re-capture the baseline\n"
+            "  (--capture) so the diff records the corpus or configuration change,\n"
+            "  then read the numbers again."
+        )
+        return
+
+    if comparison.regressions:
+        print(f"\n{RULE}")
+        print("  REGRESSIONS")
+        print(RULE)
+        for line in comparison.regressions:
+            print(f"  ! {line}")
+
+    if comparison.improvements:
+        print("\nIMPROVEMENTS (the baseline now understates the firewall)")
+        for line in comparison.improvements:
+            print(f"  + {line}")
+
+
+def check(report: Report) -> int:
+    """Diff against the committed baseline; non-zero on anything worse.
+
+    The gate runs the deterministic detectors only. Gating on a model's output
+    would make the build flaky in a way nobody could distinguish from a real
+    regression — see ADR 0042 on why the classifier is optional and ADR 0047 on
+    why that matters here.
+    """
+    path = default_baseline_path()
+    try:
+        baseline = load_baseline(path)
+    except ACPError as exc:
+        print(f"\nFAILED: {exc.message}", file=sys.stderr)
+        return REGRESSED
+
+    comparison = compare(baseline, report)
+    render_comparison(comparison)
+
+    if comparison.structural:
+        return NOT_COMPARABLE
+    if comparison.regressions:
+        print(
+            f"\nFAILED: {len(comparison.regressions)} count(s) got worse against {path.name}.",
+            file=sys.stderr,
+        )
+        print(
+            "  If this is intended, `--capture` and commit the diff — that is how\n"
+            "  accepting it stays visible.",
+            file=sys.stderr,
+        )
+        return REGRESSED
+    if comparison.stale:
+        print("\n  Nothing got worse. Re-capture to record the improvement.")
+    else:
+        print(f"\nNo change against {path.name}.")
     return 0
 
 

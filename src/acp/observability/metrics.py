@@ -108,6 +108,8 @@ class _Collectors:
     bulkhead_capacity: Any
     credential_cache: Any
     result_cache: Any
+    firewall_decisions: Any
+    firewall_findings: Any
     schema_drift: Any
     schema_drift_outstanding: Any
 
@@ -210,6 +212,33 @@ def _build() -> _Collectors | None:
             namespace=NAMESPACE,
             registry=registry,
         ),
+        firewall_decisions=Counter(
+            "firewall_decisions_total",
+            "Tool results screened by the injection firewall, by decision.",
+            # A closed set of four: clean, reported, would_refuse, refused. The
+            # denominator is here on purpose — `clean` is counted even though it
+            # is deliberately not logged, because a detection count without the
+            # traffic it was drawn from is not a rate, and the false-positive
+            # rate is the number this whole phase is judged on.
+            ["decision"],
+            namespace=NAMESPACE,
+            registry=registry,
+        ),
+        firewall_findings=Counter(
+            "firewall_findings_total",
+            "Individual detector findings, by attack family and confidence.",
+            # Both labels are StrEnums: five families, three confidences,
+            # fifteen series, fixed forever. Deliberately not labelled by
+            # detector *or* tool — the first would grow with the codebase and
+            # the second is chosen by the caller.
+            #
+            # The *value* is attacker-influenced: a document with two hundred
+            # zero-width characters adds two hundred. That is correct for a
+            # count, and cardinality is what costs a metrics server memory.
+            ["family", "confidence"],
+            namespace=NAMESPACE,
+            registry=registry,
+        ),
         schema_drift_outstanding=Gauge(
             "schema_drift_outstanding",
             "Changes not yet acknowledged by re-capturing the baseline.",
@@ -306,6 +335,33 @@ def record_result_cache(*, outcome: str) -> None:
     if _C is None:
         return
     _C.result_cache.labels(outcome).inc()
+
+
+def record_firewall_decision(*, decision: str) -> None:
+    """One screened tool result, by what the gateway did about it (task 47).
+
+    The interesting series is the ratio between ``would_refuse`` and everything
+    else while a deployment runs in report mode, because that is the estimate of
+    what enforcement would cost it — measured on its own traffic rather than on
+    the project's corpus, which is the only place a deployment's own
+    false-positive rate can honestly come from.
+    """
+    if _C is None:
+        return
+    _C.firewall_decisions.labels(decision).inc()
+
+
+def record_firewall_finding(*, family: str, confidence: str) -> None:
+    """One detector finding (task 45), sliced the way the corpus is sliced.
+
+    By family, because a single detection rate over mixed traffic is unreadable:
+    the same number can be even coverage of everything or perfect coverage of
+    the easy families and nothing at all on encoding attacks. By confidence,
+    because that is what decides whether a finding can ever refuse.
+    """
+    if _C is None:
+        return
+    _C.firewall_findings.labels(family, confidence).inc()
 
 
 def record_credential_cache(*, outcome: str) -> None:

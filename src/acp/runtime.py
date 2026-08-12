@@ -26,6 +26,9 @@ from starlette.applications import Starlette
 from acp.budget import CostTable, QuotaCounter, RateLimiter, load_costs
 from acp.config import GatewaySettings, allowed_hosts_for, load_issuers, load_upstreams
 from acp.exceptions import ConfigurationError
+from acp.firewall import Firewall, firewall_for
+from acp.firewall.decision import ENFORCEABLE
+from acp.firewall.decision import Mode as FirewallMode
 from acp.gateway import UpstreamRegistry, build_app
 from acp.health import DEFAULT_INTERVAL, HealthMonitor
 from acp.identity import (
@@ -99,6 +102,7 @@ async def gateway_from_configs(
     cacheable: CacheableTools | None = None,
     results: ResultCache | None = None,
     provenance: bool = False,
+    firewall: Firewall | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -167,6 +171,7 @@ async def gateway_from_configs(
             cacheable=cacheable,
             results=results,
             provenance=provenance,
+            firewall=firewall,
         )
         # Attached rather than yielded, so the signature every existing caller
         # and test depends on is unchanged. The probe loop itself is started by
@@ -188,6 +193,67 @@ async def gateway_from_configs(
                     "gateway.upstream_close_failed", extra={"upstream": client.config.name}
                 )
         logger.info("gateway.stopped", extra={"upstream_count": len(clients)})
+
+
+def build_firewall(settings: GatewaySettings) -> Firewall | None:
+    """Assemble the injection firewall, or ``None`` when it is switched off.
+
+    Two things are said out loud here, because both are configurations that look
+    like they are doing more than they are.
+
+    **Enforcing without framing.** ADR 0038's interlock: the refusal notice is
+    the gateway speaking, so it is deliberately *not* fenced — which means that
+    with framing on, an unfenced block is by construction the gateway, and with
+    framing off a hostile document can impersonate a refusal notice. The content
+    is still withheld either way, so this is a warning rather than a refusal to
+    start; a deployment can reasonably adopt the two controls in either order,
+    but it should know which half it has.
+
+    **Enforcing with no allowed hosts.** ``external_image`` is the exfiltration
+    detector, and it cannot withhold anything until this deployment says which
+    hosts are ordinary — otherwise every logo in every document is a HIGH
+    finding. Worth a line, because "enforcement is on" and "exfiltration is
+    enforced" read as the same sentence and are not.
+    """
+    if settings.firewall_mode is FirewallMode.OFF:
+        return None
+
+    if settings.firewall_mode is FirewallMode.ENFORCE and not settings.provenance_framing_enabled:
+        logger.warning(
+            "firewall.enforcing_without_framing",
+            extra={
+                "reason": "ACP_PROVENANCE_FRAMING_ENABLED is not set",
+                "consequence": (
+                    "refused content is still withheld, but the refusal notice is "
+                    "indistinguishable from upstream content, so a document can "
+                    "impersonate one"
+                ),
+            },
+        )
+    if settings.firewall_mode is FirewallMode.ENFORCE and not settings.firewall_allowed_hosts:
+        logger.warning(
+            "firewall.exfiltration_not_enforced",
+            extra={
+                "reason": "ACP_FIREWALL_ALLOWED_HOSTS is empty",
+                "consequence": (
+                    "every markdown image is reported and none can withhold a "
+                    "result, because with no hosts configured the detector cannot "
+                    "tell an exfiltration URL from a logo"
+                ),
+            },
+        )
+
+    logger.info(
+        "firewall.enabled",
+        extra={
+            "mode": str(settings.firewall_mode),
+            "allowed_hosts": list(settings.firewall_allowed_hosts),
+            "enforceable_detectors": sorted(ENFORCEABLE),
+        },
+    )
+    return firewall_for(
+        settings.firewall_mode, allowed_hosts=frozenset(settings.firewall_allowed_hosts)
+    )
 
 
 async def build_token_validator(settings: GatewaySettings) -> TokenValidator | None:
@@ -548,6 +614,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         if settings.quota_enabled
         else None
     )
+    firewall = build_firewall(settings)
     validator = await build_token_validator(settings)
     exchanger = build_token_exchanger(settings, validator, upstreams)
     check_upstream_audiences(upstreams, exchanging=exchanger is not None)
@@ -576,6 +643,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             cacheable=cacheable,
             results=results,
             provenance=settings.provenance_framing_enabled,
+            firewall=firewall,
         ) as app:
             yield app
     finally:

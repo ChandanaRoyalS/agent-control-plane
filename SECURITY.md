@@ -103,6 +103,30 @@ distinguishable. The full reasoning is in
   record of who read what becomes incomplete for any tool opted in — which is a
   reason not to opt one in.
 
+- **An injection this gateway does not catch.** The firewall
+  ([ADR 0036](docs/decisions/0036-detect-before-deciding-and-count-the-false-positives.md),
+  [ADR 0037](docs/decisions/0037-tell-the-model-where-the-text-came-from.md),
+  [ADR 0038](docs/decisions/0038-refuse-loudly-and-never-quote-the-payload.md))
+  has three layers and each has a stated limit. The detectors are patterns, so
+  they catch what has a shape and miss a well-written paragraph that simply
+  asserts something false. Provenance framing removes the *free* version of the
+  attack — the one that works because nothing ever told the model the text was
+  retrieved — but it is an instruction to a system that follows instructions
+  probabilistically, and a sufficiently persuasive document may still win. It
+  also does not protect a client that flattens the content blocks and loses
+  their order. Structured refusal withholds content on a deliberately narrow
+  bar: HIGH confidence from one of four detectors, which means
+  `instruction_override` can never withhold anything at all. **No detection or
+  false-positive rate is claimed anywhere in this repository**, because none has
+  been measured yet; tasks 48 to 52 produce them against a held-out corpus.
+
+- **A hostile tool description.** Tool *descriptions* reach the model's context
+  through `tools/list` and are attacker-controlled in exactly the way tool
+  results are, but nothing screens or frames them. Schema drift detection
+  ([ADR 0013](docs/decisions/0013-schema-drift-is-a-security-control.md)) catches
+  a description that *changes*; a catalogue that was hostile from the first fetch
+  passes. Named here rather than left to be assumed closed.
+
 - **A malicious operator.** Anyone who can change the configuration, the schema
   baseline or the policy files can change what the gateway permits. The controls
   here are arranged so that doing so leaves a reviewable trail — the schema

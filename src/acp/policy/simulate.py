@@ -35,9 +35,9 @@ from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
 
-from acp.policy.evaluate import Decision, matches_without_arguments
+from acp.policy.evaluate import Decision, Verdict, decision_for, matches_without_arguments
 from acp.policy.record import RecordedDecision, Traffic
-from acp.policy.schema import Effect, Policy
+from acp.policy.schema import Policy
 
 
 class Outcome(Enum):
@@ -58,6 +58,15 @@ class Outcome(Enum):
     """Was refused, is now permitted. **The security change.** Intended or not,
     it is the half of the diff a reviewer is accountable for."""
 
+    NEWLY_GATED = "newly needs approval"
+    """Was decided outright, now waits for a person (ADR 0048).
+
+    Its own outcome rather than folded into "newly denied", because they are
+    different edits with different costs: a denial breaks the caller, and a gate
+    makes them slower and makes somebody's phone buzz. Reporting a wave of new
+    approvals as denials would make a careful edit look like an outage.
+    """
+
     SAME_VERDICT_NEW_RULE = "same verdict, different rule"
     """The right answer for a different reason.
 
@@ -71,7 +80,14 @@ class Outcome(Enum):
     whose value the log deliberately does not carry."""
 
 
-CHANGED = frozenset({Outcome.NEWLY_DENIED, Outcome.NEWLY_ALLOWED, Outcome.INDETERMINATE})
+CHANGED = frozenset(
+    {
+        Outcome.NEWLY_DENIED,
+        Outcome.NEWLY_ALLOWED,
+        Outcome.NEWLY_GATED,
+        Outcome.INDETERMINATE,
+    }
+)
 """Outcomes that mean "this edit is not proven safe".
 
 `INDETERMINATE` is in here, and that is the deliberate call: unproven is not the
@@ -89,7 +105,7 @@ are the same six characters on a terminal and very different things to read.
 
 
 def _render(decision: Decision) -> str:
-    return f"{'allow' if decision.allowed else 'deny'} by {decision.rule or DENY_DEFAULT}"
+    return f"{decision.verdict.value} by {decision.rule or DENY_DEFAULT}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,12 +203,19 @@ def possible_decisions(
                 # Constrains something this call did not send. It cannot have
                 # fired, and that is certainty rather than an assumption.
                 continue
-            reachable.append(Decision(allowed=rule.effect is Effect.ALLOW, rule=rule.name))
+            reachable.append(decision_for(rule))
             continue
-        reachable.append(Decision(allowed=rule.effect is Effect.ALLOW, rule=rule.name))
+        reachable.append(decision_for(rule))
         return tuple(reachable)
     reachable.append(Decision(allowed=False, rule=None))
     return tuple(reachable)
+
+
+_CHANGED_TO = {
+    Verdict.ALLOW: Outcome.NEWLY_ALLOWED,
+    Verdict.DENY: Outcome.NEWLY_DENIED,
+    Verdict.APPROVAL: Outcome.NEWLY_GATED,
+}
 
 
 def classify(recorded: RecordedDecision, possible: tuple[Decision, ...]) -> Outcome:
@@ -205,13 +228,13 @@ def classify(recorded: RecordedDecision, possible: tuple[Decision, ...]) -> Outc
     first question. Reporting it as indeterminate would bury a real change under
     noise nobody can act on.
     """
-    verdicts = {decision.allowed for decision in possible}
+    verdicts = {decision.verdict for decision in possible}
     if len(verdicts) > 1:
         return Outcome.INDETERMINATE
 
-    allowed = next(iter(verdicts))
-    if allowed != recorded.allowed:
-        return Outcome.NEWLY_ALLOWED if allowed else Outcome.NEWLY_DENIED
+    verdict = next(iter(verdicts))
+    if verdict is not recorded.verdict:
+        return _CHANGED_TO[verdict]
     if all(decision.rule == recorded.rule for decision in possible):
         return Outcome.UNCHANGED
     return Outcome.SAME_VERDICT_NEW_RULE

@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from acp.identity.principal import Principal
-from acp.policy.evaluate import evaluate
+from acp.policy.evaluate import Verdict, evaluate
 from acp.policy.schema import Policy
 from acp.upstream.models import ToolDefinition
 
@@ -29,11 +29,22 @@ def visible_tools(
 ) -> list[ToolDefinition]:
     """Return only the tools ``principal`` is allowed to call under ``policy``.
 
-    A tool survives iff ``evaluate`` allows the principal to call it by its
-    qualified name (``<upstream>__<tool>``, ADR 0003) — the same name the merged
-    catalogue already carries and the same the enforcer matches, so visibility
-    and callability cannot drift apart. Order is preserved: the catalogue's
-    ordering is a prompt-cache decision (see ``on_list_tools``), and filtering
-    must not disturb it.
+    A tool survives iff ``evaluate`` does not *deny* the principal calling it by
+    its qualified name (``<upstream>__<tool>``, ADR 0003) — the same name the
+    merged catalogue already carries and the same the enforcer matches, so
+    visibility and callability cannot drift apart. Order is preserved: the
+    catalogue's ordering is a prompt-cache decision (see ``on_list_tools``), and
+    filtering must not disturb it.
+
+    **"Not denied" rather than "allowed", and the difference is approvals.** A
+    tool held for human approval (ADR 0048) is one the agent is *supposed* to
+    ask for — that is the entire point of the flow. Hiding it would mean the
+    agent never names it, never triggers the approval, and the operator is never
+    asked; the feature would be unreachable from the only client that could use
+    it. So the catalogue shows it, the call starts the approval, and the human
+    decides. This is the one place where the old rule "visible iff callable"
+    needed restating as "visible iff not forbidden".
     """
-    return [tool for tool in tools if evaluate(policy, principal, tool.name).allowed]
+    return [
+        tool for tool in tools if evaluate(policy, principal, tool.name).verdict is not Verdict.DENY
+    ]

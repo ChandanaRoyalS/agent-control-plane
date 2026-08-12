@@ -20,5 +20,36 @@
 # upstreams.yaml vs upstreams.compose.yaml.
 
 rules:
+  # Task 55's demo, and the reason it sits *above* the broad allow: first match
+  # wins (ADR 0026), so a narrow `require_approval` in front of a broad `allow`
+  # is how an operator expresses "everything is fine except this one thing".
+  #
+  # `mock-a__create-ticket` is the destructive-ish tool in the mock fleet, so it
+  # is the one that stops and waits for a person. The tool stays *visible* in
+  # `tools/list` — a gated tool must be, because the agent naming it is what
+  # starts the approval — which is also why the smoke test still counts six.
+  #
+  # To drive it once the stack is up:
+  #
+  #   # 1. the agent asks, and is told to wait
+  #   curl -s localhost:8080/mcp -H 'authorization: Bearer <agent token>' ... \
+  #     -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{...}}'
+  #     -> {"result":{"resultType":"input_required","requestState":"<token>"}}
+  #
+  #   # 2. a person, on the other port, sees the actual call
+  #   curl -s localhost:9090/approvals -H 'authorization: Bearer dev-only-operator-token'
+  #
+  #   # 3. and answers it
+  #   curl -s -XPOST localhost:9090/approvals/<token> \
+  #     -H 'authorization: Bearer dev-only-operator-token' \
+  #     -d '{"approved":true,"reason":"checked with the data team"}'
+  #
+  #   # 4. the agent retries with the same requestState and the call runs
+  #
+  # Two ports, two credentials, two participants — which is the whole control.
+  - name: approve-ticket-creation
+    effect: require_approval
+    tools: [mock-a__create-ticket]
+
   - name: allow-any-authenticated-caller
     effect: allow

@@ -6,121 +6,85 @@ binds current_principal(), which on_call_tool reads. Nothing binds the principal
 by hand; a test that did would exercise a path the gateway does not have (the
 same lesson as tests/integration/test_no_passthrough.py).
 
-Driven exactly like test_gateway_server.call_gateway: the SDK's streamable-HTTP
-app starts its session-manager task group in the ASGI lifespan, so the request
-runs inside app.router.lifespan_context or the app serves uninitialised.
+Driven through `helpers.authenticated_gateway`: the SDK's streamable-HTTP app
+starts its session-manager task group in the ASGI lifespan, so the request runs
+inside it or the app serves uninitialised.
+
+**A denial has two layers, and until task 55 this file only ever tested one of
+them.** The requests here were hand-rolled and carried no `Mcp-Method` or
+`Mcp-Name`, so the pre-dispatch check (ADR 0043) had nothing to authorize on and
+abstained every time — every assertion below landed on `enforce_call`, the
+backstop. Sending valid requests changed which layer answers, and the deny tests
+started failing with `TypeError: string indices must be integers`: the refusal
+was no longer a JSON-RPC error object but an HTTP 403 with `{"error":
+"forbidden"}`, exactly as `_refuse` is written to answer.
+
+**That was the tests being wrong, not the gateway** — and it is the finding, not
+the inconvenience. A real client sending a valid request is refused at the
+header, before a body is read, and nothing in this suite had ever asserted what
+that client receives. So the denials below are now split: the ones the fast path
+can prove, and the one it must abstain on because the rule constrains an
+argument nobody has read yet. Both layers, each asserted where it actually
+answers.
 """
 
 from __future__ import annotations
 
-import contextlib
-import json
 import logging
 from typing import Any
 
 import anyio
 import httpx
 import pytest
-from starlette.applications import Starlette
 
-from acp.gateway import UpstreamRegistry, build_app
-from acp.identity import AuthenticationMiddleware
-from acp.identity.issuers import single_issuer
-from acp.identity.keys import JwksCache
-from acp.identity.validator import TokenPolicy, TokenValidator
-from acp.mocks import mock_a, mock_b
 from acp.observability.log import JsonFormatter
 from acp.policy import Effect, Policy, Rule
 from acp.policy.record import parse_traffic
 from acp.policy.simulate import Outcome, simulate
-from acp.upstream import UpstreamClient, UpstreamConfig
 
-from ..tokens import AUDIENCE, ISSUER, Keypair, claims
+from ..tokens import Keypair, claims
+from .helpers import authenticated_gateway, call_gateway, parse_rpc, post_gateway
 
 pytestmark = pytest.mark.integration
-
-MCP_HEADERS = {
-    "content-type": "application/json",
-    "accept": "application/json, text/event-stream",
-}
 
 # The default token's subject is alice@example.test (tests/tokens.py).
 ALICE = "alice@example.test"
 
-
-def _validator(keypair: Keypair) -> TokenValidator:
-    def handle(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=keypair.jwks())
-
-    keys = JwksCache(
-        "https://idp.test/jwks",
-        client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
-    )
-    return TokenValidator(
-        issuers=single_issuer(TokenPolicy(issuer=ISSUER, audience=AUDIENCE), keys)
-    )
+TOOL = "mock-a__search"
+ARGUMENTS = {"query": "x"}
 
 
-def _parse(response: httpx.Response) -> dict[str, Any]:
-    """Read a JSON body, or the first data frame of an SSE stream."""
-    text = response.text
-    if text.lstrip().startswith("{"):
-        parsed: dict[str, Any] = response.json()
-        return parsed
-    for line in text.splitlines():
-        if line.startswith("data:"):
-            frame: dict[str, Any] = json.loads(line[len("data:") :].strip())
-            return frame
-    msg = f"could not parse gateway response: {text[:200]!r}"
-    raise AssertionError(msg)
+def post_tool(
+    policy: Policy,
+    keypair: Keypair,
+    token: str,
+    tool: str,
+    arguments: dict[str, Any] | None = None,
+) -> httpx.Response:
+    """POST one tools/call through the full gateway and return the response.
+
+    Unparsed, because which layer refused is visible in the status code and
+    nowhere else: 403 is the pre-dispatch check answering before a body is read,
+    and 200-carrying-a-JSON-RPC-error is `enforce_call` answering after.
+    """
+
+    async def _run() -> httpx.Response:
+        async with authenticated_gateway(keypair, token=token, policy=policy) as agent:
+            return await post_gateway(
+                agent,
+                "tools/call",
+                {"name": tool, "arguments": ARGUMENTS if arguments is None else arguments},
+            )
+
+    return anyio.run(_run)
 
 
 def call_tool(policy: Policy, keypair: Keypair, token: str, tool: str) -> dict[str, Any]:
-    """POST one tools/call through the full gateway, policy enforced.
-
-    Mirrors test_gateway_server.call_gateway: upstream clients entered, the SDK
-    lifespan started (its task group), the Host the DNS-rebinding guard expects,
-    and SSE-aware parsing.
-    """
-    body = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {"name": tool, "arguments": {"query": "x"}},
-    }
+    """The same call, parsed, for the assertions that are about the payload."""
 
     async def _run() -> dict[str, Any]:
-        clients = [
-            UpstreamClient(
-                UpstreamConfig(name="mock-a", url="http://mock/mcp"),
-                httpx.AsyncClient(transport=httpx.ASGITransport(app=mock_a.app)),
-            ),
-            UpstreamClient(
-                UpstreamConfig(name="mock-b", url="http://mock/mcp"),
-                httpx.AsyncClient(transport=httpx.ASGITransport(app=mock_b.app)),
-            ),
-        ]
-        app: Starlette = build_app(
-            UpstreamRegistry(clients),
-            validator=_validator(keypair),
-            policy=policy,
-        )
-        app.add_middleware(AuthenticationMiddleware, validator=_validator(keypair))
-
-        async with contextlib.AsyncExitStack() as stack:
-            for client in clients:
-                await stack.enter_async_context(client)
-            await stack.enter_async_context(app.router.lifespan_context(app))
-
-            transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as agent:
-                response = await agent.post(
-                    "/mcp",
-                    json=body,
-                    headers={**MCP_HEADERS, "authorization": f"Bearer {token}"},
-                )
-                return _parse(response)
-        raise AssertionError("unreachable")
+        async with authenticated_gateway(keypair, token=token, policy=policy) as agent:
+            return await call_gateway(agent, "tools/call", {"name": tool, "arguments": ARGUMENTS})
 
     return anyio.run(_run)
 
@@ -144,30 +108,95 @@ def test_an_allowed_tool_call_reaches_the_upstream(keypair: Keypair) -> None:
         assert result["error"]["code"] != -32040, result
 
 
-def test_a_denied_tool_call_is_refused_with_the_policy_code(keypair: Keypair) -> None:
-    """An explicit deny returns the policy error code."""
+def test_a_denied_tool_call_is_refused_before_its_body_is_read(keypair: Keypair) -> None:
+    """The layer a real denied client actually meets.
+
+    An explicit deny naming the tool is provable from the routing headers alone,
+    so the pre-dispatch check refuses it and the JSON-RPC handler never runs.
+    403 rather than a JSON-RPC error inside a 200, for the reason
+    `AuthenticationMiddleware` returns 401: this happens before anything parses
+    a body, and answering 200 tells every proxy in the path that the request
+    succeeded.
+    """
+    policy = Policy(rules=(Rule(name="deny-search", effect=Effect.DENY, tools=(TOOL,)),))
+
+    response = post_tool(policy, keypair, keypair.sign(claims()), TOOL)
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "forbidden"}
+
+
+def test_deny_by_default_is_refused_at_the_header_too(keypair: Keypair) -> None:
+    """An empty policy denies everything, and "everything" is provable without a
+    body — so the deny default reaches the wire from the fast path."""
+    response = post_tool(Policy(), keypair, keypair.sign(claims()), TOOL)
+
+    assert response.status_code == 403
+
+
+def test_a_call_the_fast_path_cannot_decide_is_refused_by_the_backstop(
+    keypair: Keypair,
+) -> None:
+    """**The test this file was missing.**
+
+    ADR 0043's whole safety argument is that the pre-check may refuse and may
+    never authorize, with `enforce_call` remaining authoritative — and nothing
+    here had ever exercised the second half on a *denial*, because every request
+    was under-specified enough that the fast path abstained on all of them.
+
+    The only allow is argument-scoped, so at header time the answer genuinely
+    depends on a body nobody has read: `could_ever_allow` says "not provably
+    refused" and stands aside. The call reaches `enforce_call`, whose arguments
+    do not match, and is denied by the default — as a JSON-RPC error with the
+    policy code, inside a 200.
+
+    A `require_approval` rule would be abstained on for the same reason, which
+    is why a gated call is never falsely refused at the header.
+    """
     policy = Policy(
-        rules=(Rule(name="deny-search", effect=Effect.DENY, tools=("mock-a__search",)),)
+        rules=(
+            Rule(
+                name="allow-one-query",
+                effect=Effect.ALLOW,
+                subjects=(ALICE,),
+                tools=(TOOL,),
+                args={"query": ("permitted",)},
+            ),
+        )
+    )
+
+    response = post_tool(policy, keypair, keypair.sign(claims()), TOOL, {"query": "something else"})
+
+    # Not 403 is the load-bearing half: this call was *not* refused at the
+    # header. The status of a JSON-RPC error is the SDK's business; which layer
+    # answered is this project's.
+    assert response.status_code != 403, response.text
+    assert parse_rpc(response)["error"]["code"] == -32040
+
+
+def test_neither_refusal_names_the_rule_on_the_wire(keypair: Keypair) -> None:
+    """The refusal must not reveal which rule denied it, or that the tool exists
+    — that would be an oracle. Asserted on **both** layers, because they are two
+    different pieces of code writing two different bodies, and an oracle added to
+    either one is an oracle."""
+    fast = Policy(rules=(Rule(name="deny-secret-rule-name", effect=Effect.DENY),))
+    backstop = Policy(
+        rules=(
+            Rule(
+                name="allow-secret-rule-name",
+                effect=Effect.ALLOW,
+                tools=(TOOL,),
+                args={"query": ("permitted",)},
+            ),
+        )
     )
     token = keypair.sign(claims())
-    result = call_tool(policy, keypair, token, "mock-a__search")
-    assert result["error"]["code"] == -32040
 
+    refused_early = post_tool(fast, keypair, token, TOOL)
+    refused_late = post_tool(backstop, keypair, token, TOOL, {"query": "something else"})
 
-def test_deny_by_default_refuses_a_tool_no_rule_mentions(keypair: Keypair) -> None:
-    """An empty policy denies everything — the deny default reaches the wire."""
-    token = keypair.sign(claims())
-    result = call_tool(Policy(), keypair, token, "mock-a__search")
-    assert result["error"]["code"] == -32040
-
-
-def test_the_denial_does_not_name_the_rule_on_the_wire(keypair: Keypair) -> None:
-    """The refusal must not reveal which rule denied it, or that the tool exists
-    — that would be an oracle. The rule is for the log, not the caller."""
-    policy = Policy(rules=(Rule(name="deny-secret-rule-name", effect=Effect.DENY),))
-    token = keypair.sign(claims())
-    result = call_tool(policy, keypair, token, "mock-a__search")
-    assert "deny-secret-rule-name" not in str(result)
+    assert "secret-rule-name" not in refused_early.text
+    assert "secret-rule-name" not in refused_late.text
 
 
 # ---------------------------------------------------------------------------

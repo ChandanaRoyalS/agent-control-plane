@@ -5,9 +5,17 @@ real request through the real middleware comes back as `input_required` carrying
 a token a client can read, and that sending that token back on a real retry
 executes the call.
 
-Driven exactly like `test_policy_enforcement.call_tool`: the SDK's streamable
-HTTP app starts its session-manager task group in the ASGI lifespan, so the
-request must run inside `app.router.lifespan_context`.
+Driven through `helpers.authenticated_gateway`, which starts the ASGI lifespan
+(the SDK's streamable-HTTP app starts its session-manager task group there) and
+whose transport completes every request's envelope and routing headers.
+
+**That last part is not a tidiness note.** This file was originally written with
+a hand-rolled request that omitted the 2026-07-28 envelope. The SDK picks a
+result surface by `(method, version)` and `InputRequiredResult` exists only at
+2026-07-28 — every earlier version maps `tools/call` to a bare `CallToolResult`
+— so the gateway's correct `input_required` answer could not serialise and came
+back as `-32603 Handler returned an invalid result`. The helper that would have
+prevented it already existed. See `helpers` for what was done about that.
 
 **The assertion that matters most is the last one.** An agent that answers its
 own `input_responses` must gain nothing, because the caller of this gateway is
@@ -16,58 +24,20 @@ the agent and Phase 5's whole premise is that agents read hostile text.
 
 from __future__ import annotations
 
-import contextlib
-import json
 import time
 from dataclasses import replace
 from typing import Any
 
 import anyio
-import httpx
 import pytest
-from starlette.applications import Starlette
 
 from acp.approvals import InMemoryApprovalStore, State
-from acp.gateway import UpstreamRegistry, build_app
-from acp.identity import AuthenticationMiddleware
-from acp.identity.issuers import single_issuer
-from acp.identity.keys import JwksCache
-from acp.identity.validator import TokenPolicy, TokenValidator
-from acp.mocks import mock_a, mock_b
 from acp.policy import Effect, Policy, Rule
-from acp.upstream import UpstreamClient, UpstreamConfig
-from acp.upstream.envelope import (
-    CLIENT_CAPABILITIES_META_KEY,
-    CLIENT_INFO_META_KEY,
-    MCP_METHOD_HEADER,
-    MCP_NAME_HEADER,
-    MCP_PROTOCOL_VERSION_HEADER,
-    PROTOCOL_VERSION_META_KEY,
-)
-from acp.upstream.models import PROTOCOL_VERSION
 
-from ..tokens import AUDIENCE, ISSUER, Keypair, claims
+from ..tokens import Keypair, claims
+from .helpers import authenticated_gateway, call_gateway
 
 pytestmark = pytest.mark.integration
-
-MCP_HEADERS = {
-    "content-type": "application/json",
-    "accept": "application/json, text/event-stream",
-    # The version is negotiated on the WIRE, not in the body. Without this the
-    # transport serves 2025-03-26 - the revision that introduced streamable
-    # HTTP - and at that version `tools/call` maps to a bare `CallToolResult`,
-    # so an `input_required` answer cannot be serialised at all.
-    #
-    # `test_spec_conformance` has sent this header since task 8; the approval
-    # tests were written from `test_policy_enforcement`, which does not, because
-    # a plain result validates at every version and nothing before now could
-    # notice the difference.
-    MCP_PROTOCOL_VERSION_HEADER: PROTOCOL_VERSION,
-    # Mandatory at 2026-07-28, and only checked once the version above is sent -
-    # which is why raising the version turned on a validation the earlier runs
-    # never reached. Every request in this file is a tools/call.
-    MCP_METHOD_HEADER: "tools/call",
-}
 
 ALICE = "alice@example.test"
 TOOL = "mock-a__search"
@@ -85,34 +55,8 @@ GATED = Policy(
 )
 
 
-def _validator(keypair: Keypair) -> TokenValidator:
-    def handle(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=keypair.jwks())
-
-    keys = JwksCache(
-        "https://idp.test/jwks",
-        client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
-    )
-    return TokenValidator(
-        issuers=single_issuer(TokenPolicy(issuer=ISSUER, audience=AUDIENCE), keys)
-    )
-
-
-def _parse(response: httpx.Response) -> dict[str, Any]:
-    text = response.text
-    if text.lstrip().startswith("{"):
-        parsed: dict[str, Any] = response.json()
-        return parsed
-    for line in text.splitlines():
-        if line.startswith("data:"):
-            frame: dict[str, Any] = json.loads(line[len("data:") :].strip())
-            return frame
-    msg = f"could not parse gateway response: {text[:200]!r}"
-    raise AssertionError(msg)
-
-
 def call(
-    store: InMemoryApprovalStore,
+    store: InMemoryApprovalStore | None,
     keypair: Keypair,
     token: str,
     *,
@@ -124,61 +68,17 @@ def call(
     params: dict[str, Any] = {
         "name": TOOL,
         "arguments": ARGUMENTS if arguments is None else arguments,
-        # Load-bearing, not decorative. The SDK picks a result surface by
-        # `(method, version)`, and `InputRequiredResult` exists only at
-        # 2026-07-28 - earlier versions map `tools/call` to a bare
-        # `CallToolResult`. A request with no envelope is served as an older
-        # client and the `input_required` answer fails to serialise. That is
-        # correct and fail-closed; it is not legible, which task 55 fixes.
-        "_meta": {
-            PROTOCOL_VERSION_META_KEY: PROTOCOL_VERSION,
-            CLIENT_CAPABILITIES_META_KEY: {},
-            CLIENT_INFO_META_KEY: {"name": "approval-test", "version": "1"},
-        },
     }
     if request_state is not None:
         params["requestState"] = request_state
     if input_responses is not None:
         params["inputResponses"] = input_responses
-    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params}
 
     async def _run() -> dict[str, Any]:
-        clients = [
-            UpstreamClient(
-                UpstreamConfig(name="mock-a", url="http://mock/mcp"),
-                httpx.AsyncClient(transport=httpx.ASGITransport(app=mock_a.app)),
-            ),
-            UpstreamClient(
-                UpstreamConfig(name="mock-b", url="http://mock/mcp"),
-                httpx.AsyncClient(transport=httpx.ASGITransport(app=mock_b.app)),
-            ),
-        ]
-        app: Starlette = build_app(
-            UpstreamRegistry(clients),
-            validator=_validator(keypair),
-            policy=GATED,
-            approvals=store,
-        )
-        app.add_middleware(AuthenticationMiddleware, validator=_validator(keypair))
-
-        async with contextlib.AsyncExitStack() as stack:
-            for client in clients:
-                await stack.enter_async_context(client)
-            await stack.enter_async_context(app.router.lifespan_context(app))
-
-            transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as agent:
-                response = await agent.post(
-                    "/mcp",
-                    json=body,
-                    headers={
-                        **MCP_HEADERS,
-                        MCP_NAME_HEADER: TOOL,
-                        "authorization": f"Bearer {token}",
-                    },
-                )
-                return _parse(response)
-        raise AssertionError("unreachable")
+        async with authenticated_gateway(
+            keypair, token=token, policy=GATED, approvals=store
+        ) as agent:
+            return await call_gateway(agent, "tools/call", params)
 
     return anyio.run(_run)
 
@@ -318,50 +218,21 @@ def test_a_policy_that_holds_a_call_with_no_store_fails_closed(keypair: Keypair)
     """`require_approval` with nothing to record it in is a misconfiguration, and
     the worst possible reading of that word is `allow`. Refused, like a loaded
     policy with no principal."""
-
-    async def _run() -> dict[str, Any]:
-        clients = [
-            UpstreamClient(
-                UpstreamConfig(name="mock-a", url="http://mock/mcp"),
-                httpx.AsyncClient(transport=httpx.ASGITransport(app=mock_a.app)),
-            ),
-        ]
-        app: Starlette = build_app(
-            UpstreamRegistry(clients),
-            validator=_validator(keypair),
-            policy=GATED,
-        )
-        app.add_middleware(AuthenticationMiddleware, validator=_validator(keypair))
-        async with contextlib.AsyncExitStack() as stack:
-            for client in clients:
-                await stack.enter_async_context(client)
-            await stack.enter_async_context(app.router.lifespan_context(app))
-            transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as agent:
-                response = await agent.post(
-                    "/mcp",
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "tools/call",
-                        "params": {
-                            "name": TOOL,
-                            "arguments": ARGUMENTS,
-                            "_meta": {
-                                PROTOCOL_VERSION_META_KEY: PROTOCOL_VERSION,
-                                CLIENT_CAPABILITIES_META_KEY: {},
-                            },
-                        },
-                    },
-                    headers={
-                        **MCP_HEADERS,
-                        MCP_NAME_HEADER: TOOL,
-                        "authorization": f"Bearer {keypair.sign(claims())}",
-                    },
-                )
-                return _parse(response)
-        raise AssertionError("unreachable")
-
-    payload = anyio.run(_run)
+    payload = call(None, keypair, keypair.sign(claims()))
 
     assert payload["error"]["code"] == -32040
+
+
+def test_the_held_call_carries_the_arguments_an_operator_must_read(keypair: Keypair) -> None:
+    """A person cannot approve what they cannot see (task 55).
+
+    Asserted here rather than only in the unit tests because the value has to
+    survive the whole request path — the arguments an operator is shown are the
+    ones the *request* sent, not a default the handler passed along.
+    """
+    store = InMemoryApprovalStore()
+
+    call(store, keypair, keypair.sign(claims()), arguments={"query": "the real one"})
+
+    held = store.pending()[0]
+    assert held.arguments_json == '{"query":"the real one"}'

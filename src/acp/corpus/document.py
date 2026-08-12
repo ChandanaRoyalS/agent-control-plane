@@ -27,11 +27,14 @@ directional marks, a JWT, a page with a logo on it. A test asserts there are
 enough of them, so "this corpus is realistic" is a property the build checks
 rather than a claim in a README.
 
-See ADR 0039.
+The front-matter parsing here is shared with `acp.corpus.attack`, which needs the
+same fencing and the same strictness over a different set of keys. See ADR 0039
+for the benign half and ADR 0040 for the adversarial one.
 """
 
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -45,9 +48,9 @@ DELIMITER: Final = "---"
 """Front matter is fenced the way every static site generator fences it, and
 for the same reason: the document below stays exactly what it is, with no
 escaping, no quoting and no encoding. That matters more here than anywhere —
-several of these documents contain zero-width joiners and directional marks on
-purpose, and a format that made those into ``\\u200d`` would be storing a
-description of the document instead of the document."""
+many of these documents contain zero-width joiners, directional overrides and
+base64 payloads on purpose, and a format that turned those into ``\\u200d``
+would be storing a description of the document instead of the document."""
 
 REQUIRED: Final = frozenset({"why", "source"})
 UNDERSTOOD: Final = REQUIRED | {"hard"}
@@ -91,12 +94,20 @@ class Document:
         return len(self.text)
 
 
-def parse(path: Path, text: str, *, kind: str) -> Document:
-    """Parse one corpus file, or refuse it by name.
+def front_matter(
+    path: Path,
+    text: str,
+    *,
+    required: AbstractSet[str],
+    understood: AbstractSet[str],
+) -> tuple[dict[str, Any], str]:
+    """Split a corpus file into its metadata and its body, or refuse it by name.
 
-    Strict about unknown keys. A corpus is edited by hand over months, and a
-    typo'd ``hardd: true`` that silently means "not hard" is a document quietly
-    leaving the set the numbers are computed from.
+    Strict about unknown keys, and shared by both corpora so they cannot become
+    strict in different ways. A corpus is edited by hand over months, and a
+    typo'd ``hardd: true`` that silently means "not hard" — or ``expects:``
+    where ``expect:`` was meant — is a document quietly leaving the set the
+    numbers are computed from, with nothing anywhere to say so.
     """
     if not text.startswith(DELIMITER):
         msg = f"corpus file {str(path)!r} does not begin with a `---` front matter block"
@@ -117,44 +128,56 @@ def parse(path: Path, text: str, *, kind: str) -> Document:
         msg = f"corpus file {str(path)!r}: front matter must be a mapping"
         raise ConfigurationError(msg)
 
-    missing = REQUIRED - set(loaded)
+    missing = set(required) - set(loaded)
     if missing:
         msg = f"corpus file {str(path)!r} is missing front matter: {', '.join(sorted(missing))}"
         raise ConfigurationError(msg)
 
-    unknown = set(loaded) - UNDERSTOOD
+    unknown = set(loaded) - set(understood)
     if unknown:
         msg = (
             f"corpus file {str(path)!r} has front matter nobody reads: "
             f"{', '.join(sorted(unknown))}. Understood keys are "
-            f"{', '.join(sorted(UNDERSTOOD))}."
+            f"{', '.join(sorted(understood))}."
         )
         raise ConfigurationError(msg)
-
-    try:
-        source = Source(str(loaded["source"]))
-    except ValueError as exc:
-        msg = (
-            f"corpus file {str(path)!r}: `source` must be one of "
-            f"{', '.join(s.value for s in Source)}, got {loaded['source']!r}"
-        )
-        raise ConfigurationError(msg) from exc
 
     body = body.strip("\n")
     if not body.strip():
         msg = f"corpus file {str(path)!r} has front matter and no document"
         raise ConfigurationError(msg)
 
-    why = str(loaded["why"]).strip()
+    return loaded, body
+
+
+def read_source(path: Path, value: object) -> Source:
+    try:
+        return Source(str(value))
+    except ValueError as exc:
+        msg = (
+            f"corpus file {str(path)!r}: `source` must be one of "
+            f"{', '.join(s.value for s in Source)}, got {value!r}"
+        )
+        raise ConfigurationError(msg) from exc
+
+
+def read_why(path: Path, value: object) -> str:
+    why = str(value).strip()
     if not why:
         msg = f"corpus file {str(path)!r}: `why` is empty, so nobody can tell why it is here"
         raise ConfigurationError(msg)
+    return why
+
+
+def parse(path: Path, text: str, *, kind: str) -> Document:
+    """Parse one benign corpus file, or refuse it by name."""
+    loaded, body = front_matter(path, text, required=REQUIRED, understood=UNDERSTOOD)
 
     return Document(
         id=f"{kind}/{path.stem}",
         kind=kind,
-        why=why,
-        source=source,
+        why=read_why(path, loaded["why"]),
+        source=read_source(path, loaded["source"]),
         hard=bool(loaded.get("hard", False)),
         text=body,
     )

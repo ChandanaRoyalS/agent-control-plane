@@ -28,6 +28,15 @@ confidence intervals per family. Everything reads what is here.
 
 from acp.corpus.attack import Attack, AttackFamily, Expectation, parse_attack
 from acp.corpus.document import Document, Source, parse
+from acp.corpus.heldout import (
+    HeldoutManifest,
+    Split,
+    default_heldout_path,
+    load_development_attacks,
+    load_heldout_manifest,
+    load_split,
+    split_attacks,
+)
 from acp.corpus.loader import (
     AttackCorpus,
     Corpus,
@@ -45,12 +54,19 @@ __all__ = [
     "Corpus",
     "Document",
     "Expectation",
+    "HeldoutManifest",
     "Source",
+    "Split",
+    "default_heldout_path",
     "default_root",
     "load_attacks",
     "load_benign",
     "load_corpus",
+    "load_development_attacks",
+    "load_heldout_manifest",
+    "load_split",
     "parse",
     "parse_attack",
     "repository_root",
+    "split_attacks",
 ]

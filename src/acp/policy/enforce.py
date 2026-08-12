@@ -33,13 +33,20 @@ from collections.abc import Mapping
 
 from acp.exceptions import PolicyDeniedError
 from acp.identity.principal import Principal
-from acp.policy.evaluate import Decision, evaluate
+from acp.policy.evaluate import Decision, Verdict, evaluate
 from acp.policy.schema import Policy
 
 logger = logging.getLogger(__name__)
 
 ALLOWED_EVENT = "policy.allowed"
 DENIED_EVENT = "policy.denied"
+APPROVAL_EVENT = "policy.approval_required"
+
+_EVENTS = {
+    Verdict.ALLOW: ALLOWED_EVENT,
+    Verdict.DENY: DENIED_EVENT,
+    Verdict.APPROVAL: APPROVAL_EVENT,
+}
 
 
 def _record(
@@ -78,13 +85,13 @@ def _record(
     the log shows changes rather than dictionary ordering.
     """
     logger.info(
-        ALLOWED_EVENT if decision.allowed else DENIED_EVENT,
+        _EVENTS[decision.verdict],
         extra={
             "subject": principal.subject,
             "actor": principal.actor.subject if principal.actor else None,
             "tool": tool,
             "rule": decision.rule,
-            "decision": "allow" if decision.allowed else "deny",
+            "decision": decision.verdict.value,
             "reason": decision.reason,
             "argument_names": sorted(arguments),
         },
@@ -96,12 +103,19 @@ def enforce_call(
     principal: Principal,
     tool: str,
     arguments: Mapping[str, object] | None = None,
-) -> None:
+) -> Decision:
     """Allow the call to proceed, or raise ``PolicyDeniedError``.
 
-    Returns ``None`` when the policy allows ``principal`` to call ``tool``. On a
-    denial — an explicit deny rule, or no rule matching, which is the deny
-    default — raises ``PolicyDeniedError``.
+    Returns the ``Decision`` when the policy permits ``principal`` to call
+    ``tool``, or holds it for a human (ADR 0048). On a denial — an explicit deny
+    rule, or no rule matching, which is the deny default — raises
+    ``PolicyDeniedError``.
+
+    **The return type changed from ``None`` when approvals arrived, and the
+    caller must read it.** A call held for approval is neither permitted nor
+    refused, so it cannot be expressed by returning or raising. Every caller
+    that predates approvals still gets the old behaviour for the old two
+    outcomes; a caller that wants the third has to ask for it.
 
     Both outcomes are logged at INFO before either returns or raises, so the
     record exists whatever happens next. INFO rather than DEBUG on purpose: this
@@ -120,5 +134,11 @@ def enforce_call(
     decision = evaluate(policy, principal, tool, arguments)
     _record(decision, principal, tool, arguments if arguments is not None else {})
     if decision.allowed:
-        return
+        return decision
+    if decision.requires_approval:
+        # Not a denial and not a permission. The caller decides what to do with
+        # it — the request path starts an approval (ADR 0048); anything else
+        # that has not been taught about approvals never reaches this branch,
+        # because it asked `decision.allowed` and got False.
+        return decision
     raise PolicyDeniedError("this call was not permitted")

@@ -27,9 +27,24 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 
 from acp.identity.principal import Principal
 from acp.policy.schema import Effect, Policy, Rule
+
+
+class Verdict(StrEnum):
+    """What a policy decided, in the three values it can now take.
+
+    Introduced with approvals (task 54, ADR 0048) because ``allowed: bool`` had
+    stopped being a complete answer, and every place that *reads* a decision —
+    the audit log, the simulator, the catalogue filter — needs to say which of
+    the three it saw rather than which side of a boolean.
+    """
+
+    ALLOW = "allow"
+    DENY = "deny"
+    APPROVAL = "approval"
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,8 +52,21 @@ class Decision:
     """The outcome of evaluating one request against a policy.
 
     Carries the rule that decided it, or ``None`` when nothing matched and the
-    deny default applied. The name is what the audit log (a later task) records: a
-    decision nobody can attribute to a rule is a decision nobody can explain.
+    deny default applied. The name is what the audit log records: a decision
+    nobody can attribute to a rule is a decision nobody can explain.
+
+    **``allowed`` stays a boolean, and ``requires_approval`` is a separate flag
+    rather than a third value of it.** That is the whole safety argument for how
+    approvals were added: every caller written before approvals existed asks
+    ``if decision.allowed``, and a call awaiting a human answers ``False``. They
+    all fail closed by construction, without being changed and without anybody
+    having to remember to change them. A three-valued ``allowed`` would have
+    made each of those call sites a truthiness bug waiting to be found in
+    production.
+
+    The invariant, asserted in the tests: ``requires_approval`` and ``allowed``
+    are never both true. Approval is not permission; it is the absence of a
+    denial pending a human.
     """
 
     allowed: bool
@@ -46,15 +74,29 @@ class Decision:
     """The name of the rule that decided this, or ``None`` for the deny default.
 
     ``rule is None`` and ``allowed is True`` never occur together: the default is
-    always a denial, so an allow always names the rule that granted it.
+    always a denial, so an allow always names the rule that granted it. The same
+    holds for ``requires_approval`` — the deny default never asks for a human.
     """
+
+    requires_approval: bool = False
+    """A rule matched and said this needs a person. Not permitted *yet*."""
+
+    @property
+    def verdict(self) -> Verdict:
+        if self.requires_approval:
+            return Verdict.APPROVAL
+        return Verdict.ALLOW if self.allowed else Verdict.DENY
 
     @property
     def reason(self) -> str:
         """A short human-readable account, for logs and error messages."""
         if self.rule is None:
             return "denied by default (no rule matched)"
-        verb = "allowed" if self.allowed else "denied"
+        verb = {
+            Verdict.ALLOW: "allowed",
+            Verdict.DENY: "denied",
+            Verdict.APPROVAL: "held for approval",
+        }[self.verdict]
         return f"{verb} by rule {self.rule!r}"
 
 
@@ -133,5 +175,21 @@ def evaluate(
     actor = principal.actor.subject if principal.actor else None
     for rule in policy.rules:
         if _rule_matches(rule, principal.subject, actor, tool, args):
-            return Decision(allowed=rule.effect is Effect.ALLOW, rule=rule.name)
+            return decision_for(rule)
     return Decision(allowed=False, rule=None)
+
+
+def decision_for(rule: Rule) -> Decision:
+    """The decision a matching rule produces.
+
+    Split out and shared with the simulator, so the mapping from an effect to a
+    decision exists once. A second copy is how a new effect ends up handled on
+    one path and silently treated as a denial on the other — which for
+    ``require_approval`` would mean the simulator reporting a wave of new denials
+    that the gateway was never going to make.
+    """
+    return Decision(
+        allowed=rule.effect is Effect.ALLOW,
+        rule=rule.name,
+        requires_approval=rule.effect is Effect.REQUIRE_APPROVAL,
+    )

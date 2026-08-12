@@ -27,10 +27,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from acp.policy.enforce import ALLOWED_EVENT, DENIED_EVENT
+from acp.policy.enforce import ALLOWED_EVENT, APPROVAL_EVENT, DENIED_EVENT
+from acp.policy.evaluate import Verdict
 
-DECISION_EVENTS = frozenset({ALLOWED_EVENT, DENIED_EVENT})
-"""The two event names `enforce_call` emits, imported rather than spelled again.
+DECISION_EVENTS = frozenset({ALLOWED_EVENT, DENIED_EVENT, APPROVAL_EVENT})
+"""The three event names `enforce_call` emits, imported rather than spelled again.
 
 A reader with its own copy of these strings is a reader that silently stops
 finding anything the day somebody renames the event.
@@ -55,9 +56,17 @@ class RecordedDecision:
     rule: str | None
     argument_names: frozenset[str] | None
 
+    requires_approval: bool = False
+    """The call was held for a human (ADR 0048). Mirrors ``Decision``, including
+    the invariant that it is never true alongside ``allowed`` — so a reader that
+    predates approvals sees a call that was not permitted, which is what
+    happened."""
+
     @property
-    def verdict(self) -> str:
-        return "allow" if self.allowed else "deny"
+    def verdict(self) -> Verdict:
+        if self.requires_approval:
+            return Verdict.APPROVAL
+        return Verdict.ALLOW if self.allowed else Verdict.DENY
 
     def describe(self) -> str:
         """One line naming the call, for a report a human reads."""
@@ -100,7 +109,7 @@ def _decision_from(payload: dict[str, Any]) -> RecordedDecision | None:
     verdict = payload.get("decision")
     if not isinstance(subject, str) or not isinstance(tool, str):
         return None
-    if verdict not in ("allow", "deny"):
+    if verdict not in (Verdict.ALLOW, Verdict.DENY, Verdict.APPROVAL):
         return None
 
     actor = payload.get("actor")
@@ -119,7 +128,8 @@ def _decision_from(payload: dict[str, Any]) -> RecordedDecision | None:
         subject=subject,
         actor=actor,
         tool=tool,
-        allowed=verdict == "allow",
+        allowed=verdict == Verdict.ALLOW,
+        requires_approval=verdict == Verdict.APPROVAL,
         rule=rule,
         argument_names=names,
     )

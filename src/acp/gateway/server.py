@@ -24,6 +24,7 @@ from mcp.shared.exceptions import MCPError
 from starlette.applications import Starlette
 
 from acp import __version__
+from acp.approvals import ApprovalStore, Outcome, gate
 from acp.budget import (
     CostTable,
     QuotaCounter,
@@ -33,7 +34,7 @@ from acp.budget import (
 )
 from acp.exceptions import ACPError, PolicyDeniedError
 from acp.firewall import Firewall, frame
-from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
+from acp.gateway.converters import to_input_required, to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.naming import upstream_of
 from acp.gateway.registry import UpstreamRegistry
 from acp.identity import (
@@ -50,6 +51,11 @@ from acp.results import CacheableTools, ResultCache, ResultKey, key_for
 from acp.upstream.models import CallToolResult
 
 logger = logging.getLogger(__name__)
+
+APPROVAL_EVENT = "approval.gate"
+"""One record per approval decision on the request path — started, still
+waiting, proceeded or refused. The operator side (task 55) writes the human's
+answer; this writes what the gateway did with it."""
 
 SERVER_NAME = "agent-control-plane"
 
@@ -161,6 +167,63 @@ def _served_from_cache(results: ResultCache, key: ResultKey, tool: str) -> CallT
     return held
 
 
+def _await_approval(
+    store: ApprovalStore | None,
+    principal: Principal,
+    params: types.CallToolRequestParams,
+    rule: str | None,
+) -> types.InputRequiredResult | None:
+    """Start or resolve an approval; ``None`` means the call may now proceed.
+
+    **`params.input_responses` is read by nobody, and that is the point.** MRTR
+    lets a client answer the questions a server asked, and an approval answered
+    by the caller is not an approval — the caller is the agent, and an agent
+    talked into a destructive call by a poisoned document is exactly the one
+    that will answer "yes" on its own behalf. Only `request_state` is read, and
+    only as a handle to a decision made somewhere the agent cannot reach.
+
+    A loaded policy that holds a call with no store configured is the same
+    fail-closed misconfiguration as a policy with no principal: refused, not
+    permitted. The alternative is a deployment where `require_approval` silently
+    means `allow`, which is the worst possible reading of that word.
+    """
+    if store is None:
+        logger.error(
+            "approval.no_store",
+            extra={"tool": params.name, "rule": rule},
+        )
+        raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
+
+    outcome = gate(
+        store,
+        token=params.request_state,
+        subject=principal.subject,
+        actor=principal.actor.subject if principal.actor else None,
+        tool=params.name,
+        arguments=params.arguments or {},
+        rule=rule,
+        now=time.time(),
+    )
+    logger.info(
+        APPROVAL_EVENT,
+        extra={
+            "subject": principal.subject,
+            "tool": params.name,
+            "rule": rule,
+            "outcome": outcome.outcome.value,
+            "reason": outcome.reason,
+        },
+    )
+    if outcome.outcome is Outcome.PROCEED:
+        return None
+    if outcome.outcome is Outcome.WAIT and outcome.token is not None:
+        return to_input_required(
+            token=outcome.token,
+            expires_in=(outcome.expires_at or 0.0) - time.time(),
+        )
+    raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
+
+
 def build_server(
     registry: UpstreamRegistry,
     *,
@@ -172,6 +235,7 @@ def build_server(
     results: ResultCache | None = None,
     provenance: bool = False,
     firewall: Firewall | None = None,
+    approvals: ApprovalStore | None = None,
 ) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
@@ -242,7 +306,7 @@ def build_server(
     async def on_call_tool(
         _ctx: ServerRequestContext[None, Any],
         params: types.CallToolRequestParams,
-    ) -> types.CallToolResult:
+    ) -> types.CallToolResult | types.InputRequiredResult:
         principal = current_principal()
         if policy is not None:
             # Fail-closed: a loaded policy means authorization is
@@ -251,9 +315,18 @@ def build_server(
             if principal is None:
                 raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
             try:
-                enforce_call(policy, principal, params.name, params.arguments or {})
+                decision = enforce_call(policy, principal, params.name, params.arguments or {})
             except ACPError as exc:
                 raise to_mcp_error(exc) from exc
+
+            if decision.requires_approval:
+                # Held for a person (ADR 0048). Returns before budget is
+                # charged, before the cache is consulted and before anything
+                # reaches an upstream — a call that has not happened must not
+                # spend, must not be answered from memory, and must not run.
+                awaiting = _await_approval(approvals, principal, params, decision.rule)
+                if awaiting is not None:
+                    return awaiting
 
         # After authorization: a denied call must not spend budget, and charging
         # a call we would refuse anyway is wasted work.
@@ -346,6 +419,7 @@ def build_app(
     results: ResultCache | None = None,
     provenance: bool = False,
     firewall: Firewall | None = None,
+    approvals: ApprovalStore | None = None,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -382,6 +456,7 @@ def build_app(
         results=results,
         provenance=provenance,
         firewall=firewall,
+        approvals=approvals,
     ).streamable_http_app(
         stateless_http=True,
         json_response=True,

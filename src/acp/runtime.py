@@ -23,6 +23,7 @@ from typing import Any
 
 from starlette.applications import Starlette
 
+from acp.approvals import DEFAULT_TTL_SECONDS, ApprovalStore, InMemoryApprovalStore
 from acp.budget import CostTable, QuotaCounter, RateLimiter, load_costs
 from acp.config import GatewaySettings, allowed_hosts_for, load_issuers, load_upstreams
 from acp.exceptions import ConfigurationError
@@ -43,7 +44,7 @@ from acp.identity import (
 )
 from acp.identity.cache import CredentialCache
 from acp.identity.issuers import registry_from_documents
-from acp.policy import Policy
+from acp.policy import Effect, Policy
 from acp.policy.loader import load_policy
 from acp.results import CacheableTools, ResultCache, load_cacheable
 from acp.schema import DEFAULT_BASELINE_PATH, DriftDetector, SchemaSnapshot
@@ -103,6 +104,8 @@ async def gateway_from_configs(
     results: ResultCache | None = None,
     provenance: bool = False,
     firewall: Firewall | None = None,
+    approvals: ApprovalStore | None = None,
+    approval_ttl: float = DEFAULT_TTL_SECONDS,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -172,6 +175,8 @@ async def gateway_from_configs(
             results=results,
             provenance=provenance,
             firewall=firewall,
+            approvals=approvals,
+            approval_ttl=approval_ttl,
         )
         # Attached rather than yielded, so the signature every existing caller
         # and test depends on is unchanged. The probe loop itself is started by
@@ -181,6 +186,10 @@ async def gateway_from_configs(
         # classic way to get a cancellation that fires in the wrong place.
         app.state.health = monitor
         app.state.schema_drift = detector
+        # Read by `acp serve` to mount the operator channel on the admin
+        # listener. Attached rather than returned for the same reason the other
+        # two are: the signature every existing caller depends on is unchanged.
+        app.state.approvals = approvals
         yield app
     finally:
         # Reverse order, and every close attempted even if one raises — a
@@ -193,6 +202,54 @@ async def gateway_from_configs(
                     "gateway.upstream_close_failed", extra={"upstream": client.config.name}
                 )
         logger.info("gateway.stopped", extra={"upstream_count": len(clients)})
+
+
+def build_approval_store(settings: GatewaySettings, policy: Policy | None) -> ApprovalStore | None:
+    """A store when the policy can hold a call, and nothing when it cannot.
+
+    Presence-based on the *policy* rather than on a flag, because the rule that
+    holds a call is already the statement of intent — a second switch beside it
+    could only ever be forgotten, and forgetting it means `require_approval`
+    silently fails closed on every gated call at request time rather than at
+    startup where somebody would see it.
+
+    **The loud case is a policy that gates calls with no operator channel.** The
+    gateway is then perfectly correct and completely useless: every gated call is
+    held, nothing can ever answer it, and each caller waits out the TTL and is
+    refused. That is a warning rather than a refusal to start, because a
+    replicated deployment may legitimately answer approvals from a different
+    process against a shared store — a real configuration this project's
+    in-memory store cannot yet serve, and one that should not be pre-emptively
+    banned. What it must not be is quiet.
+    """
+    if policy is None or not policy.gates_calls:
+        return None
+
+    if not settings.approval_operator_token:
+        logger.warning(
+            "approval.no_operator_channel",
+            extra={
+                "reason": "ACP_APPROVAL_OPERATOR_TOKEN is not set",
+                "consequence": (
+                    "the policy holds calls for a human, and nothing on this gateway "
+                    "can answer one: every gated call waits out its TTL and is then "
+                    "refused"
+                ),
+            },
+        )
+
+    logger.info(
+        "approval.enabled",
+        extra={
+            "gated_rules": [
+                rule.name for rule in policy.rules if rule.effect is Effect.REQUIRE_APPROVAL
+            ],
+            "ttl_seconds": settings.approval_ttl_seconds,
+            "max_pending": settings.approval_max_pending,
+            "operator_channel": bool(settings.approval_operator_token),
+        },
+    )
+    return InMemoryApprovalStore(max_pending=settings.approval_max_pending)
 
 
 def build_firewall(settings: GatewaySettings) -> Firewall | None:
@@ -643,6 +700,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         else None
     )
     firewall = build_firewall(settings)
+    approvals = build_approval_store(settings, policy)
     validator = await build_token_validator(settings)
     exchanger = build_token_exchanger(settings, validator, upstreams)
     check_upstream_audiences(upstreams, exchanging=exchanger is not None)
@@ -672,6 +730,8 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             results=results,
             provenance=settings.provenance_framing_enabled,
             firewall=firewall,
+            approvals=approvals,
+            approval_ttl=settings.approval_ttl_seconds,
         ) as app:
             yield app
     finally:

@@ -28,6 +28,8 @@ import yaml
 from pydantic import Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from acp.approvals.record import DEFAULT_TTL_SECONDS
+from acp.approvals.store import DEFAULT_MAX_PENDING
 from acp.exceptions import ConfigurationError
 from acp.firewall.decision import Mode as FirewallMode
 from acp.upstream import UpstreamConfig
@@ -93,6 +95,40 @@ class GatewaySettings(BaseSettings):
     admin_port: int = Field(default=9090, gt=0, le=65535)
 
     admin_enabled: bool = True
+
+    approval_operator_token: str = ""
+    """Credential for the approval channel on the admin listener (task 55).
+
+    Empty means the channel does not exist — not that it exists and refuses.
+    Presence-based like token exchange and the secret store, for the reason
+    `build_token_exchanger` gives: a credential is not a thing you can forget to
+    supply and still have the feature appear to work.
+
+    It is a shared secret rather than a JWT because the party it authenticates
+    is a person or a small internal console on loopback, not a fleet of agents,
+    and standing up an issuer to answer a yes/no is a cost with no matching
+    benefit. It is compared with `compare_digest` and it is the one write on a
+    listener that is otherwise read-only, so a deployment that exposes the admin
+    port beyond loopback should treat this as a production credential and put it
+    in the secret store like any other.
+    """
+
+    approval_ttl_seconds: float = Field(default=DEFAULT_TTL_SECONDS, gt=0)
+    """How long a held call waits before expiry refuses it.
+
+    The expiry is the default-deny (ADR 0048), so this is a security setting
+    wearing the clothes of a timeout: raising it widens the window in which one
+    human's yes can still be spent.
+    """
+
+    approval_max_pending: int = Field(default=DEFAULT_MAX_PENDING, gt=0)
+    """Ceiling on held requests before the oldest is evicted.
+
+    A security limit before a memory one: an authenticated caller whose policy
+    gates a tool can start one request per call and is under no obligation to
+    retry, so the bound turns "fill the gateway's memory" into "somebody has to
+    ask again".
+    """
 
     health_probing_enabled: bool = True
     """Background probing of upstream health.

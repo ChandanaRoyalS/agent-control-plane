@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 from typing import Any
 
 import anyio
@@ -28,7 +29,10 @@ from acp.identity.issuers import single_issuer
 from acp.identity.keys import JwksCache
 from acp.identity.validator import TokenPolicy, TokenValidator
 from acp.mocks import mock_a, mock_b
+from acp.observability.log import JsonFormatter
 from acp.policy import Effect, Policy, Rule
+from acp.policy.record import parse_traffic
+from acp.policy.simulate import Outcome, simulate
 from acp.upstream import UpstreamClient, UpstreamConfig
 
 from ..tokens import AUDIENCE, ISSUER, Keypair, claims
@@ -164,3 +168,104 @@ def test_the_denial_does_not_name_the_rule_on_the_wire(keypair: Keypair) -> None
     token = keypair.sign(claims())
     result = call_tool(policy, keypair, token, "mock-a__search")
     assert "deny-secret-rule-name" not in str(result)
+
+
+# ---------------------------------------------------------------------------
+# The decision log the simulator replays (task 38)
+# ---------------------------------------------------------------------------
+
+
+def decision_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """The decision records, rendered exactly as a deployed gateway writes them."""
+    return [
+        JsonFormatter().format(record)
+        for record in caplog.records
+        if record.name == "acp.policy.enforce"
+    ]
+
+
+def test_the_gateway_writes_a_log_the_simulator_can_replay(
+    keypair: Keypair, caplog: pytest.LogCaptureFixture
+) -> None:
+    """End to end: real request, real record, real replay — and it agrees.
+
+    The unit tests prove `simulate` reasons correctly about a `Traffic` object.
+    Only this proves the object exists: that a real request through the real
+    middleware produces a record the reader parses, and that replaying it
+    against the very policy that produced it reports no change. If it reported
+    one, the simulator and the gateway would be disagreeing about a decision
+    they both just made.
+    """
+    policy = Policy(
+        rules=(
+            Rule(
+                name="allow-alice-search",
+                effect=Effect.ALLOW,
+                subjects=(ALICE,),
+                tools=("mock-a__search",),
+            ),
+        )
+    )
+    token = keypair.sign(claims())
+
+    with caplog.at_level(logging.INFO, logger="acp.policy.enforce"):
+        call_tool(policy, keypair, token, "mock-a__search")
+
+    traffic = parse_traffic(decision_lines(caplog))
+    assert len(traffic.decisions) == 1
+    assert traffic.unreadable == 0
+
+    simulation = simulate(policy, traffic)
+    assert simulation.safe
+    assert simulation.counts[Outcome.UNCHANGED] == 1
+
+
+def test_the_record_carries_the_arguments_the_request_actually_sent(
+    keypair: Keypair, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The call site, not the function.
+
+    `_record` sorts whatever mapping it is handed; that is unit-tested. What is
+    only observable here is that `on_call_tool` hands it the *request's*
+    arguments rather than an empty dict — and an empty dict would still produce
+    a valid-looking record, a green unit suite, and a simulator that reported
+    every argument-scoped rule as inapplicable.
+    """
+    policy = Policy(rules=(Rule(name="allow-everything", effect=Effect.ALLOW),))
+    token = keypair.sign(claims())
+
+    with caplog.at_level(logging.INFO, logger="acp.policy.enforce"):
+        call_tool(policy, keypair, token, "mock-a__search")
+
+    traffic = parse_traffic(decision_lines(caplog))
+    # `call_tool` sends {"query": "x"}.
+    assert traffic.decisions[0].argument_names == frozenset({"query"})
+
+
+def test_a_tightened_policy_is_reported_as_breaking_the_recorded_call(
+    keypair: Keypair, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The question the tool exists to answer, asked of real traffic."""
+    live = Policy(
+        rules=(
+            Rule(
+                name="allow-alice-search",
+                effect=Effect.ALLOW,
+                subjects=(ALICE,),
+                tools=("mock-a__search",),
+            ),
+        )
+    )
+    proposed = Policy(
+        rules=(Rule(name="no-search", effect=Effect.DENY, tools=("mock-a__search",)),)
+    )
+    token = keypair.sign(claims())
+
+    with caplog.at_level(logging.INFO, logger="acp.policy.enforce"):
+        call_tool(live, keypair, token, "mock-a__search")
+
+    simulation = simulate(proposed, parse_traffic(decision_lines(caplog)))
+
+    assert not simulation.safe
+    assert simulation.counts[Outcome.NEWLY_DENIED] == 1
+    assert "was: allow by allow-alice-search" in simulation.changed[0].describe()

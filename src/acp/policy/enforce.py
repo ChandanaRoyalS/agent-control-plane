@@ -42,7 +42,12 @@ ALLOWED_EVENT = "policy.allowed"
 DENIED_EVENT = "policy.denied"
 
 
-def _record(decision: Decision, principal: Principal, tool: str) -> None:
+def _record(
+    decision: Decision,
+    principal: Principal,
+    tool: str,
+    arguments: Mapping[str, object],
+) -> None:
     """Write one authorization decision to the log.
 
     One function for both outcomes, deliberately. Two call sites emitting
@@ -56,6 +61,21 @@ def _record(decision: Decision, principal: Principal, tool: str) -> None:
     would answer "was alice allowed to do this" while leaving "which of the four
     agents acting for alice did it" unanswerable — which is the question that
     matters when one of them is misbehaving.
+
+    **Argument names, never argument values.** The names come from a tool's
+    schema; the values are the user's data, and a `doc_id` is as likely to be a
+    patient record as a public page. Writing values here would put exactly the
+    payload this gateway exists to control into a log that a dozen people and
+    three vendors can read — which is why ``redact`` exists and why this does
+    not lean on it. The names alone are not decorative: they let the policy
+    simulator (ADR 0045) settle a rule constraining an argument the call never
+    sent, because a missing argument is not a match (ADR 0031). A rule
+    constraining ``doc_id`` cannot have fired on a call that sent no ``doc_id``,
+    and that is a *definite* answer recovered without recording anything
+    sensitive.
+
+    Sorted, so two records of the same call are byte-identical and a diff over
+    the log shows changes rather than dictionary ordering.
     """
     logger.info(
         ALLOWED_EVENT if decision.allowed else DENIED_EVENT,
@@ -66,6 +86,7 @@ def _record(decision: Decision, principal: Principal, tool: str) -> None:
             "rule": decision.rule,
             "decision": "allow" if decision.allowed else "deny",
             "reason": decision.reason,
+            "argument_names": sorted(arguments),
         },
     )
 
@@ -97,7 +118,7 @@ def enforce_call(
     between its logged reason and its wire message.
     """
     decision = evaluate(policy, principal, tool, arguments)
-    _record(decision, principal, tool)
+    _record(decision, principal, tool, arguments if arguments is not None else {})
     if decision.allowed:
         return
     raise PolicyDeniedError("this call was not permitted")

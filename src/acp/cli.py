@@ -5,8 +5,8 @@ real upstream from a terminal and watch what it does. That matters more than it
 sounds: a proxy you can only exercise through its own test suite is a proxy you
 cannot debug when something odd happens against a real server.
 
-Subcommands land here as the phases do — ``policy explain`` (task 36),
-``audit verify`` in task 57.
+Subcommands land here as the phases do — ``policy explain`` and
+``policy simulate`` in phase 3, ``audit verify`` in task 57.
 """
 
 from __future__ import annotations
@@ -28,8 +28,10 @@ from acp.config import load_settings, load_upstreams
 from acp.exceptions import ACPError
 from acp.identity.principal import Actor, Principal
 from acp.observability import configure_logging, configure_tracing
-from acp.policy import evaluate
+from acp.policy import Policy, evaluate
 from acp.policy.loader import load_policy
+from acp.policy.record import parse_traffic
+from acp.policy.simulate import CHANGED, Outcome, simulate
 from acp.runtime import gateway_from_settings
 from acp.schema import SchemaSnapshot, diff
 from acp.secrets import cli as secrets_cli
@@ -91,11 +93,17 @@ def _parse_args(pairs: list[str]) -> dict[str, str]:
 
 
 def _add_policy_commands(subparsers: Any) -> None:
-    """``acp policy explain`` (task 36): the policy simulator.
+    """``acp policy explain`` and ``acp policy simulate``.
 
-    One evaluator, two paths. A live request reaches ``evaluate`` through the
-    gateway; this reaches the same ``evaluate`` from a terminal, so the
-    simulator and the gateway cannot disagree. No token, no upstream, no call.
+    One evaluator, three paths now. A live request reaches ``evaluate`` through
+    the gateway; ``explain`` reaches the same ``evaluate`` from a terminal;
+    ``simulate`` reaches the same matcher over recorded traffic. None of them
+    has its own copy of the rules, which is what makes the answers worth
+    anything (ADR 0030).
+
+    ``explain`` answers *what would this policy do to a request I describe*.
+    ``simulate`` answers *what would this policy do to the requests that
+    actually happened* — the difference between a spot check and a review.
     """
     policy = subparsers.add_parser("policy", help="inspect and simulate policy")
     actions = policy.add_subparsers(dest="policy_command", metavar="<action>")
@@ -116,6 +124,24 @@ def _add_policy_commands(subparsers: Any) -> None:
         help="a call argument, repeatable; e.g. --arg doc_id=public",
     )
 
+    simulate = actions.add_parser(
+        "simulate",
+        help="replay recorded decisions against a proposed policy and report what changes",
+    )
+    simulate.add_argument("--policy", required=True, help="path to the proposed policy file")
+    simulate.add_argument(
+        "--log",
+        required=True,
+        help="path to the gateway's decision log (JSON lines), or - for stdin",
+    )
+    simulate.add_argument(
+        "--show",
+        type=int,
+        default=20,
+        metavar="N",
+        help="how many changed calls to print in full (default 20, 0 for all)",
+    )
+
 
 # The issuer on a simulated principal: never validated, never trusted. The
 # simulator evaluates policy over an identity you describe; it does not
@@ -124,7 +150,7 @@ SIMULATED_ISSUER = "urn:acp:simulator"
 
 
 def _policy_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
-    if args.policy_command != "explain":
+    if args.policy_command not in ("explain", "simulate"):
         parser.parse_args(["policy", "--help"])
         return USAGE_ERROR
 
@@ -132,6 +158,9 @@ def _policy_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -
         policy = load_policy(Path(args.policy))
     except ACPError as exc:
         return _usage_error(f"could not load policy: {exc.message}")
+
+    if args.policy_command == "simulate":
+        return _simulate_command(policy, args)
 
     try:
         arguments = _parse_args(args.arg)
@@ -153,6 +182,86 @@ def _policy_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -
     print(f"  rule:    {matched}")  # noqa: T201
     print(f"  reason:  {decision.reason}")  # noqa: T201
     return 0 if decision.allowed else 1
+
+
+CHANGES_FOUND = 1
+"""Exit code for "this edit changes something".
+
+The same 1 that `explain` returns for a denial, and deliberately **not**
+`USAGE_ERROR`. This command is meant to gate a policy pull request, so a CI job
+has to be able to tell "the policy would deny 40 calls that work today" from
+"you typed the filename wrong". Both fail the build; only one of them is about
+the policy, and a reviewer reading a red job needs to know which without opening
+the log.
+"""
+
+
+def _read_log(path: str) -> list[str] | None:
+    """The decision log's lines, or ``None`` after reporting why not."""
+    if path == "-":
+        return sys.stdin.readlines()
+    try:
+        return Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        _usage_error(f"could not read the decision log: {exc}")
+        return None
+
+
+def _simulate_command(policy: Policy, args: argparse.Namespace) -> int:
+    """``acp policy simulate`` — replay recorded traffic, report what changes.
+
+    Prints the counts first and the detail second, because the first question
+    is always "how bad is it" and the answer has to survive being piped to
+    `head`. The changed calls come after, capped by ``--show`` so a log with
+    ten thousand newly-denied calls does not bury the summary that said so.
+    """
+    lines = _read_log(args.log)
+    if lines is None:
+        return USAGE_ERROR
+
+    traffic = parse_traffic(lines)
+    if not traffic.decisions:
+        print(f"No authorization decisions found in {args.log}.")  # noqa: T201
+        print(  # noqa: T201
+            f"  read {traffic.total} lines: {traffic.other_events} other events, "
+            f"{traffic.unreadable} unreadable"
+        )
+        # Not a failure: an empty log is a true answer to "what would change",
+        # and it is also the answer you get before the gateway has run. Said
+        # plainly rather than reported as "no changes", which would be a
+        # dangerously reassuring way to describe having measured nothing.
+        return 0
+
+    simulation = simulate(policy, traffic)
+    counts = simulation.counts
+
+    print(  # noqa: T201
+        f"Replayed {len(traffic.decisions):,} recorded decisions against {args.policy}"
+    )
+    if traffic.unreadable:
+        print(f"  ({traffic.unreadable} lines could not be read and were skipped)")  # noqa: T201
+    print()  # noqa: T201
+    for outcome in Outcome:
+        count = counts.get(outcome, 0)
+        # Marked only when it is both non-zero and one of the outcomes that
+        # means "not proven safe" — so the eye lands on the lines that decide
+        # whether this edit ships, and a large `unchanged` count does not
+        # compete with them for attention.
+        marker = "! " if count and outcome in CHANGED else "  "
+        print(f"{marker}{count:>6,}  {outcome.value}")  # noqa: T201
+
+    changed = simulation.changed
+    if changed:
+        shown = changed if args.show == 0 else changed[: args.show]
+        print(f"\n{len(changed):,} call(s) not proven unchanged:")  # noqa: T201
+        for replay in shown:
+            print(f"\n  [{replay.outcome.value}] {replay.describe()}")  # noqa: T201
+        if len(shown) < len(changed):
+            print(f"\n  ... and {len(changed) - len(shown):,} more (--show 0 for all)")  # noqa: T201
+        return CHANGES_FOUND
+
+    print("\nNo call would be decided differently.")  # noqa: T201
+    return 0
 
 
 def _add_schemas_commands(subparsers: Any) -> None:

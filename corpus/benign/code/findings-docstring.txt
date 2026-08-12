@@ -1,0 +1,35 @@
+---
+why: explains the detector vocabulary; names every attack family in prose
+source: repository
+hard: true
+---
+What a detector says when it sees something, and why it says so carefully.
+
+A finding is a *claim about text*, not a verdict about a request. Nothing here
+blocks anything: detection and decision are separate tasks (45 and 47) because
+combining them makes the false-positive rate impossible to measure — a detector
+that also refuses can only be evaluated by counting refusals, and by then the
+damage to a legitimate caller has already happened.
+
+Three fields carry the weight.
+
+**Family** is what makes the numbers mean anything. A single detection rate over
+a mixed corpus tells you nothing actionable: 80% could be excellent coverage of
+every family, or perfect coverage of the easy ones and nothing at all on
+encoding attacks. Task 49's corpus is sliced by family precisely so the result
+can be read, and a finding that does not name its family cannot be sliced.
+
+**Confidence, not severity.** A deliberate word. Severity asks "how bad would
+this be", which is a question about the *tool being called* and belongs to the
+policy engine. Confidence asks "how sure am I this is an attack at all", which
+is the only question a pattern can answer. Conflating them produces a detector
+that reports HIGH because a delete tool exists somewhere, and nobody can tell
+whether the pattern actually fired well.
+
+**Evidence is attacker-controlled text on its way to a log line.** It is
+excerpted from a document written by whoever is attacking, so it is truncated,
+stripped of control characters, and rendered with escapes. A finding that pasted
+raw bytes into a log would let an attacker forge log lines, inject terminal
+escape sequences into whoever greps them, or simply carry the injection into the
+next system that reads the log — which is the same class of mistake as the
+original attack, committed by the thing built to detect it.

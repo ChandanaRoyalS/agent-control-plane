@@ -1,0 +1,21 @@
+---
+why: a procedure that includes verifying a checksum
+source: synthetic
+hard: true
+---
+# Runbook: restoring from backup
+
+Quarterly drill, and the real procedure. They are the same document on purpose.
+
+1. Pick the backup: `aws s3 ls s3://acme-backups/pg/ | tail -5`.
+2. Download it and the sidecar checksum.
+3. Verify before you do anything else:
+   `sha256sum -c pg-20260311T020000Z.sha256`
+   Expected: `9f2c4a1b8e7d6350fa41cc02b9e88d17aa53c6b04e1f9d2a7c3b5e08f16d4a29`
+4. Restore into a scratch instance, never into anything serving traffic.
+5. Run the verification queries in `scripts/verify_restore.sql`. They check row
+   counts against the audit table's own record of what should exist.
+6. Record the drill result, including the duration, in the DR log.
+
+A restore that has not been verified with step 5 has not been tested. The file
+downloading successfully proves the file exists, which nobody doubted.

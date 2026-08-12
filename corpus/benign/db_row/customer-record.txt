@@ -1,0 +1,8 @@
+---
+why: an ordinary customer row
+source: synthetic
+---
+{"customer_id": 88412, "name": "Northwind Trading Ltd", "tier": "enterprise",
+ "seats": 340, "renewal_date": "2026-11-30", "csm": "dana@acme.example",
+ "health_score": 78, "open_tickets": 2, "region": "eu-west",
+ "notes": "Expanding into the Nordics in Q3. Wants SSO before they add seats."}

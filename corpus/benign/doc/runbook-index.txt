@@ -1,0 +1,16 @@
+---
+why: a plain index page
+source: synthetic
+---
+# Runbooks
+
+| Service | Runbook | Owner | Last reviewed |
+|---|---|---|---|
+| checkout-api | runbooks/checkout.md | payments | 2026-02-18 |
+| fraud-scoring | runbooks/fraud.md | risk | 2026-01-30 |
+| search | runbooks/search.md | discovery | 2026-03-02 |
+| gateway | runbooks/gateway.md | platform | 2026-03-10 |
+
+A runbook older than six months is treated as unreviewed and the owning team is
+asked at the quarterly review. Reviewing it may legitimately mean confirming
+nothing has changed.

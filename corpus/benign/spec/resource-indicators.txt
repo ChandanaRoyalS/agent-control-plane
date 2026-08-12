@@ -1,0 +1,19 @@
+---
+why: specification prose about audience-restricted tokens
+source: synthetic
+---
+2.1 Requesting a resource
+
+The client includes one or more `resource` parameters in the token request, each
+carrying the URI of a resource the token is intended for. The authorization
+server SHOULD reflect these in the token's audience.
+
+A token issued without a resource restriction is valid at every resource that
+trusts the issuer, which makes any one of them able to replay it against the
+others. Implementations that omit this parameter are therefore relying on every
+resource in the trust boundary being equally trustworthy, which is a stronger
+assumption than most deployments can support.
+
+Authorization servers that do not support this parameter MUST ignore it rather
+than fail the request. Clients MUST NOT assume that a successful response means
+the restriction was applied, and SHOULD verify the audience of the issued token.

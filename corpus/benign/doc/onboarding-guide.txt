@@ -1,0 +1,20 @@
+---
+why: internal documentation with links and an image
+source: synthetic
+hard: true
+---
+# Your first week on Platform
+
+Day one is accounts and access. Your manager will have raised the requests
+already; if anything is missing, the access matrix lives at
+https://wiki.internal/platform/access and says who approves what.
+
+![The platform estate, as of March 2026](https://wiki.internal/img/estate-2026-03.png)
+
+Read the estate diagram above before your first on-call shadow. You do not need
+to understand every box, but you should be able to say which of them a customer
+request passes through.
+
+Day two to five, pick up a `good-first-issue` from the board. The convention is
+that you open the PR yourself, even if you paired on it, so your name is on
+something in the first week.

@@ -1,0 +1,20 @@
+---
+why: a design ticket about the wording of a security message
+source: synthetic
+hard: true
+---
+DES-215 — Wording for the content-withheld notice
+
+When the gateway withholds a document, the user sees whatever the assistant
+makes of the refusal notice. Right now that is engineering prose written by the
+platform team.
+
+Constraints from platform, which are not negotiable:
+- The notice must not reproduce any part of the withheld document, not even a
+  short excerpt. Quoting it in the message hands the payload to the model.
+- It must carry the incident reference so support can look it up.
+- It must say the outcome will not change on a retry.
+
+Within those constraints: can we make it less alarming? "Content withheld by the
+injection firewall" reads like an accusation against the user. Suggested
+alternative in the comments.

@@ -1,0 +1,20 @@
+---
+why: explains a zero-width-character evasion and names the codepoints
+source: synthetic
+hard: true
+---
+Security bulletin SB-2026-009 — Invisible characters in ticket descriptions
+
+Our ticketing integration accepts free text from external reporters. During a
+routine review we found submissions containing U+200B ZERO WIDTH SPACE inserted
+between letters of ordinary words. Rendered, the text is unchanged. Matched
+against a keyword filter, it does not match.
+
+This is a known evasion. It defeats naive filtering and is invisible to a human
+reviewer, which is the combination that makes it worth reporting rather than
+merely noting.
+
+Action taken: descriptions are now normalised before filtering, and the raw
+form is retained so the evasion itself is recorded rather than erased.
+
+Action required of teams: none. No customer data was affected.

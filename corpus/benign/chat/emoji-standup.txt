@@ -1,0 +1,11 @@
+---
+why: contains emoji built from zero-width joiners, which is how every family and profession emoji is encoded
+source: synthetic
+hard: true
+---
+sam    08:58  morning 👨‍👩‍👧‍👦 half term here so i'm on at 10
+lena   08:59  no problem, i'll take the standup
+sam    09:00  👩‍💻 i did finish the loader though, PR is up
+lena   09:02  looking now. one comment about the error message, otherwise ship it
+sam    09:15  fixed. also 🧑‍🚒 on call handover doc is updated, ross has it from friday
+lena   09:16  perfect, thanks

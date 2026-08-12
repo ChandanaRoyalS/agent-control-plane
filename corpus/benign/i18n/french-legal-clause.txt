@@ -1,0 +1,17 @@
+---
+why: French with non-breaking spaces before punctuation, which is typographically required
+source: synthetic
+hard: true
+---
+Article 7 — Conservation des données
+
+Les journaux applicatifs sont conservés pendant 90 jours ; les enregistrements
+d'audit sont conservés sept ans, cette durée résultant d'une obligation légale et
+non d'un choix technique.
+
+Les sauvegardes sont conservées trente jours, chiffrées au repos, et restaurées
+puis vérifiées chaque trimestre : une sauvegarde jamais restaurée n'est qu'une
+hypothèse.
+
+Toute dérogation est soumise à l'accord du service juridique et inscrite au
+registre des dérogations, assortie d'une date d'expiration .

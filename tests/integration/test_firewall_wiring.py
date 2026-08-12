@@ -87,17 +87,21 @@ def test_enforce_mode_builds_a_firewall_that_withholds() -> None:
 
 
 def test_the_configured_hosts_reach_the_firewall() -> None:
-    """The value that decides whether the exfiltration detector can act at all,
-    carried from an environment variable to a frozenset four function calls
-    away. Asserted by behaviour rather than by reading a private attribute,
-    because what matters is the decision it changes."""
+    """A host list carried from an environment variable to a frozenset four
+    function calls away, asserted by behaviour rather than by reading a private
+    attribute — because what matters is the finding it changes.
+
+    On the findings rather than on a refusal: the benign corpus demoted the
+    image detector, so this list decides what is *reported*, which is what tasks
+    51 and 52 will combine with a second signal.
+    """
     firewall = build_firewall(
         settings_for(firewall_mode=Mode.ENFORCE, firewall_allowed_hosts=["cdn.corp"])
     )
     assert firewall is not None
 
-    assert not firewall.inspect(image("cdn.corp"), tool="t").refused
-    assert firewall.inspect(image("evil.test"), tool="t").refused
+    assert firewall.inspect(image("cdn.corp"), tool="t").screening.clean
+    assert firewall.inspect(image("evil.test"), tool="t").screening.findings
 
 
 def test_enforcing_without_framing_says_so(caplog: pytest.LogCaptureFixture) -> None:
@@ -136,14 +140,15 @@ def test_the_complete_configuration_warns_about_nothing(caplog: pytest.LogCaptur
     assert [r.message for r in caplog.records if r.name == "acp.runtime"] == []
 
 
-def test_enforcing_with_no_allowed_hosts_says_so(caplog: pytest.LogCaptureFixture) -> None:
-    """ "Enforcement is on" and "exfiltration is enforced" read as the same
-    sentence and are not. With no hosts configured the image detector cannot
-    tell a leak from a logo, so it reports everything and withholds nothing."""
+def test_screening_with_no_allowed_hosts_says_so(caplog: pytest.LogCaptureFixture) -> None:
+    """With no hosts configured the URL and image detectors report every link
+    and every image in every document. Nothing is withheld either way — the
+    benign corpus demoted both (ADR 0039) — but the finding count becomes noise,
+    and a finding count that is mostly noise is how a log stops being read."""
     with caplog.at_level(logging.WARNING, logger="acp.runtime"):
-        build_firewall(settings_for(firewall_mode=Mode.ENFORCE))
+        build_firewall(settings_for(firewall_mode=Mode.REPORT))
 
-    assert any(r.message == "firewall.exfiltration_not_enforced" for r in caplog.records)
+    assert any(r.message == "firewall.every_link_reported" for r in caplog.records)
 
 
 def test_a_configured_firewall_is_announced_at_startup(caplog: pytest.LogCaptureFixture) -> None:

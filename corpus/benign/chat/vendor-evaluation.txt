@@ -1,0 +1,11 @@
+---
+why: ordinary procurement chat with URLs
+source: synthetic
+---
+lena   13:15  vendor comparison is up: https://wiki.internal/platform/vendor-eval-2026
+lena   13:15  three finalists, the pricing tab is the interesting one
+tom    13:22  their docs are at https://docs.contoso.example/api/v3 if anyone wants
+              to read the actual API rather than the sales deck
+lena   13:24  i did. it's fine. no batch endpoint which will hurt us at volume
+tom    13:25  noted in the risks column?
+lena   13:26  row 14

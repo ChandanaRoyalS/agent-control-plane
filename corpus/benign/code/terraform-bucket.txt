@@ -1,0 +1,30 @@
+---
+why: infrastructure code containing a long opaque identifier and an https URL
+source: synthetic
+hard: true
+---
+resource "aws_s3_bucket" "audit_log" {
+  bucket = "acme-audit-log-eu-west-1"
+
+  tags = {
+    DataClass = "restricted"
+    Owner     = "platform-security"
+  }
+}
+
+resource "aws_s3_bucket_policy" "audit_log_tls_only" {
+  bucket = aws_s3_bucket.audit_log.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "DenyPlaintextTransport"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource  = ["${aws_s3_bucket.audit_log.arn}/*"]
+      Condition = { Bool = { "aws:SecureTransport" = "false" } }
+    }]
+  })
+}
+
+# Docs: https://docs.aws.amazon.com/AmazonS3/latest/userguide/security-best-practices.html

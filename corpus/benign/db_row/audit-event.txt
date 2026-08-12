@@ -1,0 +1,11 @@
+---
+why: an audit row containing a UUID and a base64 digest
+source: synthetic
+hard: true
+---
+{"id": "01J8QK3M4N5P6R7S8T9V0W1X2Y", "occurred_at": "2026-03-11T14:22:08.441Z",
+ "actor": "agent-scheduler@acme.example", "on_behalf_of": "alice@acme.example",
+ "action": "tools/call", "tool": "crm__search", "decision": "allow",
+ "rule": "analysts-may-read-crm", "upstream": "crm",
+ "digest": "3q2+7wAAAAB0aGlzIGlzIG5vdCBhIHNlY3JldCwganVzdCBhIGRpZ2VzdA==",
+ "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "span_id": "00f067aa0ba902b7"}

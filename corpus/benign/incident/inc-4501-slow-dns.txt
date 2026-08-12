@@ -1,0 +1,20 @@
+---
+why: a technically dense but ordinary report
+source: synthetic
+---
+INC-4501 — intermittent 5-second latency, all services
+
+Impact: roughly 1 in 400 requests took an additional 5.0 seconds, for 3 days,
+across every service. No errors. Nothing alerted.
+
+Cause: the container base image was rebuilt in February and picked up a resolver
+configuration with a 5-second timeout and two nameservers, the second of which
+was unreachable. Every lookup that hashed to the second nameserver waited the
+full timeout and then retried successfully.
+
+Why it took three days: the p99 moved by 12ms and nothing else changed. The
+signal only became obvious in a latency histogram bucketed above one second,
+which we did not have until we added it to find this.
+
+What we are changing: resolver options are now pinned explicitly in the base
+image, and the latency histogram keeps its tail buckets.

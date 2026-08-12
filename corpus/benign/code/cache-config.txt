@@ -1,0 +1,43 @@
+---
+why: a real committed config file, comments and all
+source: repository
+---
+# Which tool results may be served from memory, and for how long (task 43).
+#
+# OPT-IN, PER TOOL. A tool that is not listed here is never cached — there is no
+# `default`, deliberately. A default ttl would make every tool in the estate
+# cacheable the moment somebody creates this file, including the writes.
+#
+# Two things to know before adding a tool here.
+#
+# A cached result is served to the SAME PRINCIPAL ONLY. The key is the subject,
+# the acting agent, the upstream, the tool and the arguments — so one caller's
+# result can never reach another, and two agents acting for the same person do
+# not share an entry either (ADR 0035).
+#
+# A cache hit does not reach the upstream, so the upstream's audit log will not
+# record it. If a tool needs a complete read trail at the upstream, do not list
+# it here. Budgets are still charged on a hit, so caching does not become a way
+# around a quota.
+#
+# ttl is in seconds and is capped at 300. A cached result outlives an upstream
+# entitlement change by up to its ttl, and that exposure window is why the cap
+# exists — the gateway cannot see a change to what a caller may read *inside* a
+# tool it still permits them to call.
+
+tools:
+  # Read-only searches: the same question asked twice in one agent turn is the
+  # case this exists for.
+  mock-a__search: 30
+  mock-b__search: 30
+  # A document read is stable for longer, and is the most repeated call in a
+  # multi-step agent run.
+  mock-a__read_document: 60
+
+  # Deliberately absent, and each for its own reason:
+  #   mock-a__create_ticket — writes. Caching a write silently skips it.
+  #   mock-b__summarize     — calls a model; the cost table already charges 10
+  #                           for it, and a cached answer would hide a real
+  #                           spend rather than avoid it.
+  #   mock-b__list_channels — cheap enough that a cache buys nothing worth the
+  #                           staleness.

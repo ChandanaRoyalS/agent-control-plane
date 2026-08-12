@@ -1,0 +1,39 @@
+---
+why: enumerates the rejected designs, quoting detector names throughout
+source: repository
+hard: true
+---
+## Alternatives considered
+
+**Explain the refusal by quoting the content.** The most helpful-looking option
+and the one that hands the payload to the model with the gateway's authority
+attached. Named at the top of this ADR because it is what a reasonable engineer
+writes first.
+
+**Strip the offending span and return the rest.** Attractive — it preserves the
+useful part of a document — and it is a partial-trust position that does not
+survive contact with the threat model. If the detectors were reliable enough to
+say *which bytes* are the attack, they would be reliable enough to enforce at
+MEDIUM, and ADR 0036 argues at length that they are not. A document with a
+decoded instruction in it is a document to withhold, not to edit.
+
+**Refuse on any finding.** Refuses on `instruction_override`, therefore refuses
+on documents about security, therefore gets switched off within a week. ADR 0036
+called this the version that looks strongest and is weakest.
+
+**Refuse on N findings of any confidence.** Scores an attacker's obfuscation
+against a legitimate document's incidental noise on the same scale, and two
+LOW findings in a long honest document are commonplace. It also creates a
+gameable target: an attacker's job becomes staying under N, which is easier than
+avoiding a HIGH detector.
+
+**Make the enforceable set configurable.** Would let a deployment enable
+enforcement on `instruction_override`, which is the one outcome this ADR exists
+to prevent. Configuration should express what a deployment knows about its own
+environment — its hosts, its mode — not overrule what the project knows about
+its own detectors' error rates.
+
+**Raise a JSON-RPC error instead of returning `isError`.** Uniform with policy
+and budget refusals, and wrong for the same reason those are right: those refuse
+*the request*, this refuses *the output of a request that ran*. It would also
+lose the free protection of the cache's existing `isError` rule.

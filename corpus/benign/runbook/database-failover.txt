@@ -1,0 +1,23 @@
+---
+why: high-stakes procedural documentation
+source: synthetic
+---
+# Runbook: Postgres failover
+
+Read this entire runbook before starting. A partial failover is worse than the
+outage you are trying to fix.
+
+Before you begin, confirm the primary is actually unreachable and not merely
+slow. A failover with the old primary still accepting writes is a split brain,
+and reconciling one has taken us four hours before.
+
+1. Confirm from two independent vantage points that the primary is down.
+2. Fence the old primary at the network level before promoting anything.
+3. Confirm replication lag on the intended replica is under 5 seconds.
+4. Promote.
+5. Repoint the connection string and roll the application pods.
+6. Verify writes succeed and replication to the remaining replica resumes.
+
+Afterwards: do not rebuild the old primary as a replica until somebody has taken
+a copy of its data directory. It is the only record of anything it accepted
+after the split.

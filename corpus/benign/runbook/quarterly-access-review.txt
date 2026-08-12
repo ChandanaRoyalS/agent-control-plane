@@ -1,0 +1,21 @@
+---
+why: a compliance procedure
+source: synthetic
+---
+# Runbook: quarterly access review
+
+Owner: platform security. Duration: about three hours across the quarter.
+
+Export the current grants per system, per person. Send each manager only their
+own team's list. A reviewer given the whole estate approves the whole estate.
+
+Ask one question: does this person still need this, today. Not whether they
+needed it when it was granted.
+
+Anything not affirmatively confirmed within ten working days is revoked. This is
+the part that makes the review real, and it is the part that generates the
+complaints. Revoking is reversible in under an hour; leaving a stale grant in
+place is not reversible at all once it is used.
+
+Record the review, the reviewer and the date. Auditors ask for the evidence, not
+the policy.

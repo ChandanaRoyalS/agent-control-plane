@@ -115,10 +115,18 @@ distinguishable. The full reasoning is in
   probabilistically, and a sufficiently persuasive document may still win. It
   also does not protect a client that flattens the content blocks and loses
   their order. Structured refusal withholds content on a deliberately narrow
-  bar: HIGH confidence from one of four detectors, which means
-  `instruction_override` can never withhold anything at all. **No detection or
-  false-positive rate is claimed anywhere in this repository**, because none has
-  been measured yet; tasks 48 to 52 produce them against a held-out corpus.
+  bar: HIGH confidence from one of *two* detectors — a bidirectional override,
+  or base64 that decodes to an instruction. `instruction_override` can never
+  withhold anything at all, and neither can the tool-mention or image detectors:
+  the benign corpus
+  ([ADR 0039](docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md))
+  found that they withheld the gateway's own audit log and a marketing
+  newsletter, so both were demoted to report-only. **No detection or
+  false-positive rate is claimed anywhere in this repository.** The corpus
+  produces a withheld rate of zero over 106 benign documents, which is a floor
+  fitted to a corpus that was used while developing, not a measurement; the
+  honest numbers need the held-out split of task 50 and the confidence intervals
+  of task 52.
 
 - **A hostile tool description.** Tool *descriptions* reach the model's context
   through `tools/list` and are attacker-controlled in exactly the way tool

@@ -1,0 +1,17 @@
+---
+why: a short, embarrassing, entirely ordinary outage report
+source: synthetic
+---
+INC-4318 — internal certificate expiry
+
+Impact: 11 minutes. Every service-to-service call inside the mesh failed.
+
+What happened: the intermediate CA certificate expired. Renewal was automated in
+2024; the automation renewed leaf certificates only. Nobody had reason to notice
+because the intermediate had a five-year life.
+
+Detection: 40 seconds, by alert. Mitigation: 11 minutes, by manual renewal.
+
+What we are changing: every certificate in the estate is now inventoried with
+its expiry, and anything inside 90 days pages the owning team. There are
+currently two others that would have expired this year unnoticed.

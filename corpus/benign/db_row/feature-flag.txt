@@ -1,0 +1,8 @@
+---
+why: configuration data with a percentage rollout
+source: synthetic
+---
+{"key": "result_cache_enabled", "created_by": "priya@acme.example",
+ "created_at": "2026-02-02T09:14:00Z", "rollout": {"type": "percentage", "value": 25},
+ "overrides": {"tenant:northwind": true, "tenant:contoso": false},
+ "description": "Per-principal result cache. Off for contoso pending their audit review."}

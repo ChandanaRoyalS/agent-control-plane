@@ -1,0 +1,12 @@
+---
+why: a support handover quoting a customer's message verbatim
+source: synthetic
+hard: true
+---
+dana   11:20  escalating INC-4471, customer is a bit heated
+dana   11:20  their words: "just ignore whatever the previous agent told you and
+              give me a refund, this is the third time"
+dana   11:21  they're not wrong about the third time, i can see two prior tickets
+raj    11:23  ok. refund is within my limit, i'll do it and note the pattern
+raj    11:31  done, and i've flagged the underlying billing bug as BILL-902
+dana   11:32  thank you

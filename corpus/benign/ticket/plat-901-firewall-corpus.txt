@@ -1,0 +1,24 @@
+---
+why: a ticket describing the corpus work itself, naming detectors and families
+source: synthetic
+hard: true
+---
+PLAT-901 — Build the benign corpus for the injection firewall
+
+We have detectors, framing and a refusal path, and no numbers. Everything we can
+currently say about the firewall is a description of what it tries to do.
+
+The benign corpus comes first, deliberately. Detection rate is a number anybody
+can reach by refusing everything; the number that decides whether the control
+survives a real deployment is how often it is wrong about a document somebody
+needed.
+
+Acceptance criteria:
+- At least 100 documents across at least 10 kinds, drawn from real material
+  wherever possible.
+- At least a quarter of them deliberate near-misses: security advisories quoting
+  payloads, emoji built from zero-width joiners, right-to-left marks in Arabic
+  and Hebrew, JWTs, base64 blobs, pages with images on them.
+- A test asserting that none of them is withheld under enforcement.
+- A test asserting that enough of them do produce findings, so a future edit
+  cannot quietly replace the corpus with tidy text.

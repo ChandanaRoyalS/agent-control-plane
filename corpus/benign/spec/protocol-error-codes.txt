@@ -1,0 +1,18 @@
+---
+why: protocol documentation, in the shape of a specification
+source: synthetic
+---
+4.3 Error responses
+
+A server that cannot process a request MUST respond with an error object
+containing a `code` and a `message`. The `code` MUST be an integer drawn from
+the ranges in section 4.4. The `message` SHOULD be a single sentence suitable
+for a log line and MUST NOT contain the request body.
+
+Servers MAY include a `data` member. Clients MUST tolerate its absence and MUST
+NOT fail if it contains members they do not recognise.
+
+Implementations are reminded that the recipient of an error may be an automated
+agent rather than a human operator. An error that states what to do instead
+produces measurably better client behaviour than one that states only that
+something failed.

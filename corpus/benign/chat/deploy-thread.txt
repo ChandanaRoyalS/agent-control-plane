@@ -1,0 +1,11 @@
+---
+why: an ordinary release thread
+source: synthetic
+---
+priya  09:04  release/4.7 is cut, running the canary now
+priya  09:11  canary at 5%, error rate flat, p99 up 3ms which is noise
+tom    09:12  the 3ms is the new span attribute, we saw it in staging too
+priya  09:19  going to 25%
+tom    09:31  approvals dashboard looks right, two pending, none stuck
+priya  09:44  100%. leaving the canary alert armed until 11 in case
+tom    09:45  thanks. i'll do the changelog

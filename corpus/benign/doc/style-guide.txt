@@ -1,0 +1,20 @@
+---
+why: a writing style guide, which necessarily quotes phrases
+source: synthetic
+hard: true
+---
+# Writing incident reports
+
+Write what happened, in order, in the past tense. The reader is a colleague six
+months from now who is looking for the same failure.
+
+Quote alerts and messages exactly. If a page said "checkout-api availability
+91.2%", write that, not "availability dropped". The precision is the value.
+
+Do not write "the system decided" or "the model decided". Name the component.
+"The evaluator returned deny with no matching rule" is a sentence somebody can
+act on; "it denied the request" is not.
+
+Avoid blame and avoid heroics equally. "Ross rolled it back at 02:41" is a fact.
+"Ross heroically saved the checkout flow" is a story, and stories are how the
+same failure happens twice.

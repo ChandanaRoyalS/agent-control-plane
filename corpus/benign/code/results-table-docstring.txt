@@ -1,0 +1,29 @@
+---
+why: ordinary design prose about caching, no attack vocabulary at all
+source: repository
+---
+Which tools may have their results cached, and for how long.
+
+**Opt-in, never inferred.** A tool is cacheable because somebody with a
+deployment in front of them said so in a file that shows up in a diff — not
+because its name begins with ``get_``, not because the method looked like a
+read, and emphatically not because the upstream said so about itself.
+
+The reasons, in order of how expensive the mistake is:
+
+**A name is not a contract.** A tool called ``search`` may write an audit row.
+One called ``get_report`` may bill per call. Caching either is a correctness bug
+that shows up as a missing record or a lost charge, and neither will look like a
+cache problem when somebody eventually investigates.
+
+**An upstream that can declare its own results cacheable can make this gateway
+serve stale data on request.** That is ADR 0013's argument about tool
+descriptions, arriving through a new field: a compromised or merely
+badly-configured upstream should never be able to change how long the gateway
+repeats what it said. So there is no ``cacheable`` hint read off the catalogue,
+by design.
+
+**Absent means off.** No file, or a tool not listed, means the call goes to the
+upstream exactly as it did before. Turning result caching on with an empty table
+changes nothing — the same shape ADR 0033 chose for costs, so no existing
+deployment behaves differently until it opts in.

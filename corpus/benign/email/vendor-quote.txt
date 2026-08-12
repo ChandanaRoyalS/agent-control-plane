@@ -1,0 +1,22 @@
+---
+why: an ordinary vendor email with a link
+source: synthetic
+---
+From: sales@contoso.example
+To: procurement@acme.example
+Subject: Re: Renewal quote, Contoso Analytics
+
+Hi Dana,
+
+Attached is the revised quote reflecting the 340 seats rather than 300. The
+per-seat rate holds at the volume tier you are already in, so the difference is
+purely the extra forty.
+
+The renewal date on our side is 30 November. If you want the multi-year rate we
+would need paperwork signed by 31 October, but there is no pressure from us
+either way — the annual rate is unchanged if you would rather stay flexible.
+
+Terms are unchanged and are at https://contoso.example/legal/msa-2026.
+
+Best,
+Marcus

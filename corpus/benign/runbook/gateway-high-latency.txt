@@ -1,0 +1,20 @@
+---
+why: an operational runbook, numbered imperative steps throughout
+source: synthetic
+hard: true
+---
+# Runbook: gateway p99 above 500ms
+
+Do not restart the gateway first. It is almost never the gateway.
+
+1. Check which upstream is slow: the `acp_upstream_call_duration_seconds`
+   histogram is labelled by upstream. One of them will be obvious.
+2. Check that upstream's breaker state. If it is open, the gateway is already
+   failing fast and the latency you are seeing is the half-open probe.
+3. If every upstream looks healthy, check the bulkhead: `acp_calls_in_flight`
+   against `acp_bulkhead_capacity`. A saturated bulkhead means requests are
+   queueing for a slot rather than for a dependency.
+4. Only now consider the gateway itself. Take a `py-spy dump` before restarting.
+   A restart destroys the evidence and the problem will recur.
+
+Escalation: platform on-call, then the owning team of whichever upstream is slow.

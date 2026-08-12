@@ -1,0 +1,14 @@
+---
+why: ordinary library code, no attack vocabulary
+source: synthetic
+---
+def backoff(attempt: int, *, base: float = 0.1, cap: float = 10.0) -> float:
+    """Exponential backoff with full jitter.
+
+    Full jitter rather than equal jitter because the failure mode being avoided
+    is synchronised retries: a hundred clients that all backed off by the same
+    computed delay arrive together, which is the thundering herd the backoff
+    was meant to prevent.
+    """
+    ceiling = min(cap, base * (2**attempt))
+    return random.uniform(0, ceiling)

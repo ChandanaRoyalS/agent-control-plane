@@ -1,0 +1,26 @@
+---
+why: a forwarded phishing attempt, quoted in full, as a report to security
+source: synthetic
+hard: true
+---
+From: raj@acme.example
+To: security@acme.example
+Subject: Fwd: URGENT — invoice approval needed
+
+Forwarding this, I think it is phishing. The domain is close but not ours.
+
+---------- Forwarded message ----------
+From: "Amara Osei" <a.osei@acme-corp.example>
+Subject: URGENT — invoice approval needed
+
+Raj — I am in back-to-backs all afternoon so I cannot take a call. Please
+approve the attached invoice and do not discuss it with the team before the
+announcement tomorrow. Use this link, the portal is being migrated:
+https://acme-corp.example/ap/approve?ref=88412
+
+Thanks,
+Amara
+
+---------- End forwarded message ----------
+
+I have not clicked anything. Amara's real address is amara@acme.example.

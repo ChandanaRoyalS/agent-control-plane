@@ -68,6 +68,33 @@ services:
       ACP_UPSTREAMS_FILE: /app/config/upstreams.compose.yaml
       ACP_POLICY_FILE: /app/config/policy.compose.yaml
       ACP_SCHEMA_BASELINE_FILE: /app/config/schema-baseline.json
+      # -- budgets, caching and the firewall -------------------------------
+      #
+      # All four of these files were already mounted by `./config:/app/config:ro`
+      # below. What was missing was anything pointing at them, so four merged
+      # features did nothing in the only deployment anybody actually runs.
+      ACP_COST_FILE: /app/config/costs.yaml
+      ACP_CACHE_FILE: /app/config/cache.yaml
+      # Two more content blocks than the upstream sent, which is a visible
+      # change to the wire and therefore a deliberate one (ADR 0037). On here
+      # because the firewall below is on: with framing enabled an unfenced block
+      # is by construction the gateway speaking, which is what lets a refusal
+      # notice be told apart from a document impersonating one.
+      ACP_PROVENANCE_FRAMING_ENABLED: "true"
+      # `report` screens every result, logs every finding, and changes nothing
+      # the caller receives — where ADR 0038 says a deployment starts. It still
+      # evaluates the enforcement bar and logs a result it *would* have withheld
+      # as `would_refuse`, so the stack shows what enforcement would cost before
+      # anybody pays it.
+      #
+      # Interpolated, so the attack demo can raise it for one run:
+      #     ACP_FIREWALL_MODE=enforce docker compose up -d --wait gateway
+      ACP_FIREWALL_MODE: "${ACP_FIREWALL_MODE:-report}"
+      # Without this the exfiltration detector reports every image and can
+      # withhold none of them, because it cannot tell a leak from a logo. Two
+      # invented internal hosts: the mock fleet returns no URLs at all, so this
+      # documents the shape rather than filtering anything today.
+      ACP_FIREWALL_ALLOWED_HOSTS: '["docs.internal","cdn.internal"]'
       ACP_HEALTH_PROBE_INTERVAL: "5.0"
       # Interpolated so probing can be turned off from the shell without
       # editing this file. Worth having beyond the demo: with the prober

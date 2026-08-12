@@ -1,0 +1,10 @@
+---
+why: a session record containing a real JWT-shaped token
+source: synthetic
+hard: true
+---
+{"session_id": "sess_9f14c2a8", "user_id": 4471, "issued_at": "2026-03-11T08:00:00Z",
+ "expires_at": "2026-03-11T09:00:00Z", "ip": "203.0.113.44",
+ "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+ "id_token_header": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjdjMWEyYjNkNGU1ZjYwNzEifQ",
+ "mfa": true, "revoked": false}

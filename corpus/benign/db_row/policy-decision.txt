@@ -1,0 +1,10 @@
+---
+why: a denial record naming the rule
+source: synthetic
+---
+{"decision_id": "dec_7714aa", "at": "2026-03-11T14:22:41.902Z",
+ "principal": "bob@acme.example", "agent": "agent-support@acme.example",
+ "tool": "billing__issue_refund", "arguments_digest": "sha256:4c1f...9ab2",
+ "decision": "deny", "rule": null,
+ "reason": "no rule permitted this call; deny is the default",
+ "trace_id": "8a3d1f0c2b5e4477a9d6e0b1c3f52984"}

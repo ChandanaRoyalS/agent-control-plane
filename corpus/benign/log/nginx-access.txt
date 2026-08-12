@@ -1,0 +1,9 @@
+---
+why: web server access logs containing URLs and user agents
+source: synthetic
+hard: true
+---
+203.0.113.44 - - [11/Mar/2026:14:22:08 +0000] "GET /v2/search?q=retention&cursor=eyJvIjoxMjB9 HTTP/1.1" 200 4182 "https://app.acme.example/search" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"
+203.0.113.44 - - [11/Mar/2026:14:22:09 +0000] "GET /assets/logo-b8f2c1.svg HTTP/1.1" 304 0 "https://app.acme.example/search" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+198.51.100.7 - - [11/Mar/2026:14:22:11 +0000] "POST /v2/tickets HTTP/1.1" 201 312 "-" "acme-cli/2.3.1"
+198.51.100.7 - - [11/Mar/2026:14:22:14 +0000] "GET /v1/search?q=test HTTP/1.1" 410 88 "-" "acme-cli/2.3.1"

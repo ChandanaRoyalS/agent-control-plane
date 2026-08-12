@@ -1,0 +1,17 @@
+---
+why: protocol documentation describing content types
+source: synthetic
+---
+3.6 Content
+
+A tool result carries an ordered array of content blocks. Each block has a
+`type`. This document defines `text`, `image` and `resource_link`; future
+revisions may define others.
+
+Clients MUST preserve the order of content blocks and MUST NOT reorder,
+deduplicate or merge them. Implementations that flatten a result into a single
+string are reminded that ordering may carry meaning assigned by an intermediary,
+and that discarding it may discard a security property.
+
+Clients MUST tolerate a block with an unrecognised `type` by ignoring its
+payload while preserving its position.

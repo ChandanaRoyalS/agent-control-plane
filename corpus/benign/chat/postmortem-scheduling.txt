@@ -1,0 +1,8 @@
+---
+why: short and entirely unremarkable
+source: synthetic
+---
+mira   09:30  postmortem for last night is thursday 11am, blameless as always
+ross   09:31  can we do 2pm? i'd rather not write it up at 9am on 4 hours sleep
+mira   09:31  2pm works. i'll move it
+ross   09:32  thanks

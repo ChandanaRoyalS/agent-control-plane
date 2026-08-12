@@ -1,0 +1,30 @@
+---
+why: this repository's own screener docstring, containing a zero-width escape sequence and the payload sentence it describes
+source: repository
+hard: true
+---
+Running every detector over one piece of text, within bounds.
+
+Two responsibilities, and neither is deciding anything. The screener orders the
+detectors so that obfuscation is recorded *before* it is undone, and it bounds
+the work so that a hostile document cannot turn screening into the outage it was
+meant to prevent.
+
+**Ordering.** Invisible and bidirectional characters are detected first, then
+stripped, then everything else runs over the cleaned text. Strip first and the
+evidence of obfuscation is gone; match first without stripping and
+``ig\u200bnore previous instructions`` defeats every pattern while a model reads
+it as the sentence it plainly is. Doing both, in that order, is what turns one
+evasion into two findings.
+
+**Bounds.** The text comes from an upstream that may be compromised — that is
+the premise of the whole phase — so it is an attacker-controlled input to this
+code. Long documents are truncated before any pattern runs, and the truncation
+is itself reported, because a screener that silently examined the first 64KB of
+a 10MB document would be a control with a documented bypass: put the payload at
+the end.
+
+Screening never raises and never blocks. It returns findings. What to do about
+them is task 47, and keeping the two apart is what makes the false-positive rate
+measurable at all — a detector that also refuses can only be evaluated by
+counting refusals, and by then a legitimate caller has already been told no.

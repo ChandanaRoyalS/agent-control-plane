@@ -1,0 +1,13 @@
+---
+why: engineers arguing about caching; long, opinionated, ordinary
+source: synthetic
+---
+tom    14:02  i still think the result cache should be outermost, a hit should cost nothing
+priya  14:04  it costs a data breach if it's outside authorization
+tom    14:05  ...yes, ok. outside the *policy* check specifically
+priya  14:06  that's what outermost means though. if the cache answers before the
+              policy runs, the denial never happens at all
+tom    14:08  fine. after policy. but before the budget surely, a hit isn't a call
+priya  14:11  then the cheapest way to stay under a quota is to ask twice
+tom    14:12  hah. ok you win, innermost it is
+priya  14:12  i'll write it down so we don't have this argument again in june

@@ -1,0 +1,17 @@
+---
+why: a checklist
+source: synthetic
+---
+# On-call handover
+
+At the end of your shift, write three things in the handover doc:
+
+1. Anything currently degraded, however minor, and what you decided about it.
+   "Known slow, watching, not paging" is a complete entry.
+2. Anything you silenced, and when the silence expires. A silence with no expiry
+   is a monitor you deleted.
+3. Anything you learned that is not written down anywhere. This is the one
+   people skip and the one that compounds.
+
+Then have a five minute call with the incoming primary. Not a message. The
+questions they ask are the point.

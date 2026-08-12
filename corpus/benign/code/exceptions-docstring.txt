@@ -1,0 +1,15 @@
+---
+why: ordinary prose about an error taxonomy
+source: repository
+---
+The exception taxonomy.
+
+Every error that crosses the gateway boundary is deliberately mapped onto a
+JSON-RPC error response. This matters more than usual here because *the caller
+is a language model*: an error is not just a log line for a human, it is context
+the agent will reason over and act on. An error that explains what to do instead
+produces better agent behaviour than an opaque failure.
+
+Subclasses are added as the layers land (upstream, policy, identity, budget,
+firewall). Keep `code` values aligned with the JSON-RPC spec: -32000 to -32099
+is the implementation-defined server error range.

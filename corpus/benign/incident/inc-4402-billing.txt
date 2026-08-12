@@ -1,0 +1,21 @@
+---
+why: an ordinary data-quality postmortem
+source: synthetic
+---
+INC-4402 — repeated seat-count overcharge, Northwind
+
+Impact: one customer overcharged in January, February and March. Total
+overcharge £4,180, refunded in full on 2026-03-11.
+
+What happened: seat counts sync nightly from the HR system. Two employee records
+were duplicated during a 2025 migration and never reconciled. The sync counts
+records, not people.
+
+Why it recurred: the first two tickets were closed by correcting the *invoice*
+rather than the *count*, so the next sync reintroduced it. That is the finding
+worth keeping — the fix that resolves a ticket and the fix that resolves a
+problem were different, and nobody noticed for two months.
+
+What we are changing: the sync now reconciles against a stable person identifier
+and alerts when a count changes by more than 5% overnight. The duplicate records
+have been merged.

@@ -1,0 +1,19 @@
+---
+why: a frustrated customer email
+source: synthetic
+---
+From: ops@northwind.example
+To: support@acme.example
+Subject: Third time reporting the same billing error
+
+This is the third ticket for the same problem and I am running out of patience.
+
+Our March invoice again charges for 400 seats. We have 340. The two previous
+tickets (4318, 4402) were both closed as resolved and neither fixed anything.
+
+I do not need an apology, I need the invoice corrected and I need to know what
+changed so it does not happen in April. If the answer is that seat counts sync
+nightly from a system that is wrong, please say so.
+
+Sam Whitfield
+Head of IT, Northwind Trading

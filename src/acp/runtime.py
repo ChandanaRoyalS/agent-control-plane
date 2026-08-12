@@ -209,11 +209,11 @@ def build_firewall(settings: GatewaySettings) -> Firewall | None:
     start; a deployment can reasonably adopt the two controls in either order,
     but it should know which half it has.
 
-    **Enforcing with no allowed hosts.** ``external_image`` is the exfiltration
-    detector, and it cannot withhold anything until this deployment says which
-    hosts are ordinary — otherwise every logo in every document is a HIGH
-    finding. Worth a line, because "enforcement is on" and "exfiltration is
-    enforced" read as the same sentence and are not.
+    **Screening with no allowed hosts.** The URL and image detectors then report
+    *every* link and every image in every document. Nothing is withheld either
+    way — neither detector may withhold anything since the benign corpus demoted
+    them (ADR 0039) — but the finding count becomes noise, and a finding count
+    that is mostly noise is how a log stops being read.
     """
     if settings.firewall_mode is FirewallMode.OFF:
         return None
@@ -230,15 +230,15 @@ def build_firewall(settings: GatewaySettings) -> Firewall | None:
                 ),
             },
         )
-    if settings.firewall_mode is FirewallMode.ENFORCE and not settings.firewall_allowed_hosts:
+    if not settings.firewall_allowed_hosts:
         logger.warning(
-            "firewall.exfiltration_not_enforced",
+            "firewall.every_link_reported",
             extra={
                 "reason": "ACP_FIREWALL_ALLOWED_HOSTS is empty",
                 "consequence": (
-                    "every markdown image is reported and none can withhold a "
-                    "result, because with no hosts configured the detector cannot "
-                    "tell an exfiltration URL from a logo"
+                    "every link and every image in every result is reported, because "
+                    "with no hosts configured the detectors cannot tell an "
+                    "exfiltration URL from a logo"
                 ),
             },
         )

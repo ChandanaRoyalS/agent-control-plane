@@ -1,0 +1,22 @@
+---
+why: ordinary engineering prose; the control describing what it costs
+source: repository
+---
+## Consequences
+
+**Callers receive two more content blocks than the upstream sent.** A real,
+visible change to the wire, and the point of the task. It is documented, and it
+is why framing is configurable per deployment rather than assumed.
+
+**The result cache stores unframed content**, so its entries stay valid across
+the nonce changing — and a cache hit is fenced with its own fresh delimiter,
+exactly as a miss is.
+
+**The gateway now writes text a model will read.** A new responsibility, and one
+worth stating: the framing copy is a security control, so it is a constant in
+one module with tests over it, not a string built at the call site.
+
+**The residual is honest.** Framing raises the cost of injection; it does not
+end it. The numbers that will say how much are tasks 48–52, and the corpus
+should include a slice of *plain assertion* attacks — the ones no detector can
+catch — precisely because those are the ones this control is aimed at.

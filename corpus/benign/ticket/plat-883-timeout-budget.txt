@@ -1,0 +1,18 @@
+---
+why: a follow-up ticket with numbers
+source: synthetic
+---
+PLAT-883 — Separate timeout budget for fraud-scoring calls
+
+Follow-up from INC-4460.
+
+checkout-api currently applies its whole 30s request budget to the fraud call,
+so a slow fraud service consumes the entire budget and the checkout has nothing
+left even if fraud eventually answers.
+
+Proposal: fraud gets 800ms. On timeout, fall back to the conservative decision
+(review rather than approve) and record the fallback. A checkout that goes to
+manual review is a worse outcome than an approval and a much better one than a
+spinner.
+
+Needs sign-off from risk on the fallback behaviour before implementation.

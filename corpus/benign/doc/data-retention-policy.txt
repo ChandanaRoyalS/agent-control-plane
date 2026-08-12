@@ -1,0 +1,19 @@
+---
+why: an internal policy document
+source: synthetic
+---
+# Data retention
+
+Application logs: 90 days, then deleted. Audit events: seven years, because they
+are the record of who did what to customer data and the retention is a legal
+requirement rather than an engineering preference.
+
+Backups: 30 days rolling, encrypted at rest, restored and verified quarterly. A
+backup nobody has restored is a hypothesis.
+
+Customer data on account closure: deleted within 30 days, except audit events
+referencing the account, which are retained under the schedule above with
+identifiers replaced by a stable pseudonym.
+
+Exceptions require sign-off from Legal and are recorded in the exceptions
+register with an expiry date. There are currently four.

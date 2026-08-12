@@ -1,0 +1,20 @@
+---
+why: an operations script; pipes, permissions and a checksum
+source: synthetic
+hard: true
+---
+#!/usr/bin/env bash
+set -euo pipefail
+
+DEST=${1:?usage: backup.sh <destination>}
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+
+pg_dump --format=custom --no-owner "$DATABASE_URL" \
+  | gzip -9 \
+  > "${DEST}/pg-${STAMP}.dump.gz"
+
+sha256sum "${DEST}/pg-${STAMP}.dump.gz" | tee "${DEST}/pg-${STAMP}.sha256"
+# 9f2c4a1b8e7d6350fa41cc02b9e88d17aa53c6b04e1f9d2a7c3b5e08f16d4a29
+
+chmod 0400 "${DEST}/pg-${STAMP}."*
+find "$DEST" -name 'pg-*.dump.gz' -mtime +30 -print -delete

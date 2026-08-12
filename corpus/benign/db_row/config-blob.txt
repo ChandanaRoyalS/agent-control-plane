@@ -1,0 +1,8 @@
+---
+why: a settings row storing base64-encoded binary, which decodes to bytes rather than text
+source: synthetic
+hard: true
+---
+{"tenant": "northwind", "key": "branding.logo", "content_type": "image/png",
+ "bytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+ "updated_at": "2026-01-19T16:41:22Z", "updated_by": "dana@acme.example"}

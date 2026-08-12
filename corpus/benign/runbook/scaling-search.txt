@@ -1,0 +1,18 @@
+---
+why: capacity procedure
+source: synthetic
+---
+# Runbook: adding a search node
+
+Lead time is about 20 minutes, most of it shard rebalancing.
+
+1. Confirm you actually need a node. Check heap pressure and CPU, not query
+   latency — latency rises for several reasons and only one of them is capacity.
+2. Add the node to the cluster with allocation disabled.
+3. Enable allocation and watch shards move. Expect roughly 8 minutes per 100GB.
+4. Do not add a second node while rebalancing. Two concurrent rebalances take
+   longer than two sequential ones and are harder to reason about.
+5. Once green, update the capacity note in the runbook index with the new count.
+
+Removing a node is the same procedure in reverse, and requires the same patience
+at step 3.

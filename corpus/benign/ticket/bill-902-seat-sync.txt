@@ -1,0 +1,17 @@
+---
+why: a data bug ticket
+source: synthetic
+---
+BILL-902 — Seat count sync counts records, not people
+
+Northwind has been overcharged three months running. Root cause is duplicate
+employee records from the 2025 HR migration; the nightly sync counts rows.
+
+Fix: reconcile on a stable person identifier rather than on the record id, and
+alert when a tenant's seat count moves more than 5% overnight.
+
+Also needed, and this is the part that made it recur: closing a billing ticket
+by correcting the invoice does not correct the count. The runbook for billing
+disputes should say so explicitly.
+
+Blocked by: nothing. Blocks: BILL-903 (refund automation).

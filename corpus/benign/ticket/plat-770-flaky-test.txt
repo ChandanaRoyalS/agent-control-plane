@@ -1,0 +1,17 @@
+---
+why: a ticket about a flaky test, quoting the failure
+source: synthetic
+---
+PLAT-770 — test_breaker_reopens_after_probe is flaky in CI
+
+Fails roughly 1 run in 30, only in CI, never locally.
+
+    assert breaker.state is State.OPEN
+    AssertionError: assert <State.HALF_OPEN: 'half_open'> is <State.OPEN: 'open'>
+
+The test sleeps for the reset timeout and then asserts. On a loaded CI runner
+the sleep overshoots and the breaker has already moved to half-open.
+
+Fix: inject a clock. The breaker already takes `now` as a parameter everywhere
+else; the test is the only caller using the real one. This is a five line change
+and it removes the only sleep in the unit suite.

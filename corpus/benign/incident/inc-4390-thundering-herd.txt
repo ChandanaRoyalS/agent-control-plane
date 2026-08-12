@@ -1,0 +1,17 @@
+---
+why: engineering prose about retries
+source: synthetic
+---
+INC-4390 — self-inflicted outage after a brief dependency blip
+
+Impact: 22 minutes, entirely of our own making.
+
+The payment provider was unavailable for 40 seconds. Our clients retried with
+exponential backoff and no jitter, so every one of them retried at the same
+instants: 1s, 2s, 4s, 8s. Each wave was larger than the last because failed
+requests accumulated. The provider recovered at 40 seconds and was immediately
+knocked over again by us.
+
+What we are changing: full jitter on every retry, and a retry budget so that
+retries can never exceed 10% of total requests. The provider is fine. We were
+the incident.

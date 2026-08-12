@@ -1,0 +1,22 @@
+---
+why: a plain postmortem with no attack vocabulary
+source: synthetic
+---
+INC-4460 — checkout availability, 2026-03-11
+
+Impact: 33 minutes of degraded checkout, 91.2% availability at the worst point.
+Approximately 1,400 customers saw a spinner and roughly 210 abandoned.
+
+What happened: fraud-scoring 2.14.2 deployed at 01:58 and increased p99 response
+time from 40ms to 1.9s. checkout-api calls it synchronously. Our connection pool
+is sized globally rather than per instance, so all four instances saturated
+together and checkout requests queued behind fraud calls.
+
+What went well: the bulkhead held. Search, catalogue and account were unaffected
+throughout, which is why this is a P1 and not a P0.
+
+What we are changing: pool sizing moves to per-instance (PLAT-882), and
+fraud-scoring calls get their own timeout budget separate from the request
+budget (PLAT-883).
+
+Detection: 2 minutes, by alert. Mitigation: 27 minutes, by rollback.

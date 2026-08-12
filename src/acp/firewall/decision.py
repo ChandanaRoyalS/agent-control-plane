@@ -59,37 +59,50 @@ class Mode(StrEnum):
     """Withhold content that crosses the bar below."""
 
 
-ENFORCEABLE: Final = frozenset(
-    {
-        "bidirectional_override",
-        "encoded_payload",
-        "tool_name_mention",
-        "external_image",
-    }
-)
+ENFORCEABLE: Final = frozenset({"bidirectional_override", "encoded_payload"})
 """The only detectors whose findings may withhold a result.
+
+Two, and the list is short because it was **measured** rather than reasoned
+about. Both of these produced zero findings across the 106 documents of the
+benign corpus (task 48). Everything else produced some, and a detector that
+fires on real documents cannot be allowed to withhold them.
 
 In code rather than in configuration, deliberately. A deployment can say what it
 knows about its own environment — its hosts, its mode — but it cannot promote a
 noisy detector into a blocking one, because what is encoded here is what *this
-project* knows about its own detectors' error rates.
+project has measured* about its own detectors' error rates.
 
-Absent, and each for a stated reason: ``instruction_override`` is capped at
-MEDIUM because a document *about* prompt injection is indistinguishable from the
-attack at the level of a regular expression; ``invisible_characters`` is MEDIUM
-because zero-width joiners are how emoji families are encoded and how several
-scripts shape correctly; ``disallowed_url`` is MEDIUM because legitimate
-documents link to things.
-"""
+Absent, and each for a reason the corpus either predicted or produced:
 
-HOST_DEPENDENT: Final = frozenset({"external_image", "disallowed_url"})
-"""Detectors whose eligibility depends on the deployment having configured hosts.
+``instruction_override`` — capped at MEDIUM by ADR 0036, so it could never
+withhold anything. Fired on 10 benign documents, exactly as expected: security
+advisories, an incident report, this repository's own ADRs.
 
-With no allowed hosts, ``external_image`` reports *every* markdown image at HIGH
-— its documented default is the noisy one (ADR 0036). Enforcing on that default
-would refuse a wiki page for having a logo in it, so the configuration is part
-of the detector's eligibility and is checked here rather than assumed of whoever
-wrote the config file.
+``invisible_characters`` — MEDIUM, same reasoning. Fired on 10: emoji built from
+zero-width joiners, Persian requiring the zero-width non-joiner as spelling,
+French non-breaking spaces.
+
+``disallowed_url`` — MEDIUM. Fired on 10 benign documents that link to things,
+because benign documents link to things.
+
+``tool_name_mention`` — **demoted by the corpus** (ADR 0039). It was on this
+list, described as having a false-positive rate near zero because a *qualified*
+name is unusual in prose. That was a guess and it was wrong in a predictable
+class: it withheld the gateway's own audit log, a policy-decision record and its
+own firewall log lines. A document that is a record of tool calls names tools.
+An observability tool returning that record would have been refused by the
+gateway that wrote it.
+
+``external_image`` — **demoted by the corpus** (ADR 0039). It withheld a
+marketing newsletter carrying a tracking pixel and a security advisory
+demonstrating the exfiltration pattern. Both are benign, both are exactly the
+shape, and no allow-list a real deployment would write covers a third party's
+newsletter.
+
+Both demoted detectors still fire, are still logged, and still count toward
+`would_refuse` in report mode. What changed is that they no longer withhold
+anything on their own. Tasks 51 and 52 can promote them again by combining them
+with a second signal — which is what the corpus says they need.
 """
 
 INCIDENT_BYTES: Final = 8
@@ -160,20 +173,24 @@ class Inspection:
         return not self.refused and not self.screening.truncated
 
 
-def triggers_for(screening: Screening, *, hosts_configured: bool) -> tuple[Finding, ...]:
+def triggers_for(screening: Screening) -> tuple[Finding, ...]:
     """The findings that justify withholding a result.
 
     Two conditions, both necessary: HIGH confidence, and a detector on the
     enforceable list. HIGH alone is not enough because confidence is a claim a
     detector makes about itself; the list is what decides which detectors are
     trusted to make it.
+
+    There used to be a third condition — that a host-dependent detector could
+    only withhold once the deployment had configured its allowed hosts. It went
+    when `external_image` left the enforceable list, because a condition on a
+    detector that can no longer withhold anything is a guard that cannot fire,
+    and a guard that cannot fire is worse than none: a reader trusts it.
     """
     return tuple(
         finding
         for finding in screening.findings
-        if finding.confidence is Confidence.HIGH
-        and finding.detector in ENFORCEABLE
-        and (hosts_configured or finding.detector not in HOST_DEPENDENT)
+        if finding.confidence is Confidence.HIGH and finding.detector in ENFORCEABLE
     )
 
 
@@ -245,7 +262,7 @@ class Firewall:
         screening = screener.screen_all(
             [block.text for block in result.content if block.text is not None]
         )
-        triggers = triggers_for(screening, hosts_configured=bool(self._allowed_hosts))
+        triggers = triggers_for(screening)
 
         if not (triggers and self._enforce):
             self._record(tool, screening, decision=_verdict(screening, triggers), triggers=triggers)

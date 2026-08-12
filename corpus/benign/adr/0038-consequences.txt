@@ -1,0 +1,31 @@
+---
+why: ordinary engineering prose from a decision record about the firewall itself
+source: repository
+---
+## Consequences
+
+**A refused call still cost the caller their budget.** It was rate-limited,
+charged and dispatched before anything was screened. Correct — the upstream work
+happened — and worth stating, because an agent retrying into a refusal spends
+real quota to receive the same notice.
+
+**Enforcement is measurable only after tasks 48–52.** Nothing here claims a
+false-positive rate, and the README must not either. What this task ships is the
+mechanism and a deliberately conservative threshold; the corpus decides whether
+the bar moves, in which direction, and per family.
+
+**The refusal notice is a security control written in English.** So it is a
+constant in one module with tests over its contents, not a string built at the
+call site — the same rule ADR 0037 applied to the fence, for the same reason.
+
+**Tool descriptions are still unscreened.** ADR 0037 named this gap and it stays
+named: a hostile tool *description* reaches the model's context through
+`tools/list` without passing any of this. Closing it means screening the
+catalogue, which changes what an agent can see rather than what it receives, and
+that is a different decision with a different failure mode.
+
+**Counters are incremented per finding.** A document containing two hundred
+zero-width characters adds two hundred to `firewall_findings_total`. Deliberate
+— it is a count, and the label set is closed, so the cardinality an attacker
+controls is zero. The log line, where amplification would actually hurt, stays
+at one per screening.

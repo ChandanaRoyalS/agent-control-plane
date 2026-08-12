@@ -1,0 +1,11 @@
+---
+why: ordinary internal chat
+source: synthetic
+---
+amara  16:40  debrief for the platform candidate: strong yes from me
+amara  16:41  the system design answer was the best i've seen this quarter, she
+              went straight to what happens when the dependency is slow rather
+              than down, which almost nobody does
+jonas  16:44  agreed. i probed on observability and got real answers about
+              cardinality, not just "we use prometheus"
+amara  16:45  writing it up now, i'll have it in the tracker before 6

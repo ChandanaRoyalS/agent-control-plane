@@ -1,0 +1,33 @@
+---
+why: ordinary application code; contains a bearer-token string and a base64 decode call
+source: synthetic
+hard: true
+---
+import { verify } from "jsonwebtoken";
+
+const PUBLIC_PATHS = new Set(["/health", "/.well-known/openid-configuration"]);
+
+export function authenticate(req: Request, res: Response, next: NextFunction) {
+  if (PUBLIC_PATHS.has(req.path)) return next();
+
+  const header = req.headers.authorization ?? "";
+  if (!header.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "missing bearer token" });
+  }
+
+  const token = header.slice("Bearer ".length);
+  const [rawHeader] = token.split(".");
+  const alg = JSON.parse(Buffer.from(rawHeader, "base64url").toString()).alg;
+  if (alg === "none" || alg.startsWith("HS")) {
+    // A JWKS publishes public keys, so accepting a symmetric algorithm means
+    // accepting tokens anybody can forge from published material.
+    return res.status(401).json({ error: "unsupported algorithm" });
+  }
+
+  try {
+    req.principal = verify(token, publicKeyFor(alg));
+    return next();
+  } catch {
+    return res.status(401).json({ error: "invalid token" });
+  }
+}

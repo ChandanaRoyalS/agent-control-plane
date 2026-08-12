@@ -1,0 +1,14 @@
+---
+why: a small maintenance ticket
+source: synthetic
+---
+OPS-330 — Remove monitoring for decommissioned host db-legacy-03
+
+The host was decommissioned in November. Its disk-space check has been firing
+ever since and was the source of 34 of the 38 pages in INC-4455.
+
+Delete the check, the dashboard panel and the two silences that have been
+renewed four times.
+
+Also: work out why decommissioning did not remove it. If the answer is that
+nothing does, that is a separate ticket and probably a script.

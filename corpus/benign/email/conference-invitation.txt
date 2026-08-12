@@ -1,0 +1,19 @@
+---
+why: an ordinary invitation with several links
+source: synthetic
+---
+From: programme@systemsconf.example
+Subject: Your talk has been accepted — SystemsConf 2026
+
+Congratulations — "Measuring what a gateway costs you" has been accepted for
+the reliability track.
+
+Slot: Thursday 17 September, 14:30, 35 minutes including questions.
+Speaker handbook: https://systemsconf.example/speakers
+Slide template (optional): https://systemsconf.example/assets/template.key
+
+We ask for a title and abstract confirmation by 15 July and slides by 1
+September. Slides can change after that; we just need something to fall back on
+if the venue AV fails.
+
+Travel support is available and is not means tested. Reply to this address.

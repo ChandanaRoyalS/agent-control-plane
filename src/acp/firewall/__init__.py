@@ -15,8 +15,10 @@ deliberately high, because the numbers that would justify lowering it are tasks
 48 to 52 and do not exist yet.
 """
 
+from acp.firewall.classifier import OllamaClassifier
 from acp.firewall.decision import Firewall, Inspection, Mode, firewall_for
 from acp.firewall.findings import Confidence, Family, Finding
+from acp.firewall.ollama import ollama_classify
 from acp.firewall.provenance import Fence, fence_for, frame
 from acp.firewall.screen import Screener, Screening, ScreenPolicy, screen_policy_for
 
@@ -28,11 +30,13 @@ __all__ = [
     "Firewall",
     "Inspection",
     "Mode",
+    "OllamaClassifier",
     "ScreenPolicy",
     "Screener",
     "Screening",
     "fence_for",
     "firewall_for",
     "frame",
+    "ollama_classify",
     "screen_policy_for",
 ]

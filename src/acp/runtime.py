@@ -26,7 +26,7 @@ from starlette.applications import Starlette
 from acp.budget import CostTable, QuotaCounter, RateLimiter, load_costs
 from acp.config import GatewaySettings, allowed_hosts_for, load_issuers, load_upstreams
 from acp.exceptions import ConfigurationError
-from acp.firewall import Firewall, firewall_for
+from acp.firewall import Firewall, OllamaClassifier, firewall_for, ollama_classify
 from acp.firewall.decision import ENFORCEABLE
 from acp.firewall.decision import Mode as FirewallMode
 from acp.gateway import UpstreamRegistry, build_app
@@ -243,17 +243,45 @@ def build_firewall(settings: GatewaySettings) -> Firewall | None:
             },
         )
 
+    classifier = _build_classifier(settings)
+
     logger.info(
         "firewall.enabled",
         extra={
             "mode": str(settings.firewall_mode),
             "allowed_hosts": list(settings.firewall_allowed_hosts),
             "enforceable_detectors": sorted(ENFORCEABLE),
+            "classifier": settings.firewall_classifier_enabled,
         },
     )
     return firewall_for(
-        settings.firewall_mode, allowed_hosts=frozenset(settings.firewall_allowed_hosts)
+        settings.firewall_mode,
+        allowed_hosts=frozenset(settings.firewall_allowed_hosts),
+        classifier=classifier,
     )
+
+
+def _build_classifier(settings: GatewaySettings) -> OllamaClassifier | None:
+    """The model-based detector when it is switched on, else ``None``.
+
+    Off returns ``None`` rather than an inert classifier, so the screener's
+    detector set does not grow a name for a detector that never runs. When on,
+    the transport is bound to the configured model and endpoint; a failure to
+    reach it at screening time is already handled as no-finding, so nothing is
+    verified here beyond that the settings are wired to the call.
+    """
+    if not settings.firewall_classifier_enabled:
+        return None
+
+    def classify(document: str) -> str:
+        return ollama_classify(
+            document,
+            model=settings.firewall_classifier_model,
+            endpoint=settings.firewall_classifier_endpoint,
+            timeout_seconds=settings.firewall_classifier_timeout_seconds,
+        )
+
+    return OllamaClassifier(classify_fn=classify)
 
 
 async def build_token_validator(settings: GatewaySettings) -> TokenValidator | None:

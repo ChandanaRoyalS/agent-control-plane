@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
+from acp.firewall.classifier import OllamaClassifier
 from acp.firewall.findings import Confidence, Finding
 from acp.firewall.screen import MAX_SCREENED_CHARS, Screener, Screening, ScreenPolicy
 from acp.observability import metrics
@@ -235,10 +236,12 @@ class Firewall:
         enforce: bool = False,
         allowed_hosts: AbstractSet[str] = frozenset(),
         max_chars: int = MAX_SCREENED_CHARS,
+        classifier: OllamaClassifier | None = None,
     ) -> None:
         self._enforce = enforce
         self._allowed_hosts = frozenset(allowed_hosts)
         self._max_chars = max_chars
+        self._classifier = classifier
 
     def inspect(
         self,
@@ -253,7 +256,8 @@ class Firewall:
                 allowed_hosts=self._allowed_hosts,
                 tools=frozenset(tools),
                 max_chars=self._max_chars,
-            )
+            ),
+            classifier=self._classifier,
         )
         # Text blocks only. An image is bytes and this layer has no opinion
         # about bytes; a resource link is a URI the *client* may fetch, which is
@@ -344,7 +348,12 @@ def _verdict(screening: Screening, triggers: tuple[Finding, ...]) -> str:
     return "clean"
 
 
-def firewall_for(mode: Mode, *, allowed_hosts: AbstractSet[str] = frozenset()) -> Firewall | None:
+def firewall_for(
+    mode: Mode,
+    *,
+    allowed_hosts: AbstractSet[str] = frozenset(),
+    classifier: OllamaClassifier | None = None,
+) -> Firewall | None:
     """The firewall this mode asks for, or ``None`` for no screening at all.
 
     ``None`` rather than a ``Firewall`` in an inert mode, so that "off" costs
@@ -353,4 +362,6 @@ def firewall_for(mode: Mode, *, allowed_hosts: AbstractSet[str] = frozenset()) -
     """
     if mode is Mode.OFF:
         return None
-    return Firewall(enforce=mode is Mode.ENFORCE, allowed_hosts=allowed_hosts)
+    return Firewall(
+        enforce=mode is Mode.ENFORCE, allowed_hosts=allowed_hosts, classifier=classifier
+    )

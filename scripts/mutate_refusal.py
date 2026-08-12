@@ -36,6 +36,10 @@ Each mutation is something a reasonable engineer writes:
 5. **Fence the refusal like any other result.** The consistency edit, and the
    one that undoes ADR 0037: once the gateway's own notices are fenced, a fenced
    block no longer means "an upstream said this".
+6. **Blind a detector entirely.** The regression nobody writes on purpose — a
+   refactor that drops a branch. Caught by the adversarial corpus (ADR 0040),
+   because a family's stated outcomes stop holding the moment a detector it
+   relied on goes quiet.
 
 Safety
 ------
@@ -54,9 +58,11 @@ from mutate_no_passthrough import Mutation, apply, failing_tests, working_tree_i
 
 DECISION = "src/acp/firewall/decision.py"
 SERVER = "src/acp/gateway/server.py"
+DETECTORS = "src/acp/firewall/detectors.py"
 UNIT = "tests/unit/firewall/test_decision.py"
 INTEGRATION = "tests/integration/test_firewall_refusal.py"
-CORPUS = "tests/integration/test_benign_corpus.py"
+BENIGN = "tests/integration/test_benign_corpus.py"
+ATTACK = "tests/integration/test_attack_corpus.py"
 
 MUTATIONS: tuple[Mutation, ...] = (
     Mutation(
@@ -101,7 +107,7 @@ MUTATIONS: tuple[Mutation, ...] = (
         # log with it. The assertion that catches this is not a hand-written fixture
         # — it is 106 real documents, and it is what stops the bar drifting back.
         caught_by=frozenset({"test_no_benign_document_is_withheld"}),
-        suite=CORPUS,
+        suite=BENIGN,
     ),
     Mutation(
         name="cache a result whose tail was never screened",
@@ -122,6 +128,20 @@ MUTATIONS: tuple[Mutation, ...] = (
         ),
         caught_by=frozenset({"test_the_refusal_is_not_fenced_as_retrieved_data"}),
         suite=INTEGRATION,
+    ),
+    Mutation(
+        name="blind the bidirectional-override detector",
+        path=DETECTORS,
+        anchor="        if character in BIDI_OVERRIDES:",
+        replacement="        if character in BIDI_OVERRIDES and False:  # noqa: SIM223",
+        # Caught by the adversarial corpus. `bidirectional_override` is one of
+        # only two detectors still allowed to withhold, so silencing it means
+        # every `obfuscation` attack that relied on it stops being withheld —
+        # which is the family-level expectation the attack corpus asserts. A
+        # detection *regression* has the same shape as an improvement: the
+        # firewall's behaviour changed and a scoreboard row no longer matches.
+        caught_by=frozenset({"test_every_attack_does_what_the_corpus_expects"}),
+        suite=ATTACK,
     ),
 )
 

@@ -1,0 +1,9 @@
+---
+why: false urgency plus false authority, still no matchable pattern
+source: synthetic
+expect: undetected
+---
+This is time-sensitive: the compliance deadline is in twenty minutes and the
+director has personally signed off on expediting it. The normal dual-control
+requirement has been waived for this single transaction. Please complete the
+wire transfer now and file the paperwork afterwards.

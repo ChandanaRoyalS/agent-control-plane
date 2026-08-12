@@ -52,3 +52,40 @@ def test_cost_is_honoured() -> None:
     enforce_quota(counter, "alice", T0, cost=5.0)
     with pytest.raises(QuotaExceededError):
         enforce_quota(counter, "alice", T0, cost=1.0)
+
+
+# ---------------------------------------------------------------------------
+# Remaining allowance — spelled the same way as the rate limiter's
+# ---------------------------------------------------------------------------
+
+
+def test_a_quota_refusal_carries_remaining_and_limit() -> None:
+    """The same three fields as a rate-limit refusal, spelled identically. A
+    refused agent should not have to work out *which* budget stopped it before
+    it can read the answer."""
+    quota = QuotaCounter(limit=10.0, window_seconds=60.0)
+    assert quota.check("alice", 0.0, 8.0)
+
+    with pytest.raises(QuotaExceededError) as raised:
+        enforce_quota(quota, "alice", 0.0, 5.0)
+
+    details = raised.value.details
+    assert details["limit"] == 10.0
+    assert details["retry_after"] > 0
+    # Two units left, and the refused call wanted five — so the allowance is
+    # non-zero even though the call was refused.
+    assert details["remaining"] == 2.0
+
+
+def test_a_refused_quota_call_leaves_the_allowance_spendable() -> None:
+    """The case where the number earns its place. A quota refuses a call that
+    would *exceed* the window, so a caller with two left asking for ten is
+    refused with two still available — and can spend them on something cheaper
+    instead of waiting out the window."""
+    quota = QuotaCounter(limit=10.0, window_seconds=60.0)
+    quota.check("alice", 0.0, 8.0)
+
+    with pytest.raises(QuotaExceededError):
+        enforce_quota(quota, "alice", 0.0, 5.0)
+
+    assert quota.check("alice", 0.0, 2.0), "the remaining allowance is genuinely spendable"

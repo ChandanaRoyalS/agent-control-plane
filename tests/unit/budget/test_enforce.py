@@ -86,3 +86,55 @@ def test_the_default_cost_is_one() -> None:
     enforce_rate_limit(limiter, "alice", T0)
     with pytest.raises(RateLimitExceededError):
         enforce_rate_limit(limiter, "alice", T0)
+
+
+# ---------------------------------------------------------------------------
+# Remaining allowance — the other half of an agent-readable refusal
+# ---------------------------------------------------------------------------
+
+
+def test_a_refusal_says_how_much_is_left_as_well_as_when() -> None:
+    """`retry_after` tells an agent *when* it may try again. `remaining` tells
+    it *how much* it may still do, which is the difference between backing off
+    blindly and planning: given three units and five queued calls, an agent that
+    knows the number can choose which three."""
+    limiter = RateLimiter(capacity=2.0, refill_per_second=1.0)
+    assert limiter.check("alice", 0.0, 2.0)
+
+    with pytest.raises(RateLimitExceededError) as raised:
+        enforce_rate_limit(limiter, "alice", 0.0, 1.0)
+
+    details = raised.value.details
+    assert details["remaining"] == 0.0
+    assert details["limit"] == 2.0
+    assert details["retry_after"] > 0
+
+
+def test_remaining_is_the_scale_as_well_as_the_number() -> None:
+    """ "2 left" means something different out of 5 than out of 500, so the
+    capacity travels with it."""
+    limiter = RateLimiter(capacity=10.0, refill_per_second=1.0)
+    limiter.check("alice", 0.0, 4.0)
+
+    assert limiter.remaining("alice") == 6.0
+    assert limiter.capacity == 10.0
+
+
+def test_an_untouched_bucket_reports_its_full_capacity() -> None:
+    """A bucket initialises full on first take, so reading the pre-initialisation
+    zero would tell a caller who has done nothing that it has nothing left. The
+    same correction `retry_after` already made."""
+    limiter = RateLimiter(capacity=5.0, refill_per_second=1.0)
+
+    assert limiter.remaining("never-seen") == 5.0
+    assert limiter.retry_after("never-seen") == 0.0
+
+
+def test_remaining_refills_with_time() -> None:
+    limiter = RateLimiter(capacity=4.0, refill_per_second=2.0)
+    limiter.check("alice", 0.0, 4.0)
+    assert limiter.remaining("alice") == 0.0
+
+    limiter.check("alice", 1.0, 0.0)
+
+    assert limiter.remaining("alice") == 2.0

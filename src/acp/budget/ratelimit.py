@@ -70,13 +70,30 @@ class TokenBucket:
         # A bucket never yet taken from is full (it initialises full on first
         # take), so nothing is owed — asking retry_after before any call must not
         # read the pre-initialisation zero as an empty bucket.
-        available = self.capacity if not self._initialised else self.tokens
+        available = self.remaining()
         if available >= cost:
             return 0.0
         shortfall = cost - available
         if self.refill_per_second <= 0:
             return float("inf")
         return shortfall / self.refill_per_second
+
+    def remaining(self) -> float:
+        """Tokens available right now, without refilling or debiting.
+
+        The other half of what a refused caller needs. ``retry_after`` says
+        *when* they may try again; this says *how much* they may still do, which
+        is the difference between an agent that backs off and one that plans —
+        it can decide to spend what is left on the three calls that matter
+        rather than burning it on the first three it thought of.
+
+        A bucket never yet taken from reports its full capacity. It initialises
+        full on first take, so reading the pre-initialisation zero would tell a
+        caller who has done nothing that they have nothing left. That is the same
+        correction ``retry_after`` makes, which is why it now reads this rather
+        than repeating it.
+        """
+        return self.capacity if not self._initialised else self.tokens
 
 
 class RateLimiter:
@@ -93,6 +110,17 @@ class RateLimiter:
         self._capacity = capacity
         self._refill_per_second = refill_per_second
         self._buckets: dict[str, TokenBucket] = {}
+
+    @property
+    def capacity(self) -> float:
+        """The burst allowance every principal's bucket holds when full.
+
+        Public because a refused caller is told it: ``remaining`` alone is a
+        number without a scale, and "2 left" means something different out of 5
+        than out of 500. The pair is what lets an agent judge how hard it is
+        being throttled rather than only that it is.
+        """
+        return self._capacity
 
     def _bucket(self, principal: str) -> TokenBucket:
         bucket = self._buckets.get(principal)
@@ -112,3 +140,12 @@ class RateLimiter:
     def retry_after(self, principal: str, cost: float = 1.0) -> float:
         """How long ``principal`` should wait before retrying, in seconds."""
         return self._bucket(principal).retry_after(cost)
+
+    def remaining(self, principal: str) -> float:
+        """How much of ``principal``'s budget is available right now.
+
+        Named to match ``QuotaCounter.remaining`` so the two budgets answer the
+        same question with the same word — a refused caller should not have to
+        know which of the two stopped them to read the answer.
+        """
+        return self._bucket(principal).remaining()

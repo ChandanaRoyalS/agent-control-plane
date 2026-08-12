@@ -66,6 +66,12 @@ size limit in the stack.
 
 REFUSED_EVENT: Final = "policy.predispatch_refused"
 
+PERMISSIBLE: Final = frozenset({Effect.ALLOW, Effect.REQUIRE_APPROVAL})
+"""Effects under which a call may still proceed, so the fast path must not
+refuse it. Named rather than inlined, because the next effect added here is the
+one somebody forgets — and forgetting produces a silent false denial rather
+than an error."""
+
 
 def could_ever_allow(policy: Policy, principal: Principal, tool: str) -> bool:
     """Could any argument mapping make this call permitted?
@@ -82,6 +88,10 @@ def could_ever_allow(policy: Policy, principal: Principal, tool: str) -> bool:
       constrains arguments — means some call could be permitted. Stop, and do
       not refuse. An allow with argument constraints is precisely the case a
       naive implementation gets wrong.
+    - **So does a `require_approval` rule** (ADR 0048), and forgetting this
+      would be a false refusal of exactly the kind this module exists to avoid:
+      a call a human was about to approve, refused at the header before anyone
+      was asked, with no rule an operator could point at to explain it.
     - **A deny with no argument constraints** matches every call to this tool by
       this principal, so it decides all of them. Stop, and refuse.
     - **A deny that constrains arguments** decides only the calls whose
@@ -103,7 +113,7 @@ def could_ever_allow(policy: Policy, principal: Principal, tool: str) -> bool:
         # depends on a body nobody has read.
         if not matches_without_arguments(rule, principal.subject, actor, tool):
             continue
-        if rule.effect is Effect.ALLOW:
+        if rule.effect in PERMISSIBLE:
             return True
         if not rule.args:
             return False

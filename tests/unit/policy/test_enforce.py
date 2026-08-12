@@ -1,12 +1,16 @@
 """Unit tests for policy enforcement.
 
-``enforce_call`` is the request-path backstop: allow silently, or raise
-``PolicyDeniedError``. The tests pin both halves and the one property that matters for
-safety — the raised error carries the deciding rule for the log but says nothing
-revealing to the caller.
+``enforce_call`` is the request-path backstop: allow, or raise
+``PolicyDeniedError``. The tests pin both halves, the one property that matters
+for safety — the raised error carries the deciding rule for the log but says
+nothing revealing to the caller — and the property the audit log rests on: that
+**both** outcomes are recorded, not only the refusals.
 """
 
 from __future__ import annotations
+
+import logging
+from typing import Any
 
 import pytest
 
@@ -119,3 +123,116 @@ def test_enforce_allows_when_the_argument_matches() -> None:
         )
     )
     enforce_call(policy, _principal(), "mock-a__read_document", {"doc_id": "public"})
+
+
+# ---------------------------------------------------------------------------
+# Every decision is recorded, not only the refusals
+# ---------------------------------------------------------------------------
+
+ALLOW_SEARCH = Policy(
+    rules=(Rule(name="allow-search", effect=Effect.ALLOW, tools=("mock-a__search",)),)
+)
+
+
+def records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name == "acp.policy.enforce"]
+
+
+def fields(record: logging.LogRecord) -> dict[str, Any]:
+    """The ``extra`` fields, read off the record as a dictionary.
+
+    ``logging.LogRecord`` has no static knowledge of what ``extra=`` injected,
+    so ``record.rule`` is an attribute error to `mypy --strict` even though it
+    works at runtime. Reading through ``vars()`` keeps the assertions checking
+    the record exactly as a log consumer would — a structured handler serialises
+    these fields, it does not read them as attributes — and does it in one place
+    rather than in nine ``type: ignore`` comments.
+    """
+    return vars(record)
+
+
+def test_an_allowed_call_is_recorded_with_its_rule(caplog: pytest.LogCaptureFixture) -> None:
+    """The half that was missing, and the one the audit log depends on.
+
+    A hash chain over refusals alone would faithfully prove the integrity of a
+    record containing none of what actually happened. An auditor's first
+    question is "what did this agent do", not "what was it refused".
+    """
+    with caplog.at_level(logging.INFO, logger="acp.policy.enforce"):
+        enforce_call(ALLOW_SEARCH, _principal(), "mock-a__search")
+
+    [record] = records(caplog)
+    assert record.message == "policy.allowed"
+    assert fields(record)["rule"] == "allow-search"
+    assert fields(record)["decision"] == "allow"
+
+
+def test_a_denied_call_is_still_recorded_with_its_rule(caplog: pytest.LogCaptureFixture) -> None:
+    denies = Policy(
+        rules=(Rule(name="deny-writes", effect=Effect.DENY, tools=("mock-a__create_ticket",)),)
+    )
+
+    with (
+        caplog.at_level(logging.INFO, logger="acp.policy.enforce"),
+        pytest.raises(PolicyDeniedError),
+    ):
+        enforce_call(denies, _principal(), "mock-a__create_ticket")
+
+    [record] = records(caplog)
+    assert record.message == "policy.denied"
+    assert fields(record)["rule"] == "deny-writes"
+    assert fields(record)["decision"] == "deny"
+
+
+def test_the_deny_default_is_recorded_with_no_rule(caplog: pytest.LogCaptureFixture) -> None:
+    """Nothing matched. The record still exists and says so — a denial with no
+    rule is the most important one to be able to explain, because it means the
+    policy simply has no opinion about this call."""
+    with (
+        caplog.at_level(logging.INFO, logger="acp.policy.enforce"),
+        pytest.raises(PolicyDeniedError),
+    ):
+        enforce_call(Policy(rules=()), _principal(), "mock-a__search")
+
+    [record] = records(caplog)
+    assert record.message == "policy.denied"
+    assert fields(record)["rule"] is None
+    assert "no rule matched" in fields(record)["reason"]
+
+
+def test_both_identities_are_recorded(caplog: pytest.LogCaptureFixture) -> None:
+    """The whole authorization model is that the human and the agent are
+    different questions. A record naming only the subject can answer "was alice
+    allowed to do this" and not "which of the agents acting for alice did it" —
+    which is the question that matters when one of them misbehaves."""
+    with caplog.at_level(logging.INFO, logger="acp.policy.enforce"):
+        enforce_call(ALLOW_SEARCH, _principal(actor="agent-research"), "mock-a__search")
+
+    [record] = records(caplog)
+    assert fields(record)["subject"] == "alice"
+    assert fields(record)["actor"] == "agent-research"
+
+
+def test_a_call_with_no_agent_records_a_null_actor(caplog: pytest.LogCaptureFixture) -> None:
+    """Absent rather than omitted: a field that disappears on one path is a
+    record no query can group by."""
+    with caplog.at_level(logging.INFO, logger="acp.policy.enforce"):
+        enforce_call(ALLOW_SEARCH, _principal(), "mock-a__search")
+
+    [record] = records(caplog)
+    assert fields(record)["actor"] is None
+
+
+def test_allow_and_deny_records_have_the_same_shape(caplog: pytest.LogCaptureFixture) -> None:
+    """One helper writes both, so they cannot drift into carrying different
+    fields — which is how an audit record acquires a column on one path only."""
+    expected = {"subject", "actor", "tool", "rule", "decision", "reason"}
+
+    with caplog.at_level(logging.INFO, logger="acp.policy.enforce"):
+        enforce_call(ALLOW_SEARCH, _principal(), "mock-a__search")
+        with pytest.raises(PolicyDeniedError):
+            enforce_call(Policy(rules=()), _principal(), "mock-a__search")
+
+    allowed, denied = records(caplog)
+    assert expected <= set(fields(allowed))
+    assert expected <= set(fields(denied))

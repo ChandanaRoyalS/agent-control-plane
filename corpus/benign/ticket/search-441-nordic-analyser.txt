@@ -1,0 +1,18 @@
+---
+why: a product ticket in a specialist domain
+source: synthetic
+---
+SEARCH-441 — Nordic language analyser
+
+Northwind is expanding into Sweden, Norway and Denmark in Q3 and their catalogue
+search is currently tokenised as English. Compound words are the whole problem:
+"cykelhjälm" is one token to us and two concepts to a customer.
+
+Needed: a decompounding analyser for sv, no, da, with a shared dictionary since
+the three are close enough that maintaining three is not worth it.
+
+Not in scope: Finnish. It is not close to the other three and Northwind is not
+launching there.
+
+Success measure: zero-result rate for Swedish queries drops below the English
+baseline of 3.1%.

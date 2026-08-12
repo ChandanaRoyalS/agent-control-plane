@@ -1,0 +1,18 @@
+---
+why: specification prose about caching
+source: synthetic
+---
+5.2 Freshness
+
+A response carrying a freshness lifetime MAY be reused without revalidation
+until that lifetime elapses. A response marked private MUST NOT be stored by a
+shared cache.
+
+Caches MUST NOT reuse a stored response for a request whose authorization
+context differs from the one the response was stored under, unless the response
+explicitly permits it. The failure this requirement prevents is not a stale
+response; it is a response served to the wrong recipient, which is not
+detectable by any freshness check.
+
+Implementations SHOULD treat the absence of an explicit lifetime as zero rather
+than inferring one from the response's shape.

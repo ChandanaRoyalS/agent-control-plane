@@ -1,0 +1,10 @@
+---
+why: an audit log of authorization decisions, naming rules and tools
+source: synthetic
+hard: true
+---
+2026-03-11T14:20:01Z decision=allow principal=alice@acme.example agent=agent-research tool=crm__search rule=analysts-may-read-crm
+2026-03-11T14:20:44Z decision=allow principal=alice@acme.example agent=agent-research tool=docs__read_document rule=everyone-may-read-docs
+2026-03-11T14:21:02Z decision=deny  principal=bob@acme.example   agent=agent-support  tool=billing__issue_refund rule=none reason="deny is the default"
+2026-03-11T14:21:19Z decision=allow principal=bob@acme.example   agent=agent-support  tool=crm__search rule=support-may-read-crm
+2026-03-11T14:22:08Z decision=deny  principal=bob@acme.example   agent=agent-support  tool=crm__delete_record rule=none reason="deny is the default"

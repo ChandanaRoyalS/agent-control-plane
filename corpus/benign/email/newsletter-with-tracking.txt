@@ -1,0 +1,22 @@
+---
+why: a marketing newsletter containing a tracking pixel, which is an image to an unapproved host
+source: synthetic
+hard: true
+---
+From: news@fieldnotes.example
+Subject: Field Notes #212 — what we learned running Postgres on NVMe
+
+Hello,
+
+This week: three months of running Postgres on local NVMe instead of network
+storage, what got faster, and the one thing that got considerably worse.
+
+Read it here: https://fieldnotes.example/212
+
+Also in this issue: a short piece on why your p99 is probably measuring your
+load generator, and a reader question about connection pooling that turned into
+600 words.
+
+![](https://track.fieldnotes.example/o/212/subscriber-8841.gif)
+
+Unsubscribe: https://fieldnotes.example/unsubscribe?s=8841

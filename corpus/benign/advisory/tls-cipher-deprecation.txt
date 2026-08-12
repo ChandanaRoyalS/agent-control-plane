@@ -1,0 +1,15 @@
+---
+why: routine infrastructure advisory
+source: synthetic
+---
+Advisory: TLS 1.0 and 1.1 termination ends 2026-09-30
+
+Our edge will stop negotiating TLS 1.0 and 1.1 on 30 September. Traffic on those
+versions is currently 0.03% of requests and comes almost entirely from two
+monitoring agents inside our own estate.
+
+If you own an integration that cannot negotiate TLS 1.2, open a ticket in
+PLATFORM before 1 September and we will arrange an exception subdomain with an
+expiry date on it.
+
+No action is required for anything running a runtime released after 2018.

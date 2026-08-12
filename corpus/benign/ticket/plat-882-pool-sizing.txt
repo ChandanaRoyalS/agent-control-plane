@@ -1,0 +1,18 @@
+---
+why: an ordinary engineering ticket
+source: synthetic
+---
+PLAT-882 — Size connection pools per instance, not globally
+
+Follow-up from INC-4460.
+
+The pool is configured with a total size that is then divided by an assumed
+instance count. The assumption is wrong whenever we scale, which is daily.
+
+Acceptance criteria:
+- Pool size is expressed per instance and is independent of replica count.
+- A load test at 4 and at 12 replicas shows saturation at the expected point in
+  both cases.
+- The metric exposes both in-flight and capacity so saturation is a ratio.
+
+Estimate: 2 days including the load test.

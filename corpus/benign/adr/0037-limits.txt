@@ -1,0 +1,24 @@
+---
+why: the honest-limits section; names the attack in plain terms
+source: repository
+hard: true
+---
+## What this does not do
+
+Stated plainly, because a control that gets oversold is one that gets relied on.
+
+**It does not make the model obey.** Framing is an instruction to a system that
+follows instructions probabilistically. A sufficiently persuasive document may
+still win. What framing removes is the *free* version of the attack — the one
+that works because nothing ever told the model the text was retrieved.
+
+**It does not protect a client that strips the fence.** The blocks are ordinary
+content; a caller that reassembles them into a flat prompt without preserving
+order loses the boundary. That is a property of the client, not something this
+gateway can enforce, and it belongs in the threat model.
+
+**It does not frame the catalogue.** Tool *descriptions* also reach the model's
+context and are also attacker-controlled — the MCP rug pull, ADR 0013. Schema
+drift detection covers change; nothing yet covers a description that was hostile
+from the first fetch. Named here as a real gap rather than left to be assumed
+closed.

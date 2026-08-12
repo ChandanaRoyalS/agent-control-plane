@@ -1,0 +1,19 @@
+---
+why: a stack trace, which contains code fragments and file paths
+source: synthetic
+---
+Traceback (most recent call last):
+  File "/app/src/acp/upstream/client.py", line 182, in call_tool
+    response = await self._client.post(self._url, json=body, headers=headers)
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_client.py", line 1877, in post
+    return await self.request(...)
+  File "/app/.venv/lib/python3.14/site-packages/httpx/_transports/default.py", line 394, in handle_async_request
+    raise mapped_exc(message) from exc
+httpx.ReadTimeout: The read operation timed out
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/app/src/acp/gateway/server.py", line 273, in on_call_tool
+    result = await registry.call_tool(params.name, arguments)
+acp.exceptions.UpstreamTimeoutError: crm did not answer within 30.0s

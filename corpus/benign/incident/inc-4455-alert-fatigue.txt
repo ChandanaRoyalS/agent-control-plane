@@ -1,0 +1,18 @@
+---
+why: a process postmortem, no technical payloads
+source: synthetic
+---
+INC-4455 — a real page was missed because of noise
+
+Impact: 41 minutes of elevated error rate on the search API, unnoticed.
+
+What happened: the on-call engineer received 38 pages in the preceding six hours,
+34 of which were a flapping disk-space alert on a machine that had been
+decommissioned but not removed from monitoring. The 35th was real.
+
+No individual made a mistake here worth naming. A person who has silenced 34
+false pages will silence the 35th.
+
+What we are changing: alert routing now requires an owner and a runbook link, and
+an alert that fires more than five times in 24 hours without a corresponding
+incident is auto-muted and raised at the weekly review instead of paging.

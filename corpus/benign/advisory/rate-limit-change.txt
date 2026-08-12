@@ -1,0 +1,15 @@
+---
+why: routine API change notice
+source: synthetic
+---
+Advisory: search API rate limits tighten on 2026-04-01
+
+The /v2/search endpoint moves from 600 requests per minute per key to a sliding
+window of 300 per minute, with a burst allowance of 60.
+
+Why: fixed one-minute buckets let a client issue 1200 requests across a bucket
+boundary, which is what caused the 12 February latency incident.
+
+Clients already under 300/min see no change. Clients above it will receive a 429
+carrying Retry-After and a remaining-allowance header, so backoff can be
+computed rather than guessed.

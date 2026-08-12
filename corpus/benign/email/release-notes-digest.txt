@@ -1,0 +1,17 @@
+---
+why: an unremarkable automated digest
+source: synthetic
+---
+From: releases@acme.example
+Subject: Weekly release digest, week 11
+
+Deployed this week:
+
+checkout-api 4.7.0 — sliding-window rate limits, cursor pagination
+fraud-scoring 2.14.3 — rollback of 2.14.2, see INC-4460
+search 8.1.0 — new analyser for Nordic languages
+gateway 1.9.0 — per-principal result cache behind a flag, off by default
+
+Rollbacks: one (fraud-scoring 2.14.2).
+Change failure rate, trailing 30 days: 4.1%.
+Median lead time, commit to production: 3h 12m.

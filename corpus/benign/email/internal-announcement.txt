@@ -1,0 +1,18 @@
+---
+why: an all-hands announcement
+source: synthetic
+---
+From: amara@acme.example
+To: engineering@acme.example
+Subject: Platform on-call rotation changes from April
+
+From 1 April the platform rotation moves from weekly to a split shift: primary
+for five days, secondary for the following five. The overlap is deliberate —
+the secondary has already been on the rota and has context when they take over.
+
+Nobody's total on-call hours increase. Two people asked whether this means more
+weekends; it does not, weekends are unchanged and still count double toward the
+time-off-in-lieu balance.
+
+The new rota is in PagerDuty from Monday. Please check your entries and tell me
+this week if something clashes with leave you have already booked.

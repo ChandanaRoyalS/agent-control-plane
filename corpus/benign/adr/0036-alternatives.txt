@@ -1,0 +1,27 @@
+---
+why: contains "Block on any finding" and quoted detector names; prose about the control, indistinguishable from an attack to a pattern
+source: repository
+hard: true
+---
+## Alternatives considered
+
+**Start with a classifier.** Tempting, and wrong first. A model-based detector
+cannot explain itself, costs per call on the request path, and has no
+deterministic regression behaviour — so when it is wrong there is nothing to fix
+and no way to prove it was fixed. The pattern layer sets the floor a classifier
+must beat, and task 51 adds one behind the same interface.
+
+**One detector, many patterns.** Simpler, and it makes every false positive
+attributable to "the firewall" rather than to a rule. The difference between
+tuning one pattern and switching the layer off.
+
+**Block on any finding.** The version that looks strongest and is weakest. With
+`instruction_override` firing LOW on any document about security, it would
+refuse a meaningful share of honest traffic — and the first response would be to
+disable screening entirely.
+
+**Normalise aggressively (NFKC) before matching.** Catches homoglyph variants,
+and also destroys signal: NFKC rewrites characters the obfuscation detectors
+exist to report, and changes text an upstream may legitimately have sent. Left
+for the corpus work, where its effect on the false-positive rate can be measured
+rather than assumed.

@@ -1,0 +1,8 @@
+---
+why: structured application logs containing trace identifiers
+source: synthetic
+---
+{"ts":"2026-03-11T14:22:08.441Z","level":"info","event":"request.completed","method":"POST","path":"/mcp","status":200,"duration_ms":42,"request_id":"req_8f14c2a8","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","principal":"alice@acme.example"}
+{"ts":"2026-03-11T14:22:08.902Z","level":"info","event":"upstream.call","upstream":"crm","tool":"search","duration_ms":31,"outcome":"ok","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
+{"ts":"2026-03-11T14:22:09.118Z","level":"warning","event":"upstream.retry","upstream":"billing","method":"tools/call","attempt":2,"backoff_ms":184,"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
+{"ts":"2026-03-11T14:22:09.402Z","level":"info","event":"request.completed","method":"POST","path":"/mcp","status":200,"duration_ms":961,"request_id":"req_7c31d9b0","trace_id":"8a3d1f0c2b5e4477a9d6e0b1c3f52984","principal":"bob@acme.example"}

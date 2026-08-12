@@ -1,0 +1,11 @@
+---
+why: a small result set, several rows
+source: synthetic
+---
+sku        | description                  | on_hand | reorder_at | unit_cost
+-----------+------------------------------+---------+------------+-----------
+NW-1002    | 8mm hex bolt, zinc, box 500  |    1240 |        400 |     18.40
+NW-1003    | 8mm hex nut, zinc, box 1000  |     860 |        400 |      9.15
+NW-2210    | M6 washer, stainless, box 200|      95 |        150 |      6.80
+NW-4417    | Threadlock, medium, 50ml     |      12 |         25 |     11.05
+(4 rows)

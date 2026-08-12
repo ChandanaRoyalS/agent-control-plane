@@ -1,0 +1,18 @@
+---
+why: ordinary supply-chain advisory, no injection vocabulary
+source: synthetic
+---
+Advisory: internal package names resolvable from the public index
+
+Three of our internal Python packages share names with packages now published
+on PyPI. A build that resolves against the public index first will install the
+public package instead of ours.
+
+Affected: acme-telemetry, acme-featureflags, acme-billing-client.
+
+Fix applied: the build now pins an internal index with --index-url and refuses
+--extra-index-url, so a public package of the same name cannot win a version
+comparison. Lockfiles have been regenerated and hashes pinned.
+
+Nothing suggests any of the public packages is malicious. They appear to be
+placeholders.

@@ -1,0 +1,10 @@
+---
+why: system logs, dense and unstructured
+source: synthetic
+---
+[ 8241.114932] EXT4-fs (nvme0n1p2): mounted filesystem with ordered data mode
+[ 8419.882014] docker0: port 3(veth9a1c204) entered blocking state
+[ 8419.882019] docker0: port 3(veth9a1c204) entered forwarding state
+[10233.401118] Out of memory: Killed process 4471 (python3.14) total-vm:8412004kB, anon-rss:6104112kB
+[10233.409882] oom_reaper: reaped process 4471 (python3.14), now anon-rss:0kB
+[10248.117740] docker0: port 3(veth9a1c204) entered disabled state

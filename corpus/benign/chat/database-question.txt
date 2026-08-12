@@ -1,0 +1,11 @@
+---
+why: contains a long identifier and a base64-looking string in ordinary use
+source: synthetic
+hard: true
+---
+kit    10:02  anyone know what this session id format is? eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+kit    10:02  it's showing up in the referrer logs and i can't tell if it's ours
+noor   10:05  that's a JWT header, base64url. decodes to {"alg":"HS256","typ":"JWT"}
+noor   10:06  which is a problem in itself if it's in a referrer, that's a token in a URL
+kit    10:07  ugh. ok, raising it
+noor   10:08  it's probably the old embed widget, it put the token in the query string

@@ -1,0 +1,17 @@
+---
+why: an ordinary schema migration
+source: synthetic
+---
+-- 0042_add_retention_policy.sql
+BEGIN;
+
+ALTER TABLE audit_events
+    ADD COLUMN retention_days integer NOT NULL DEFAULT 90;
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS audit_events_expires_at_idx
+    ON audit_events ((occurred_at + (retention_days || ' days')::interval));
+
+COMMENT ON COLUMN audit_events.retention_days IS
+    'Per-tenant override. Legal hold sets this to 2555 (seven years).';
+
+COMMIT;

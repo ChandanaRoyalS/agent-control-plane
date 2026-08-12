@@ -1,0 +1,12 @@
+---
+why: runtime telemetry, entirely numeric
+source: synthetic
+---
+acp_upstream_calls_total{upstream="crm",method="tools/call",tool="search",outcome="ok"} 128441
+acp_upstream_calls_total{upstream="crm",method="tools/call",tool="search",outcome="timeout"} 312
+acp_upstream_call_duration_seconds_bucket{upstream="crm",method="tools/call",le="0.05"} 98211
+acp_upstream_call_duration_seconds_bucket{upstream="crm",method="tools/call",le="0.25"} 127004
+acp_result_cache_total{outcome="hit"} 41882
+acp_result_cache_total{outcome="miss"} 86559
+acp_upstream_breaker_state{upstream="billing",state="closed"} 1
+acp_upstream_breaker_state{upstream="billing",state="open"} 0

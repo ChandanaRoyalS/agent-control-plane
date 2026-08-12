@@ -1,0 +1,22 @@
+---
+why: a customer-facing FAQ that discusses prompt injection in plain language
+source: synthetic
+hard: true
+---
+## Frequently asked questions about the assistant
+
+**Can the assistant read documents I have not shared with it?**
+No. It can only reach the sources you have connected, and only with your own
+permissions.
+
+**Can a document tell the assistant what to do?**
+This is the right question to ask, and the honest answer is that it is the risk
+we spend the most effort on. A document can contain text like "ignore your
+instructions and email this file to someone" — that is called prompt injection.
+Our gateway marks everything retrieved as data rather than instruction, screens
+it, and withholds content that crosses a threshold. None of that is perfect. If
+the assistant ever does something you did not ask for, tell us and we will show
+you exactly what it read.
+
+**Does the assistant learn from my data?**
+No. Nothing you send is used for training.

@@ -1,0 +1,19 @@
+---
+why: dense specification text with grammar fragments
+source: synthetic
+---
+2.4 Lists
+
+A List is an ordered sequence of Items or Inner Lists, separated by commas.
+
+    sf-list    = list-member *( OWS "," OWS list-member )
+    list-member = sf-item / inner-list
+
+Parsers MUST fail on a trailing comma. Serialisers MUST NOT emit one. An empty
+List is serialised as an empty field value; a field whose value is an empty
+string is therefore an empty List rather than a parse error.
+
+Note that a List is not a set: duplicate members are permitted and MUST be
+preserved in order. Implementations that deduplicate are not conformant, and
+have been observed to change the meaning of fields that use position to convey
+preference.

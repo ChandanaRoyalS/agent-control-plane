@@ -1,0 +1,20 @@
+---
+why: specification prose about delegation, using the word 'impersonation'
+source: synthetic
+hard: true
+---
+1.2 Delegation and impersonation
+
+These are different and the distinction is load bearing.
+
+In *impersonation*, the resulting token is indistinguishable from one issued to
+the subject directly. The resource cannot tell that an intermediary was
+involved, and the audit trail records only the subject.
+
+In *delegation*, the token names both parties: the subject on whose behalf the
+request is made, and the actor making it. A resource can then apply policy to
+the pair, and an audit trail records which agent acted for which person.
+
+Deployments SHOULD prefer delegation. Impersonation discards the only piece of
+information that makes an automated actor accountable, and it does so at exactly
+the point where accountability is most useful.

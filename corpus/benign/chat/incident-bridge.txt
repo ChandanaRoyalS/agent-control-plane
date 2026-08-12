@@ -1,0 +1,13 @@
+---
+why: an incident channel; urgent, terse, quotes an alert
+source: synthetic
+---
+ops-bot  02:14  [P1] checkout-api availability 91.2% (threshold 99.0) for 5m
+ross     02:16  ack, looking
+ross     02:19  it's the connection pool, we're at max on all four instances
+ross     02:20  every checkout is waiting on the fraud service, which is timing out
+mira     02:22  fraud team is paged, their deploy went out at 01:58
+ross     02:24  rolling them back from our side isn't possible. bulkhead is doing its job,
+                the rest of the estate is unaffected
+mira     02:41  fraud rolled back, pool draining
+ops-bot  02:47  [RESOLVED] checkout-api availability 99.8%

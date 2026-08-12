@@ -1,0 +1,20 @@
+---
+why: procedural documentation
+source: synthetic
+---
+# Runbook: rotating the internal CA intermediate
+
+Frequency: every two years, or immediately on suspected compromise.
+Duration: about 90 minutes, of which 60 is waiting for propagation.
+
+1. Generate the new intermediate on the offline machine. It never leaves.
+2. Publish the new intermediate alongside the old one. Both are trusted during
+   the overlap; this is what makes the rotation non-disruptive.
+3. Wait for every service to pick up the new bundle. The dashboard shows the
+   count of instances by bundle version. Do not proceed until it is 100%.
+4. Reissue leaf certificates against the new intermediate.
+5. Remove the old intermediate from the trust bundle.
+6. Verify: `openssl s_client -connect` against one service in each cluster.
+
+If step 3 stalls below 100%, the remaining instances are almost always in a
+namespace that was excluded from the config reload. Do not skip ahead.

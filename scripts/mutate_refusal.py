@@ -25,9 +25,11 @@ Each mutation is something a reasonable engineer writes:
 2. **Lower the bar to MEDIUM.** The "surely we should catch more" edit. Aimed at
    the condition that no live document currently exercises, which is exactly why
    it needs a harness rather than a comment.
-3. **Ignore whether hosts are configured.** The tidying-up edit — the condition
-   looks redundant next to the enforceable list. It is what stands between this
-   gateway and refusing every wiki page that has a logo on it.
+3. **Put a demoted detector back on the enforceable list.** The confident edit
+   — `tool_name_mention` is the strongest signal in the estate and it looks like
+   it belongs there. It was there, until the benign corpus withheld the
+   gateway's own audit log with it. Caught by 106 real documents rather than by
+   a fixture, which is what stops the bar drifting back.
 4. **Cache a result whose tail was never screened.** The performance edit. Turns
    one unexamined document into every later caller's answer for the length of
    its ttl.
@@ -54,6 +56,7 @@ DECISION = "src/acp/firewall/decision.py"
 SERVER = "src/acp/gateway/server.py"
 UNIT = "tests/unit/firewall/test_decision.py"
 INTEGRATION = "tests/integration/test_firewall_refusal.py"
+CORPUS = "tests/integration/test_benign_corpus.py"
 
 MUTATIONS: tuple[Mutation, ...] = (
     Mutation(
@@ -85,12 +88,20 @@ MUTATIONS: tuple[Mutation, ...] = (
         suite=UNIT,
     ),
     Mutation(
-        name="enforce the image detector even with no hosts configured",
+        name="put the demoted tool-mention detector back on the enforceable list",
         path=DECISION,
-        anchor="        and (hosts_configured or finding.detector not in HOST_DEPENDENT)",
-        replacement="        and (True or finding.detector not in HOST_DEPENDENT)  # noqa: SIM222",
-        caught_by=frozenset({"test_an_image_cannot_withhold_a_result_until_hosts_are_configured"}),
-        suite=UNIT,
+        anchor='ENFORCEABLE: Final = frozenset({"bidirectional_override", "encoded_payload"})',
+        replacement=(
+            "ENFORCEABLE: Final = frozenset(\n"
+            '    {"bidirectional_override", "encoded_payload", "tool_name_mention"}\n'
+            ")"
+        ),
+        # Caught by the corpus, which is the point of having one. `tool_name_mention`
+        # was on this list until the benign corpus withheld the gateway's own audit
+        # log with it. The assertion that catches this is not a hand-written fixture
+        # — it is 106 real documents, and it is what stops the bar drifting back.
+        caught_by=frozenset({"test_no_benign_document_is_withheld"}),
+        suite=CORPUS,
     ),
     Mutation(
         name="cache a result whose tail was never screened",

@@ -1,0 +1,20 @@
+---
+why: reference documentation about error codes
+source: synthetic
+---
+## Errors
+
+Every error response carries a machine-readable `code` and a human-readable
+`message`. The `code` is stable; the `message` is not, and clients must not
+match on it.
+
+| code | HTTP | meaning | retry? |
+|---|---|---|---|
+| `invalid_request` | 400 | The request did not parse or failed validation. | no |
+| `unauthenticated` | 401 | Missing or invalid credential. | after re-auth |
+| `forbidden` | 403 | Authenticated, and not permitted. | no |
+| `rate_limited` | 429 | Too many requests. `Retry-After` is set. | yes |
+| `upstream_unavailable` | 503 | A dependency did not answer. | yes, with backoff |
+
+A 503 says nothing about whether your request was valid. A 403 says it will
+never be permitted for this credential, so retrying is wasted budget.

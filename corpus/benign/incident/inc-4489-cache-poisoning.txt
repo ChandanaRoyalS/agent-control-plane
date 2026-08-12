@@ -1,0 +1,26 @@
+---
+why: an incident writeup about a caching bug that leaked one user's data to another, described precisely
+source: synthetic
+hard: true
+---
+INC-4489 — cached search results served across accounts
+
+Impact: for 19 minutes, six users received search results computed for a
+different user in the same tenant. No results crossed a tenant boundary.
+
+What happened: a caching layer added to the search API keyed on the query string
+and the tenant, but not on the user. Two users in the same tenant issuing the
+same query received the same result set, including documents only one of them
+could read.
+
+This was found by a customer, not by us, and that is the most important sentence
+in this report.
+
+Why no alarm fired: there is no alarm for this. A cache serving the wrong answer
+returns a 200 with plausible content. The error rate did not move, latency
+improved, and the hit ratio looked excellent.
+
+What we are changing: the cache key now includes the principal, and a test
+asserts that one principal's cached result can never be served to another. The
+test is itself tested, by a script that removes each field from the key and
+requires that test to be the one that fails.

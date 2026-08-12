@@ -20,10 +20,19 @@ compared. See `record.py`.
 """
 
 from acp.approvals.flow import Gate, Outcome, Resolution, gate, resolve
+from acp.approvals.operator import (
+    APPROVAL_PATH,
+    APPROVALS_PATH,
+    UNTRUSTED_NOTICE,
+    ApprovalReader,
+    operator_routes,
+)
 from acp.approvals.record import (
     DEFAULT_TTL_SECONDS,
+    MAX_DISPLAYED_ARGUMENT_BYTES,
     ApprovalRequest,
     State,
+    canonical,
     fingerprint,
     new_token,
     request_for,
@@ -31,7 +40,12 @@ from acp.approvals.record import (
 from acp.approvals.store import ApprovalStore, InMemoryApprovalStore
 
 __all__ = [
+    "APPROVALS_PATH",
+    "APPROVAL_PATH",
     "DEFAULT_TTL_SECONDS",
+    "MAX_DISPLAYED_ARGUMENT_BYTES",
+    "UNTRUSTED_NOTICE",
+    "ApprovalReader",
     "ApprovalRequest",
     "ApprovalStore",
     "Gate",
@@ -39,9 +53,11 @@ __all__ = [
     "Outcome",
     "Resolution",
     "State",
+    "canonical",
     "fingerprint",
     "gate",
     "new_token",
+    "operator_routes",
     "request_for",
     "resolve",
 ]

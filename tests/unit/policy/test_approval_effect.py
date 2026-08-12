@@ -191,3 +191,38 @@ def test_an_argument_scoped_approval_does_not_let_the_fast_path_refuse() -> None
     )
 
     assert could_ever_allow(policy, principal(), TOOL)
+
+
+# ---------------------------------------------------------------------------
+# Whether this policy can hold a call at all (task 55)
+# ---------------------------------------------------------------------------
+
+
+def test_a_policy_with_no_approval_rule_gates_nothing() -> None:
+    """Asked at startup, so a deployment that never holds a call carries no
+    machinery for holding one — and, more usefully, so an operator reading the
+    startup log learns which of the two they have."""
+    policy = Policy(
+        rules=(
+            Rule(name="deny-deletes", effect=Effect.DENY, tools=("crm__delete",)),
+            Rule(name="allow-rest", effect=Effect.ALLOW),
+        )
+    )
+
+    assert policy.gates_calls is False
+
+
+def test_an_empty_policy_gates_nothing() -> None:
+    """Deny-everything is still a decision made without a person."""
+    assert Policy().gates_calls is False
+
+
+def test_one_approval_rule_is_enough() -> None:
+    policy = Policy(
+        rules=(
+            Rule(name="approve-deletes", effect=Effect.REQUIRE_APPROVAL, tools=("crm__delete",)),
+            Rule(name="allow-rest", effect=Effect.ALLOW),
+        )
+    )
+
+    assert policy.gates_calls is True

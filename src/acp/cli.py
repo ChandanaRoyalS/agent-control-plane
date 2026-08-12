@@ -496,13 +496,31 @@ def _serve_command(args: argparse.Namespace) -> int:
 
             monitor = getattr(app.state, "health", None)
             admin = _server(
-                build_admin_app(monitor, getattr(app.state, "schema_drift", None)),
+                build_admin_app(
+                    monitor,
+                    getattr(app.state, "schema_drift", None),
+                    # The store the request path is holding calls in. The same
+                    # object, deliberately: an operator channel pointed at a
+                    # second store would answer approvals nobody is waiting on.
+                    getattr(app.state, "approvals", None),
+                    settings.approval_operator_token,
+                ),
                 settings.admin_host,
                 settings.admin_port,
             )
             logger.info(
                 "admin.listening",
-                extra={"host": settings.admin_host, "port": settings.admin_port},
+                extra={
+                    "host": settings.admin_host,
+                    "port": settings.admin_port,
+                    # Named at startup because its absence is silent otherwise:
+                    # a gated deployment with no channel looks identical to a
+                    # working one until the first call is held and never answered.
+                    "approval_channel": bool(
+                        settings.approval_operator_token
+                        and getattr(app.state, "approvals", None) is not None
+                    ),
+                },
             )
 
             # Both servers in one task group. Each installs its own signal

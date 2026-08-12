@@ -24,7 +24,7 @@ from mcp.shared.exceptions import MCPError
 from starlette.applications import Starlette
 
 from acp import __version__
-from acp.approvals import ApprovalStore, Outcome, gate
+from acp.approvals import DEFAULT_TTL_SECONDS, ApprovalStore, Outcome, gate
 from acp.budget import (
     CostTable,
     QuotaCounter,
@@ -172,6 +172,7 @@ def _await_approval(
     principal: Principal,
     params: types.CallToolRequestParams,
     rule: str | None,
+    ttl: float = DEFAULT_TTL_SECONDS,
 ) -> types.InputRequiredResult | None:
     """Start or resolve an approval; ``None`` means the call may now proceed.
 
@@ -203,6 +204,7 @@ def _await_approval(
         arguments=params.arguments or {},
         rule=rule,
         now=time.time(),
+        ttl=ttl,
     )
     logger.info(
         APPROVAL_EVENT,
@@ -236,6 +238,7 @@ def build_server(
     provenance: bool = False,
     firewall: Firewall | None = None,
     approvals: ApprovalStore | None = None,
+    approval_ttl: float = DEFAULT_TTL_SECONDS,
 ) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
@@ -324,7 +327,9 @@ def build_server(
                 # charged, before the cache is consulted and before anything
                 # reaches an upstream — a call that has not happened must not
                 # spend, must not be answered from memory, and must not run.
-                awaiting = _await_approval(approvals, principal, params, decision.rule)
+                awaiting = _await_approval(
+                    approvals, principal, params, decision.rule, approval_ttl
+                )
                 if awaiting is not None:
                     return awaiting
 
@@ -420,6 +425,7 @@ def build_app(
     provenance: bool = False,
     firewall: Firewall | None = None,
     approvals: ApprovalStore | None = None,
+    approval_ttl: float = DEFAULT_TTL_SECONDS,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -457,6 +463,7 @@ def build_app(
         provenance=provenance,
         firewall=firewall,
         approvals=approvals,
+        approval_ttl=approval_ttl,
     ).streamable_http_app(
         stateless_http=True,
         json_response=True,

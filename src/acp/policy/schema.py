@@ -181,3 +181,21 @@ class Policy(BaseModel):
                 raise ValueError(msg)
             seen.add(rule.name)
         return value
+
+    @property
+    def gates_calls(self) -> bool:
+        """Whether any rule holds a call for a person (ADR 0048).
+
+        Asked at startup, so that a deployment whose policy can hold a call gets
+        the store and the operator channel that make holding one answerable —
+        and one whose policy cannot gets neither. Presence-based like every other
+        switch in `runtime`: the configuration that uses the feature is what
+        turns it on, rather than a second flag somebody has to remember to set
+        alongside the rule they just wrote.
+
+        The alternative was building a store unconditionally. It is nearly free,
+        and it is still wrong: an operator reading `approval.store_enabled` in
+        the startup log would learn nothing about whether this gateway can
+        actually hold anything.
+        """
+        return any(rule.effect is Effect.REQUIRE_APPROVAL for rule in self.rules)

@@ -29,6 +29,8 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
 from acp import __version__
+from acp.approvals.operator import operator_routes
+from acp.approvals.store import ApprovalStore
 from acp.health import HealthMonitor
 from acp.observability import metrics
 from acp.schema import DriftDetector
@@ -127,14 +129,29 @@ def build_schemas(detector: DriftDetector | None) -> Any:
 
 
 def build_admin_app(
-    health: HealthMonitor | None = None, drift: DriftDetector | None = None
+    health: HealthMonitor | None = None,
+    drift: DriftDetector | None = None,
+    approvals: ApprovalStore | None = None,
+    operator_credential: str = "",
 ) -> Starlette:
-    """The admin ASGI app. Small on purpose — it must not be able to fail."""
+    """The admin ASGI app. Small on purpose — it must not be able to fail.
+
+    The approval channel (task 55) is mounted here rather than on the gateway,
+    and that placement is the security property: the agent addresses `:8080` and
+    a person decides on `:9090`, so an agent cannot approve its own call because
+    it cannot reach the thing that approves calls. See `acp.approvals.operator`.
+
+    It is also the one part of this listener that is authenticated, because it is
+    the one part that *writes* — and what it writes is a permission. With no
+    credential configured the routes are absent rather than present and closed;
+    `operator_routes` argues why.
+    """
     return Starlette(
         routes=[
             Route(METRICS_PATH, _metrics, methods=["GET"]),
             Route(HEALTH_PATH, _healthz, methods=["GET"]),
             Route(READY_PATH, build_readyz(health), methods=["GET"]),
             Route(SCHEMAS_PATH, build_schemas(drift), methods=["GET"]),
+            *operator_routes(approvals, operator_credential),
         ]
     )

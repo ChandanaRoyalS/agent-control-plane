@@ -5,8 +5,11 @@ and the systems they are allowed to touch.
 
 [![CI](https://github.com/USERNAME/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/USERNAME/agent-control-plane/actions/workflows/ci.yml)
 
-> **Status:** in development. Phase 1 complete (`v0.1.0`); Phase 2 — identity —
-> in progress.
+> **Status:** in development. Phases 1 to 4 complete — foundation, delegated
+> identity, policy, budgets and result caching. Phase 5, the injection firewall,
+> is in progress: deterministic detectors, provenance framing and structured
+> refusal have shipped; the measured detection and false-positive rates have
+> not, and nothing here claims a number until they do.
 
 ## The problem
 
@@ -380,10 +383,10 @@ naming.
 | Phase | Status | Scope |
 |---|---|---|
 | 1 · Foundation | **complete** | Resilient, observable, aggregating passthrough |
-| 2 · Identity | planned | Delegated auth, scoped per-upstream token exchange |
-| 3 · Policy | in progress | Deny-by-default engine, catalogue filtering, and simulator shipped; argument-level rules next |
-| 4 · Budgets | planned | Quotas, rate limits, cost accounting, result caching |
-| 5 · Firewall | planned | Injection defense with a measured detection rate |
+| 2 · Identity | **complete** | Delegated auth, scoped per-upstream token exchange, proven no-passthrough |
+| 3 · Policy | **complete** | Deny-by-default engine, argument-level rules, catalogue filtering, simulator |
+| 4 · Budgets | **complete** | Quotas, rate limits, cost accounting, per-principal result caching |
+| 5 · Firewall | in progress | Detectors, provenance framing and structured refusal shipped; corpus and measured rates next |
 | 6 · Approvals | planned | Human-in-the-loop via multi-round-trip requests |
 | 7 · Audit | planned | Tamper-evident log, multi-tenancy, threat model |
 | 8 · Performance | planned | Load testing, profiling, published latency |

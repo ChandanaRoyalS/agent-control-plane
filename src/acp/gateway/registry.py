@@ -124,6 +124,25 @@ class UpstreamRegistry:
     def names(self) -> list[str]:
         return sorted(self._clients)
 
+    @property
+    def known_tools(self) -> frozenset[str]:
+        """Every qualified tool name this process has resolved so far.
+
+        The firewall's tool-mention detector needs a catalogue to compare a
+        document against, and this is the cheap answer: no fan-out, no upstream
+        call, just what has already been seen. It is what makes that detector
+        the one only a gateway can write — a document returned by ``mock-a``
+        naming ``mock-b__delete_record`` has read this estate's catalogue.
+
+        Honestly incomplete, and incomplete in the safe direction. A process
+        that has never served a ``tools/list`` knows nothing, so the detector
+        under-reports rather than inventing names — which is the same choice
+        ADR 0036 made for the screener's defaults. In practice an agent must
+        list before it can call, so by the first ``tools/call`` this is
+        populated.
+        """
+        return frozenset(self._resolved)
+
     # -- catalogue ---------------------------------------------------------
 
     async def list_tools(self) -> Catalogue:

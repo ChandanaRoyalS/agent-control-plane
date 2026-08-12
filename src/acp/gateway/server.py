@@ -32,7 +32,7 @@ from acp.budget import (
     enforce_rate_limit,
 )
 from acp.exceptions import ACPError, PolicyDeniedError
-from acp.firewall import frame
+from acp.firewall import Firewall, frame
 from acp.gateway.converters import to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.naming import upstream_of
 from acp.gateway.registry import UpstreamRegistry
@@ -114,6 +114,42 @@ def _framed(result: CallToolResult, tool: str, provenance: bool) -> CallToolResu
     return frame(result, tool=tool) if provenance else result
 
 
+def _charge(
+    *,
+    subject: str | None,
+    tool: str,
+    limiter: RateLimiter | None,
+    costs: CostTable | None,
+    quota: QuotaCounter | None,
+) -> None:
+    """Draw this call against both budgets, or raise the refusal it earns.
+
+    Both key on the principal's subject; with no principal (auth off) there is
+    no per-caller budget to charge, so both are skipped. The cost is resolved
+    once and shared, because a tool that costs ten should cost ten to each
+    budget rather than ten to one and one to the other.
+
+    Extracted from ``on_call_tool`` for a reason worth stating: it is the *only*
+    thing between authorization and the cache, so a reader following the
+    security argument in that function should be able to see the whole ordering
+    on one screen.
+    """
+    if subject is None or (limiter is None and quota is None):
+        return
+    cost = costs.cost_of(tool) if costs is not None else 1.0
+    try:
+        if limiter is not None:
+            # A monotonic clock for the rate: a wall-clock jump must not hand
+            # out or withhold burst allowance.
+            enforce_rate_limit(limiter, subject, time.monotonic(), cost)
+        if quota is not None:
+            # Wall-clock time for the window: a daily quota aligns to real
+            # calendar time, not to how long the process has been running.
+            enforce_quota(quota, subject, time.time(), cost)
+    except ACPError as exc:
+        raise to_mcp_error(exc) from exc
+
+
 def _served_from_cache(results: ResultCache, key: ResultKey, tool: str) -> CallToolResult | None:
     """A held result for this key, with the hit or miss recorded either way."""
     held = results.get(key)
@@ -134,6 +170,7 @@ def build_server(
     cacheable: CacheableTools | None = None,
     results: ResultCache | None = None,
     provenance: bool = False,
+    firewall: Firewall | None = None,
 ) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
@@ -217,28 +254,15 @@ def build_server(
             except ACPError as exc:
                 raise to_mcp_error(exc) from exc
 
-        # After authorization: a denied call must not spend budget, and
-        # charging a call we would refuse anyway is wasted work. Both budgets
-        # key on the principal's subject; with no principal (auth off) there is
-        # no per-caller budget to charge, so both are skipped. The cost is
-        # resolved once and shared by both.
-        subject = principal.subject if principal is not None else None
-        if subject is not None and (limiter is not None or quota is not None):
-            cost = costs.cost_of(params.name) if costs is not None else 1.0
-            if limiter is not None:
-                # A monotonic clock for the rate: a wall-clock jump must not
-                # hand out or withhold burst allowance.
-                try:
-                    enforce_rate_limit(limiter, subject, time.monotonic(), cost)
-                except ACPError as exc:
-                    raise to_mcp_error(exc) from exc
-            if quota is not None:
-                # Wall-clock time for the window: a daily quota aligns to real
-                # calendar time, not to how long the process has been running.
-                try:
-                    enforce_quota(quota, subject, time.time(), cost)
-                except ACPError as exc:
-                    raise to_mcp_error(exc) from exc
+        # After authorization: a denied call must not spend budget, and charging
+        # a call we would refuse anyway is wasted work.
+        _charge(
+            subject=principal.subject if principal is not None else None,
+            tool=params.name,
+            limiter=limiter,
+            costs=costs,
+            quota=quota,
+        )
         # The result cache, and its position in this function is the whole
         # security argument (ADR 0035). Everywhere else in this codebase caching
         # is outermost, because a hit should cost nothing — ADR 0006 argues it
@@ -273,6 +297,25 @@ def build_server(
         except ACPError as exc:
             raise to_mcp_error(exc) from exc
 
+        # Screened on the miss path only. A cache hit was screened before it was
+        # stored, so what is held is by construction what the firewall allowed —
+        # and re-screening every hit would erase the reason the cache exists.
+        # The honest cost, and its two bounds, are in ADR 0038.
+        if firewall is not None:
+            inspection = firewall.inspect(result, tool=params.name, tools=registry.known_tools)
+            if inspection.refused:
+                # Returned unframed, and that is deliberate: the fence marks
+                # text the gateway did *not* write, so fencing the gateway's own
+                # notice would be a lie about its origin. With framing on, an
+                # unfenced block is by construction the gateway speaking.
+                return to_mcp_call_tool_result(inspection.result)
+            if not inspection.cacheable:
+                # Truncated screening: served once, examined in part, never
+                # repeated. Storing a document whose tail was never examined
+                # turns one unexamined document into every later caller's answer
+                # for the length of its ttl.
+                cache_key = None
+
         if cache_key is not None and results is not None and ttl is not None:
             # `put` refuses an `is_error` result itself, so a failed tool call
             # cannot be cached even from here.
@@ -301,6 +344,7 @@ def build_app(
     cacheable: CacheableTools | None = None,
     results: ResultCache | None = None,
     provenance: bool = False,
+    firewall: Firewall | None = None,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -336,6 +380,7 @@ def build_app(
         cacheable=cacheable,
         results=results,
         provenance=provenance,
+        firewall=firewall,
     ).streamable_http_app(
         stateless_http=True,
         json_response=True,

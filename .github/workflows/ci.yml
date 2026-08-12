@@ -59,6 +59,13 @@ jobs:
       - name: Prove the result-cache isolation test can fail
         run: uv run python scripts/mutate_result_cache.py
 
+      # A refusal that explains itself by quoting the document delivers the
+      # payload to the model with the gateway's authority attached, outside
+      # any fence. Nothing errors and nothing breaks — the attack simply
+      # works better than it would have on its own.
+      - name: Prove the refusal can fail
+        run: uv run python scripts/mutate_refusal.py
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

@@ -29,6 +29,7 @@ from pydantic import Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from acp.exceptions import ConfigurationError
+from acp.firewall.decision import Mode as FirewallMode
 from acp.upstream import UpstreamConfig
 
 DEFAULT_SECRETS_DIR = "/run/secrets"
@@ -177,6 +178,34 @@ class GatewaySettings(BaseSettings):
     nothing, so it cannot be wrong about a document. What it costs is two blocks
     and a little of the model's context; what it buys is that a retrieved
     paragraph no longer arrives looking like something the user said.
+    """
+
+    firewall_mode: FirewallMode = FirewallMode.OFF
+    """How much the injection firewall is allowed to do (task 47, ADR 0038).
+
+    ``off`` screens nothing. ``report`` screens every tool result, logs every
+    finding, and changes nothing the caller receives. ``enforce`` withholds
+    content that crosses the bar.
+
+    **Start at ``report``.** It is not a timid setting, it is the measuring
+    instrument: it evaluates the same bar enforcement would and logs a result it
+    *would* have withheld as ``would_refuse``, so a deployment learns what
+    enforcement would cost its own traffic before paying it. A firewall that
+    refuses honest documents does not get tuned, it gets set back to ``off``.
+
+    ``off`` is the default because screening is linear in the size of every
+    result and a control that turns itself on is a control nobody chose.
+    """
+
+    firewall_allowed_hosts: list[str] = Field(default_factory=list)
+    """Hosts a tool result may legitimately link to or embed an image from.
+
+    Empty is the *noisy* default on purpose (ADR 0036): with no hosts
+    configured every markdown image and every link is reported. That is visible
+    in the numbers, where the opposite default would look clean while detecting
+    less — and it is why ``external_image`` cannot withhold anything until this
+    list is set. Enforcing on the empty default would refuse a wiki page for
+    having a logo in it.
     """
 
     quota_enabled: bool = False

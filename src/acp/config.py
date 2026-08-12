@@ -208,6 +208,28 @@ class GatewaySettings(BaseSettings):
     having a logo in it.
     """
 
+    firewall_classifier_enabled: bool = False
+    """Whether the optional model-based detector runs (task 51, ADR 0042).
+
+    Off by default: it needs a local Ollama, it is slower than every pattern, and
+    a firewall that silently depends on a model service is one that breaks in a
+    way nobody configured. When on, it adds findings at MEDIUM alongside the
+    patterns; when the model is absent or slow it adds nothing, so enabling it
+    cannot take screening offline — only make it quieter than intended."""
+
+    firewall_classifier_model: str = "llama3.2"
+    """The Ollama model the classifier asks. Only consulted when the classifier
+    is enabled."""
+
+    firewall_classifier_endpoint: str = "http://127.0.0.1:11434/api/generate"
+    """Where the local Ollama listens. Only consulted when the classifier is
+    enabled."""
+
+    firewall_classifier_timeout_seconds: float = Field(default=5.0, gt=0)
+    """How long to wait for the model before treating it as absent. Tight on
+    purpose: a slow model must degrade to no-finding the same way a down one
+    does, rather than slowing every screened result."""
+
     quota_enabled: bool = False
     """Whether per-principal quotas are enforced. Off by default, opt-in like
     rate limiting: a gateway with no quota configured behaves exactly as before."""

@@ -1,0 +1,33 @@
+# Held-out attack split — version 1
+#
+# The ids listed here are SEALED. They are excluded from the development corpus
+# the firewall is built and tuned against, so that tasks 51 and 52 can measure
+# the firewall on attacks it was never shaped by. A detection rate over the
+# development set alone measures how well the firewall fits what it has already
+# seen; a rate over this set measures whether that fitting generalises.
+#
+# The rules that keep the number honest:
+#   - Nothing in this file may be read while building or tuning a detector.
+#     The whole point is that these documents are unseen. A detector designed
+#     against a held-out document has quietly turned it back into training data.
+#   - This split is versioned. When it changes, the version changes, and any
+#     measurement citing it names the version. "Measured against held-out v1"
+#     is a claim someone can reproduce; "measured against the held-out set" is
+#     not, once the set has moved.
+#   - One attack per family, chosen by id alphabetically — a rule a machine
+#     applies, not a judgement someone makes looking at the contents. Every
+#     family is represented, so the split can report whether generalisation
+#     holds per family rather than only in aggregate.
+#
+# Format: one attack id (<family>/<slug>) per line. Blank lines and #-comments
+# are ignored.
+
+version: 1
+
+boundary_escape/fake-end-marker
+delayed_multi_step/deferred-trigger
+direct_override/authority-appeal
+exfiltration/data-uri-decoy
+obfuscation/base64-benign-decoy
+plain_assertion/false-provenance
+tool_confusion/chain-two-tools

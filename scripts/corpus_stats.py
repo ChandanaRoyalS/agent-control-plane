@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from collections import Counter
 
-from acp.corpus import Corpus, load_attacks, load_benign
+from acp.corpus import Corpus, load_attacks, load_benign, load_split
 from acp.corpus.evaluate import evaluate
 from acp.firewall import Firewall
 from acp.upstream.models import CallToolResult, ContentBlock
@@ -138,6 +138,25 @@ def attack_scoreboard() -> int:
     print("There is no single catch rate on purpose. An aggregate over families")
     print("that includes the uncatchable ones measures the corpus, not the")
     print("firewall. The families are the result. See ADR 0040.")
+    print()
+
+    # The held-out split is DESCRIBED here, never scored here. Running the
+    # firewall against it during development is exactly the contamination the
+    # split exists to prevent — the number it yields belongs to task 52's
+    # harness, run deliberately, not to a stats script run on every change.
+    split = load_split()
+    held = split.heldout
+    held_families = sorted({a.family.value for a in held.attacks})
+    print()
+    print("Held-out split (sealed — described, not scored here)\n")
+    print(f"  version                   {split.version}")
+    print(f"  held out                  {len(held)}")
+    print(f"  development               {len(split.development)}")
+    print(f"  families covered          {len(held_families)} of {len(split.development.families)}")
+    print()
+    print("These attacks are excluded from the development corpus a detector is")
+    print("tuned against, so tasks 51-52 can measure the firewall on attacks it")
+    print("was never shaped by. See ADR 0041.")
     return len(board.all_mismatches)
 
 

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install check fmt lint types test cov clean image up down logs smoke \
-        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus
+        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -64,6 +64,9 @@ prove-predispatch:  ## Hunt for a call the pre-dispatch check refuses and policy
 
 corpus:  ## What the benign corpus contains, and what the firewall does to it
 	uv run python scripts/corpus_stats.py
+
+eval:  ## Measure the firewall: false positives first, then recall and precision
+	uv run python scripts/evaluate.py
 
 probe-resource:  ## Measure what Keycloak does with RFC 8707's `resource`
 	uv run python scripts/probe_resource_indicator.py

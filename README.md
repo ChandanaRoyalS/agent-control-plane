@@ -407,6 +407,65 @@ number small: a rule constraining `doc_id` cannot have fired on a call that sent
 no `doc_id`, which is a definite answer bought with a field that records nothing
 sensitive. See [ADR 0045](docs/decisions/0045-replay-the-log-and-report-what-changes.md).
 
+### What the firewall actually does
+
+`make eval` screens 106 hand-written benign documents and the adversarial corpus
+and reports what happened — false positives first, because a firewall that stops
+legitimate documents gets switched off, and a switched-off firewall's recall is
+zero.
+
+```
+  bootstrap:  2,000 resamples, seed 20260812
+
+FALSE POSITIVES — benign documents, which nothing should happen to
+  produced a finding    19.8%   21/106  [13%, 27%]
+  actually withheld      0.0%    0/106  [uninformative]
+
+RECALL — by the family the corpus assigned (what the attack IS)
+  exfiltration         100.0%    5/5    [uninformative]
+  obfuscation           85.7%    6/7    [57%, 100%]
+  direct_override       83.3%    5/6    [50%, 100%]
+  tool_confusion        75.0%    3/4    [25%, 100%]
+  boundary_escape       25.0%    1/4    [0%, 75%]
+  delayed_multi_step     0.0%    0/4    [uninformative]   (4 expected undetected)
+  plain_assertion        0.0%    0/6    [uninformative]   (6 expected undetected)
+
+PRECISION — by the family the firewall reported (what it SAID)
+  obfuscation           66.7%    6/9    [33%, 89%]    6 attack / 3 benign
+  direct_override       53.3%    8/15   [27%, 80%]    8 attack / 7 benign
+  exfiltration          41.7%    5/12   [17%, 67%]    5 attack / 7 benign
+  tool_confusion        37.5%    3/8    [0%, 75%]     3 attack / 5 benign
+
+  held-out split v1: 7 attacks, NOT SCORED (pass --unseal to score it)
+```
+
+**Under half of what this firewall flags is an attack.** That is the number this
+harness added, and it is the least flattering one the project has produced. It is
+survivable only because of the row above it — *0 of 106 benign documents were
+withheld* — which is to say the bar between "found something" and "acted on it"
+is carrying the entire deployment. Any future proposal to lower that bar now has
+a number to argue against.
+
+Three things the report refuses to do:
+
+- **No aggregate detection rate.** An average over families that include
+  `plain_assertion` — which nothing catches, by construction — is a number set by
+  how many of each somebody chose to write. It measures the corpus.
+- **No bare percentages.** Every family here is under ten documents. Where every
+  observation agrees the bootstrap can only return a point, and that is printed
+  as `[uninformative]` rather than as a spuriously tight interval — a harness
+  whose weakest rows look like its most confident ones is worse than none.
+- **No peeking at the held-out split.** It is named and counted on every run and
+  scored on none of them without `--unseal`. A number you can re-run while tuning
+  has stopped being held out by about the third iteration.
+
+The intervals above are from the default 2,000 resamples at seed 20260812 —
+`make eval` reproduces them exactly, which is the point of fixing the seed.
+
+Recall and precision are indexed by different things on purpose — what an attack
+*is* versus what the firewall *said* — so they are two tables rather than two
+columns. See [ADR 0046](docs/decisions/0046-the-harness-that-reports-false-positives-first.md).
+
 ## Development
 
 ```bash
@@ -439,7 +498,7 @@ naming.
 | 2 · Identity | **complete** | Delegated auth, scoped per-upstream token exchange, proven no-passthrough |
 | 3 · Policy | **complete** | Deny-by-default engine, argument-level rules, catalogue filtering, simulator |
 | 4 · Budgets | **complete** | Quotas, rate limits, cost accounting, per-principal result caching |
-| 5 · Firewall | in progress | Detectors, framing, refusal, and benign + adversarial corpora shipped; held-out split, classifier and per-family rates next |
+| 5 · Firewall | in progress | Detectors, framing, refusal, both corpora, a sealed held-out split, an optional classifier, and per-family precision/recall with intervals; CI regression gate next |
 | 6 · Approvals | planned | Human-in-the-loop via multi-round-trip requests |
 | 7 · Audit | planned | Tamper-evident log, multi-tenancy, threat model |
 | 8 · Performance | planned | Load testing, profiling, published latency |

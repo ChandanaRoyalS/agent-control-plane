@@ -21,13 +21,30 @@ Every attack also records what the firewall is expected to do with it, including
 `undetected`, and the build fails when an expectation is wrong in *either*
 direction.
 
-Tasks 50 to 52 add the held-out split, a classifier behind the same interface,
-and the harness reporting precision, recall and false-positive rate with
-confidence intervals per family. Everything reads what is here.
+**Then the split that may not be tuned against** (task 50, ADR 0041) and a
+model classifier behind the same detector interface (task 51, ADR 0042).
+
+**And finally the harness that turns all of it into numbers** (task 52,
+ADR 0046). False-positive rate first, then recall sliced by the family the
+corpus assigned, then precision sliced by the family the firewall reported —
+two different questions over two different populations, reported as two tables
+so nobody divides one by the other. Every rate carries a bootstrap interval,
+because a rate over 106 documents and a rate over 106,000 read identically and
+are not the same claim. There is still no aggregate detection rate, and the
+held-out split is named and counted on every run and scored on none of them
+without a deliberate flag.
 """
 
 from acp.corpus.attack import Attack, AttackFamily, Expectation, parse_attack
 from acp.corpus.document import Document, Source, parse
+from acp.corpus.harness import (
+    DEFAULT_DEPLOYMENT,
+    Deployment,
+    PrecisionRow,
+    RecallRow,
+    Report,
+    evaluate_firewall,
+)
 from acp.corpus.heldout import (
     HeldoutManifest,
     Split,
@@ -46,25 +63,36 @@ from acp.corpus.loader import (
     load_corpus,
     repository_root,
 )
+from acp.corpus.metrics import Interval, Proportion, bootstrap, measure
 
 __all__ = [
+    "DEFAULT_DEPLOYMENT",
     "Attack",
     "AttackCorpus",
     "AttackFamily",
     "Corpus",
+    "Deployment",
     "Document",
     "Expectation",
     "HeldoutManifest",
+    "Interval",
+    "PrecisionRow",
+    "Proportion",
+    "RecallRow",
+    "Report",
     "Source",
     "Split",
+    "bootstrap",
     "default_heldout_path",
     "default_root",
+    "evaluate_firewall",
     "load_attacks",
     "load_benign",
     "load_corpus",
     "load_development_attacks",
     "load_heldout_manifest",
     "load_split",
+    "measure",
     "parse",
     "parse_attack",
     "repository_root",

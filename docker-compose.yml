@@ -68,6 +68,29 @@ services:
       ACP_UPSTREAMS_FILE: /app/config/upstreams.compose.yaml
       ACP_POLICY_FILE: /app/config/policy.compose.yaml
       ACP_SCHEMA_BASELINE_FILE: /app/config/schema-baseline.json
+      # -- human-in-the-loop approvals (task 55) ---------------------------
+      #
+      # `policy.compose.yaml` holds `mock-a__create-ticket` for a person. This
+      # is what makes answering possible: with no operator credential the
+      # approval routes are not mounted at all, so every gated call would wait
+      # out its TTL and be refused. The gateway says so at startup
+      # (`approval.no_operator_channel`) rather than failing silently.
+      #
+      # The channel lives on the ADMIN listener (`:9090`), never on the MCP one
+      # (`:8080`). That is the control, not the plumbing: an agent cannot
+      # approve its own call because it cannot address the thing that approves
+      # calls. See ADR 0049.
+      #
+      # Committed in the clear for the same reason the Keycloak client secret
+      # above is: this stack is a demonstration on loopback. A real deployment
+      # puts this in the secret store like any other production credential —
+      # it is the one write on a listener that is otherwise read-only.
+      ACP_APPROVAL_OPERATOR_TOKEN: dev-only-operator-token
+      # Five minutes is the default. Named here because it is the default-deny
+      # (ADR 0048) wearing the clothes of a timeout: raising it widens the
+      # window in which one person's yes can still be spent.
+      ACP_APPROVAL_TTL_SECONDS: "300"
+      ACP_APPROVAL_MAX_PENDING: "256"
       # -- budgets, caching and the firewall -------------------------------
       #
       # All four of these files were already mounted by `./config:/app/config:ro`

@@ -61,6 +61,22 @@ resolved rather than by a sweeper, so an approval cannot be honoured late becaus
 a background job did not run.
 """
 
+MAX_DISPLAYED_ARGUMENT_BYTES: Final = 8192
+"""How much of a call an operator is shown before it is withheld as too large.
+
+A bound rather than a truncation, and the difference is the whole point. What
+the operator reads is byte-identical to what the fingerprint was taken over, so
+a truncated display would be a *different* call from the one being approved —
+the exact confusion this module exists to prevent, reintroduced in the one place
+a human is looking. Past the bound the arguments are withheld entirely and the
+response says so, which makes approving blind a visible choice rather than an
+accident.
+
+Eight kilobytes because a tool call is arguments, not a payload, and because
+this is multiplied by `DEFAULT_MAX_PENDING`: 256 held requests at 8 KiB is two
+megabytes of worst case, which is a bound worth having.
+"""
+
 
 class State(StrEnum):
     """Where a request has got to.
@@ -77,6 +93,32 @@ class State(StrEnum):
     CONSUMED = "consumed"
     """Used once and spent. An approval that stays approved is one approval and
     unbounded deletes."""
+
+
+def canonical(arguments: Mapping[str, Any]) -> str | None:
+    """The one encoding of ``arguments`` that everything else agrees on.
+
+    Keys sorted and whitespace removed, so two spellings of one call produce one
+    string. ``None`` when the value carries something JSON cannot represent —
+    and the caller must **refuse**, never fall back. A `repr()` or `str()`
+    fallback can map two different argument sets onto one string, which here is
+    not a cache collision but a human's yes applied to a call they never saw.
+
+    Extracted so the fingerprint and the operator's view are produced by the
+    same function rather than by two that agree today. What a person reads when
+    they approve is byte-for-byte the string the binding was taken over; a
+    second encoder, however carefully written, is a place for them to drift.
+    """
+    try:
+        return json.dumps(
+            arguments,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def fingerprint(
@@ -102,15 +144,8 @@ def fingerprint(
     reason ADR 0015 gives: an approval granted for an agent acting for alice must
     not be spendable by an agent acting for bob.
     """
-    try:
-        encoded = json.dumps(
-            arguments,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-    except (TypeError, ValueError):
+    encoded = canonical(arguments)
+    if encoded is None:
         return None
 
     material = json.dumps(
@@ -152,6 +187,26 @@ class ApprovalRequest:
     to the caller: a denial that explains itself is an oracle, the same argument
     `PolicyDeniedError` makes."""
 
+    arguments_json: str | None = None
+    """The canonical arguments, exactly as fingerprinted — or ``None`` when they
+    exceeded `MAX_DISPLAYED_ARGUMENT_BYTES`.
+
+    **An approval you cannot read is not an approval.** ADR 0045 keeps argument
+    *values* out of the decision log because that log is widely readable; this
+    record is not that. It lives in memory for five minutes and is read by
+    exactly the person being asked to make a security decision about this
+    specific call, and asking them to answer without seeing it is asking for a
+    rubber stamp. Different reader, different threat model, opposite answer —
+    stated here because it looks like an inconsistency and is not one.
+
+    A string rather than a mapping so the record stays hashable, immutable, and
+    identical to the fingerprint's input. The operator side parses it back.
+    """
+
+    arguments_bytes: int = 0
+    """Size of the canonical form, recorded even when it is withheld — so a
+    withheld call reports *how* large rather than merely that it was too big."""
+
     def expired(self, now: float) -> bool:
         return now >= self.expires_at
 
@@ -178,9 +233,13 @@ def request_for(
     rate limiter takes it: the whole module is then a pure function of its
     inputs and expiry is tested by advancing a number rather than by sleeping.
     """
-    digest = fingerprint(subject=subject, actor=actor, tool=tool, arguments=arguments)
-    if digest is None:
+    encoded = canonical(arguments)
+    if encoded is None:
         return None
+    digest = fingerprint(subject=subject, actor=actor, tool=tool, arguments=arguments)
+    if digest is None:  # pragma: no cover — `canonical` already proved it encodes
+        return None
+    size = len(encoded.encode("utf-8"))
     return ApprovalRequest(
         token=new_token(),
         fingerprint=digest,
@@ -189,4 +248,6 @@ def request_for(
         rule=rule,
         created_at=now,
         expires_at=now + ttl,
+        arguments_json=encoded if size <= MAX_DISPLAYED_ARGUMENT_BYTES else None,
+        arguments_bytes=size,
     )

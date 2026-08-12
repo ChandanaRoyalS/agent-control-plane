@@ -45,8 +45,9 @@ with RFC 8707 resource indicators, so the agent's own token never travels
 upstream and an upstream token cannot be replayed elsewhere. It **evaluates
 policy** deny-by-default over the principal, tool, arguments and target resource,
 using the `Mcp-Method` and `Mcp-Name` headers to authorize before the body is
-parsed. It **screens tool results** for injected instructions and tags what
-passes as untrusted data. It **meters** calls, tokens and spend per principal.
+parsed. It **holds** the calls a rule says no machine should decide alone, and
+answers them on a listener the agent cannot reach. It **screens tool results**
+for injected instructions and tags what passes as untrusted data. It **meters** calls, tokens and spend per principal.
 And it **records** every decision to a tamper-evident audit log, with
 OpenTelemetry traces throughout.
 
@@ -499,6 +500,94 @@ deterministic detectors only: gating on a model's output makes a build that goes
 green on re-run, which teaches people to re-run. See
 [ADR 0047](docs/decisions/0047-a-baseline-not-a-threshold.md).
 
+### Calls a person has to approve
+
+Some calls should not be decided by a rule. A refund above a threshold, a delete
+against a production dataset, anything whose blast radius is somebody's afternoon.
+The policy says so, in the language it already has:
+
+```yaml
+rules:
+  # First match wins, so a narrow gate sits in front of a broad allow.
+  - name: approve-production-deletes
+    effect: require_approval
+    tools: [crm__delete-record]
+    args:
+      dataset: production
+
+  - name: allow-support-agents
+    effect: allow
+    subjects: [alice, bob]
+```
+
+The call then stops mid-flight. The 2026-07-28 revision gives that a shape with
+no session machinery: the gateway answers `resultType: "input_required"` with an
+opaque `requestState`, nothing is held open, no connection is pinned, and any
+instance can take the retry.
+
+```jsonc
+// the agent asks, on :8080
+{"result": {"resultType": "input_required", "requestState": "sK9…", "_meta": {
+  "dev.agent-control-plane/approval": {"status": "awaiting_human_approval",
+                                       "expiresInSeconds": 300}}}}
+```
+
+**A person answers on a different port.**
+
+```bash
+# :9090 — the admin listener, loopback by default, not reachable from the request path
+curl -s localhost:9090/approvals -H "authorization: Bearer $ACP_APPROVAL_OPERATOR_TOKEN"
+# → the subject, the tool, the rule that held it, and the arguments themselves
+
+curl -s -XPOST localhost:9090/approvals/sK9… \
+  -H "authorization: Bearer $ACP_APPROVAL_OPERATOR_TOKEN" \
+  -d '{"approved": true, "reason": "checked with the data team"}'
+```
+
+The agent retries with the same `requestState` and the call runs. Four things
+about that are load-bearing, and each is a bug in a different direction if it is
+missed.
+
+**An approval is granted to a call, not to a token.** The obvious implementation
+records "token X is approved" and lets the retry through — which is a privilege
+escalation with extra steps. An agent asks to delete the test dataset, a human
+reads "delete the test dataset" and approves, and the agent retries the same
+token with `dataset=production`. So every held request records a fingerprint of
+exactly what was asked — subject, actor, tool, canonicalised arguments — and the
+retry is re-fingerprinted and compared. An approval that does not match the call
+in front of it is not an approval.
+
+**An agent cannot approve its own call, because it cannot address the thing that
+approves calls.** MCP's multi-round-trip requests let a client answer the
+questions a server asked, and the client here *is* the agent — an agent talked
+into a destructive call by a poisoned document is precisely the one that will
+answer "yes" on its own behalf. So `inputResponses` is read by nobody, and the
+decision lives on a separate listener on a separate port. A guarantee that rests
+on one `if` statement is one refactor away from being gone.
+
+**What the operator reads is what the fingerprint binds.** The bytes displayed
+are the canonical string the binding was taken over, from one shared encoder — a
+second one for display is the single place "approve the call you read" and
+"approve the call that runs" could quietly come apart. Arguments too large to
+show are withheld rather than truncated, because a truncated display *is* a
+different call.
+
+**Expiry is the default-deny.** It is enforced when the token is resolved, not
+by a background sweeper, so an approval cannot be honoured late because a job did
+not run — and it is checked before the state, so an operator who approves after
+the window closed has approved nothing. One approval, one call: `resolve`
+consumes it as part of returning "proceed".
+
+The shipped store is in memory and per process, which is a real limitation stated
+rather than discovered — a replicated gateway that holds a call on one instance
+and takes the retry on another cannot resolve it. `ApprovalStore` is four
+operations against a shared row so the Redis implementation is a class, not a
+redesign. See [ADR 0048](docs/decisions/0048-an-approval-is-for-a-call-not-a-token.md)
+and [ADR 0049](docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md).
+
+`make up` runs it: the composed policy holds `mock-a__create-ticket`, and
+`config/policy.compose.yaml` has the four commands end to end.
+
 ## Development
 
 ```bash
@@ -532,7 +621,7 @@ naming.
 | 3 · Policy | **complete** | Deny-by-default engine, argument-level rules, catalogue filtering, simulator |
 | 4 · Budgets | **complete** | Quotas, rate limits, cost accounting, per-principal result caching |
 | 5 · Firewall | **complete** | Detectors, framing, refusal, both corpora, a sealed held-out split, an optional classifier, per-family precision/recall with intervals, and a committed-baseline regression gate in CI |
-| 6 · Approvals | planned | Human-in-the-loop via multi-round-trip requests |
+| 6 · Approvals | **complete** | Human-in-the-loop via multi-round-trip requests: a policy effect that holds a call, an approval bound to the call rather than the token, and an operator channel on a listener the agent cannot reach |
 | 7 · Audit | planned | Tamper-evident log, multi-tenancy, threat model |
 | 8 · Performance | planned | Load testing, profiling, published latency |
 | 9 · Demo | planned | Live trace console, scripted attack demo |

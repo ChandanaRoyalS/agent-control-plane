@@ -45,10 +45,23 @@ class Effect(StrEnum):
 
     A str-valued enum so it round-trips through YAML as the word `allow` or
     `deny` rather than an integer nobody can read in a diff.
+
+    **`require_approval` is the third, and it is a policy effect rather than a
+    separate config file on purpose.** "Support agents may delete records, but a
+    delete against a production dataset needs a human" is a statement about *who*
+    may do *what to which argument* — which is precisely what this language
+    already expresses, down to the argument (ADR 0031). A tool-level
+    `approvals.yaml` could only ever say "this tool needs approval for
+    everybody", and the interesting approvals are never that coarse.
+
+    It sits in first-match-wins order like everything else, so a narrow
+    `require_approval` in front of a broad `allow` reads exactly the way an
+    operator means it.
     """
 
     ALLOW = "allow"
     DENY = "deny"
+    REQUIRE_APPROVAL = "require_approval"
 
 
 class Rule(BaseModel):

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install check fmt lint types test cov clean image up down logs smoke \
-        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval
+        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -67,6 +67,9 @@ corpus:  ## What the benign corpus contains, and what the firewall does to it
 
 eval:  ## Measure the firewall: false positives first, then recall and precision
 	uv run python scripts/evaluate.py
+
+eval-check:  ## Fail if any measured count got worse than corpus/eval-baseline.json
+	uv run python scripts/evaluate.py --check
 
 probe-resource:  ## Measure what Keycloak does with RFC 8707's `resource`
 	uv run python scripts/probe_resource_indicator.py

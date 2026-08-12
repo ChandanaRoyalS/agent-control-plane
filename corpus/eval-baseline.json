@@ -1,0 +1,67 @@
+{
+  "benign": {
+    "flagged": 21,
+    "total": 106,
+    "withheld": 0
+  },
+  "deployment": "6 allowed hosts, 8 tools in the catalogue",
+  "detectors": [
+    "deterministic patterns"
+  ],
+  "families": {
+    "boundary_escape": {
+      "detected": 1,
+      "total": 4,
+      "withheld": 0
+    },
+    "delayed_multi_step": {
+      "detected": 0,
+      "total": 4,
+      "withheld": 0
+    },
+    "direct_override": {
+      "detected": 5,
+      "total": 6,
+      "withheld": 0
+    },
+    "exfiltration": {
+      "detected": 5,
+      "total": 5,
+      "withheld": 0
+    },
+    "obfuscation": {
+      "detected": 6,
+      "total": 7,
+      "withheld": 4
+    },
+    "plain_assertion": {
+      "detected": 0,
+      "total": 6,
+      "withheld": 0
+    },
+    "tool_confusion": {
+      "detected": 3,
+      "total": 4,
+      "withheld": 0
+    }
+  },
+  "reported": {
+    "direct_override": {
+      "attack_hits": 8,
+      "benign_hits": 7
+    },
+    "exfiltration": {
+      "attack_hits": 5,
+      "benign_hits": 7
+    },
+    "obfuscation": {
+      "attack_hits": 6,
+      "benign_hits": 3
+    },
+    "tool_confusion": {
+      "attack_hits": 3,
+      "benign_hits": 5
+    }
+  },
+  "version": 1
+}

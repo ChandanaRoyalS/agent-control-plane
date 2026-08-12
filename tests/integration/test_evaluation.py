@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pytest
 
+from acp.corpus.baseline import compare, default_baseline_path, load_baseline
 from acp.corpus.harness import DEFAULT_DEPLOYMENT, Report, evaluate_firewall
 from acp.corpus.heldout import load_split
 from acp.corpus.loader import load_benign
@@ -175,3 +176,45 @@ def test_every_attack_still_does_what_the_corpus_records(report: Report) -> None
     acknowledge in the corpus and the ADR.
     """
     assert report.matched, f"expectation mismatches: {report.all_mismatches}"
+
+
+# ---------------------------------------------------------------------------
+# The committed baseline (task 53)
+# ---------------------------------------------------------------------------
+
+
+def test_the_committed_baseline_still_describes_this_firewall(report: Report) -> None:
+    """`make check` catches a stale baseline before CI does.
+
+    The same comparison `--check` runs, asserted here so the feedback arrives on
+    the machine where the change was made rather than four minutes later in a
+    pull request. An *improvement* passes — a gate that failed on any change is
+    one people disable the first time they improve something — so this goes red
+    only when something got worse, or when the corpus or deployment moved and the
+    two runs stopped being comparable.
+    """
+    comparison = compare(load_baseline(default_baseline_path()), report)
+
+    assert not comparison.structural, (
+        "the corpus or the deployment changed, so the committed counts describe "
+        f"something else: {comparison.structural}. Re-capture with "
+        f"`python scripts/evaluate.py --capture` and commit the diff."
+    )
+    assert comparison.acceptable, (
+        f"the firewall got worse than corpus/eval-baseline.json: {comparison.regressions}. "
+        f"If that is intended, `--capture` and commit the diff — that is how "
+        f"accepting it stays visible."
+    )
+
+
+def test_the_baseline_records_the_run_it_was_captured_from(report: Report) -> None:
+    """It carries the deployment and the detector list, not just the counts.
+
+    Without those, a baseline captured with the classifier on would be compared
+    against a run without it and the difference would read as a pile of
+    regressions — blaming the patterns for work the model had been doing.
+    """
+    baseline = load_baseline(default_baseline_path())
+
+    assert baseline.deployment == report.deployment
+    assert baseline.detectors == report.detectors

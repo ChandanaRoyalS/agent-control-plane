@@ -466,6 +466,39 @@ Recall and precision are indexed by different things on purpose — what an atta
 *is* versus what the firewall *said* — so they are two tables rather than two
 columns. See [ADR 0046](docs/decisions/0046-the-harness-that-reports-false-positives-first.md).
 
+### Keeping it from quietly getting worse
+
+```bash
+make eval-check      # fails if any measured count got worse
+make eval && python scripts/evaluate.py --capture   # accept the new numbers
+```
+
+Those counts are committed to [`corpus/eval-baseline.json`](corpus/eval-baseline.json)
+and checked on every pull request — **a baseline, not a threshold.** A threshold
+is a number somebody picked once, and it can be raised by whoever the build is
+annoying that week: "under 25%" survives until a change makes it 26%, and the
+cheapest fix is to edit the 25. That reads as a one-character diff, not as *"we
+accepted more false positives"*.
+
+A baseline makes accepting a regression stay possible and stop being invisible —
+`--capture` and commit, and the diff is the record, with a name on it. Counts
+rather than rates, because a rate hides its denominator: 19.8% and 20.7% look
+like drift and are one document out of 106.
+
+Three outcomes, and the third is the one a simpler gate gets wrong:
+
+| | | |
+|---|---|---|
+| something got worse | exit 1 | find what broke |
+| something improved | exit 0 | the baseline now understates the firewall |
+| the corpus or deployment moved | exit 2 | **the two runs are not comparable** — re-capture |
+
+Reporting that last case as a regression sends somebody hunting a bug in the
+firewall that is really a document they wrote. The gate also runs the
+deterministic detectors only: gating on a model's output makes a build that goes
+green on re-run, which teaches people to re-run. See
+[ADR 0047](docs/decisions/0047-a-baseline-not-a-threshold.md).
+
 ## Development
 
 ```bash
@@ -498,7 +531,7 @@ naming.
 | 2 · Identity | **complete** | Delegated auth, scoped per-upstream token exchange, proven no-passthrough |
 | 3 · Policy | **complete** | Deny-by-default engine, argument-level rules, catalogue filtering, simulator |
 | 4 · Budgets | **complete** | Quotas, rate limits, cost accounting, per-principal result caching |
-| 5 · Firewall | in progress | Detectors, framing, refusal, both corpora, a sealed held-out split, an optional classifier, and per-family precision/recall with intervals; CI regression gate next |
+| 5 · Firewall | **complete** | Detectors, framing, refusal, both corpora, a sealed held-out split, an optional classifier, per-family precision/recall with intervals, and a committed-baseline regression gate in CI |
 | 6 · Approvals | planned | Human-in-the-loop via multi-round-trip requests |
 | 7 · Audit | planned | Tamper-evident log, multi-tenancy, threat model |
 | 8 · Performance | planned | Load testing, profiling, published latency |

@@ -357,6 +357,56 @@ a deployment this project cannot test here, and a half-working adapter for it
 would look like support. The seam is in the right place; the swap is one class.
 See [ADR 0021](docs/decisions/0021-one-backend-behind-a-seam.md).
 
+### Editing a policy without guessing
+
+A policy is only useful if people edit it, and people only edit what they can
+predict. Without an answer to *what does this break*, the rational move is to
+never tighten anything — which is how a deny-by-default system acquires an
+`allow-everything` rule at the top.
+
+Every authorization decision the gateway makes is recorded. `simulate` replays
+those decisions against a proposed policy and reports the difference:
+
+```bash
+acp policy explain  --policy policy.yaml --subject alice --tool mock-a__search
+acp policy simulate --policy proposed.yaml --log decisions.jsonl
+```
+
+```
+Replayed 4,182 recorded decisions against proposed.yaml
+
+   2,376  unchanged
+!  1,381  newly denied
+       0  newly allowed
+       0  same verdict, different rule
+!    425  depends on argument values
+
+1,806 call(s) not proven unchanged:
+
+  [newly denied] alice -> mock-b__delete_record
+      was: allow by allow-team
+      now: deny by no-deletes
+
+  [depends on argument values] bob -> mock-a__read_document (doc_id)
+      was: allow by allow-team
+      now: deny by no-secret-docs or allow by allow-team
+```
+
+Five outcomes rather than two, because "12 decisions changed" makes a reviewer
+read all twelve to find out which are an outage and which are a security
+change — and because a rule that now *shadows* the one that used to decide a
+call agrees with it today and stops agreeing on the next edit.
+
+The last line is the honest one. The decision log records argument *names* and
+never argument *values*, so a rule constraining an argument may or may not have
+fired on a recorded call, and no analysis can settle it. Those calls are
+reported as undecidable rather than guessed in either direction, and they count
+as failures — the command exits non-zero, so it can gate a policy pull request,
+and "I could not tell" is not the same as "fine". The names are what keep that
+number small: a rule constraining `doc_id` cannot have fired on a call that sent
+no `doc_id`, which is a definite answer bought with a field that records nothing
+sensitive. See [ADR 0045](docs/decisions/0045-replay-the-log-and-report-what-changes.md).
+
 ## Development
 
 ```bash

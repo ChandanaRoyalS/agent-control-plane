@@ -226,7 +226,7 @@ def test_a_call_with_no_agent_records_a_null_actor(caplog: pytest.LogCaptureFixt
 def test_allow_and_deny_records_have_the_same_shape(caplog: pytest.LogCaptureFixture) -> None:
     """One helper writes both, so they cannot drift into carrying different
     fields — which is how an audit record acquires a column on one path only."""
-    expected = {"subject", "actor", "tool", "rule", "decision", "reason"}
+    expected = {"subject", "actor", "tool", "rule", "decision", "reason", "argument_names"}
 
     with caplog.at_level(logging.INFO, logger="acp.policy.enforce"):
         enforce_call(ALLOW_SEARCH, _principal(), "mock-a__search")

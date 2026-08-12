@@ -45,6 +45,7 @@ from acp.identity import (
 from acp.identity.principal import Principal, current_principal
 from acp.observability import RequestContextMiddleware, metrics
 from acp.policy import Policy, enforce_call, visible_tools
+from acp.policy.predispatch import PreDispatchAuthorizationMiddleware
 from acp.results import CacheableTools, ResultCache, ResultKey, key_for
 from acp.upstream.models import CallToolResult
 
@@ -406,10 +407,21 @@ def build_app(
     #
     # Order matters, and Starlette's is the reverse of the reading order:
     # `add_middleware` inserts at the front, so the *last* one added runs
-    # outermost. Authentication is added first and therefore runs *inside* the
-    # request-context middleware — which is what makes a rejected request still
-    # carry a request ID in its log line. A 401 nobody can correlate is a 401
-    # nobody can investigate.
+    # outermost and the *first* one added runs innermost. Read the three calls
+    # below bottom-up and you have the order a request actually meets them:
+    # request context, then authentication, then pre-dispatch authorization.
+    #
+    # Authentication runs *inside* the request-context middleware, which is what
+    # makes a rejected request still carry a request ID in its log line. A 401
+    # nobody can correlate is a 401 nobody can investigate.
+    #
+    # Pre-dispatch authorization runs innermost of the three, inside
+    # authentication, which is what lets it read a principal that has already
+    # been resolved. It refuses a call the policy could never permit before the
+    # body is parsed (ADR 0043), and it can only ever subtract: anything it does
+    # not refuse still reaches `enforce_call`, which reads the body and remains
+    # authoritative.
+    app.add_middleware(PreDispatchAuthorizationMiddleware, policy=policy)
     app.add_middleware(AuthenticationMiddleware, validator=validator, resource=resource)
     app.add_middleware(RequestContextMiddleware)
     return app

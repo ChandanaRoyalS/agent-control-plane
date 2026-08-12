@@ -66,6 +66,27 @@ jobs:
       - name: Prove the refusal can fail
         run: uv run python scripts/mutate_refusal.py
 
+      # The fourth harness, and it has been passing only on demand since task 35.
+      # A harness that runs when somebody remembers is a harness that stops
+      # running. This one hunts for a call the pre-dispatch fast path refuses and
+      # the policy would have allowed — a false denial of legitimate traffic,
+      # produced by an optimisation that was supposed to be invisible.
+      - name: Prove the pre-dispatch check refuses nothing legitimate
+        run: uv run python scripts/prove_predispatch.py
+
+      # Task 53's gate. Diffs the measured counts against the committed
+      # baseline and fails when any of them got worse — detection down, false
+      # positives up, a benign document newly withheld. Exit 2 means the corpus
+      # or the deployment moved and the two runs are not comparable, which needs
+      # a deliberate `--capture` rather than a fix.
+      #
+      # Deterministic detectors only, deliberately: gating on a model's output
+      # would make the build flaky in a way nobody could tell from a real
+      # regression, and a red build that goes green on re-run teaches people to
+      # re-run. See ADR 0047.
+      - name: Fail if the firewall got worse
+        run: uv run python scripts/evaluate.py --check
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

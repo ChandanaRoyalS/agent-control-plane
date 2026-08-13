@@ -108,6 +108,16 @@ services:
       # none, because the record then asserts by omission that nothing happened
       # during the window somebody will eventually ask about.
       ACP_AUDIT_REQUIRED: "true"
+      # Switchable, so ADR 0050 §8's declared cost can be measured rather than
+      # asserted (task 60). `make load` runs with it on; `make load-nofsync`
+      # runs the identical mix with it off, and the difference is what
+      # durability costs on this machine's disk.
+      #
+      # Defaulted to true, so the honest setting is the one you get without
+      # asking for it. A record buffered in the kernel when the machine loses
+      # power describes a call that really happened, and that is precisely the
+      # crash-adjacent window an investigation cares about.
+      ACP_AUDIT_FSYNC: "${ACP_AUDIT_FSYNC:-true}"
       # -- budgets, caching and the firewall -------------------------------
       #
       # All four of these files were already mounted by `./config:/app/config:ro`

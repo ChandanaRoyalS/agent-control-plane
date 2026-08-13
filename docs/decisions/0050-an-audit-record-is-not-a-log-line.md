@@ -85,9 +85,7 @@ These are asserted as **passing tests**, not omitted. A chain that appeared to
 detect everything would be one whose claims nobody had checked.
 
 Both are answered by `acp audit checkpoint`: a `{seq, head}` anchor small enough
-to paste into a chat channel, committed to `config/` — which ADR 0014 mounts
-read-only, so the running gateway cannot rewrite the anchor that proves it has
-not rewritten its own log.
+to paste into a chat channel, kept somewhere the log's writer cannot reach.
 
 > **A chain plus an external anchor is tamper-evident. A chain alone is
 > tamper-evident to anybody who already knows where it should end.**
@@ -100,6 +98,32 @@ one.
 rewritten from any point, so "the head is what I expected" only means anything
 for an anchor taken at the very end. Anchoring on the entry means a checkpoint
 from last Tuesday still detects a rewrite that happened on Wednesday.
+
+#### 5a. An anchor belongs to a deployment, not to a repository
+
+This decision originally said to commit the checkpoint to `config/`, which
+ADR 0014 mounts read-only. That is the right *mechanism* — the gateway cannot
+rewrite the anchor that proves it has not rewritten its own log — attached to
+the wrong *scope*, and CI found the error the way these things are usually
+found: a red build nobody could explain.
+
+**A checkpoint names a position in one chain.** One chain is written by one
+process, from genesis, in one place. A repository is the source of many such
+places: a laptop, a CI runner that starts empty on every run, and eventually a
+server. An anchor committed from any one of them is not a weaker check in the
+others — it is a **guaranteed false break**, which is precisely the
+cries-wolf failure decision 1 rejects a logging handler for.
+
+So `config/audit-checkpoint.json` is **gitignored**, alongside `audit/` itself,
+and the CI job verifies with no anchor at all and prints the weaker claim it is
+actually making. That the verifier already distinguishes "verified against a
+committed checkpoint" from "verified against nothing" is what makes this
+honest rather than a downgrade — the build log says which one happened.
+
+Committing the anchor becomes right again the moment the repository and the
+deployment are one-to-one: one long-lived gateway, one chain, an anchor
+travelling by a route the gateway does not control. That is a deployment
+decision, and it is recorded here as one.
 
 ### 6. Fail-closed, configurably, and loud either way
 
@@ -152,6 +176,18 @@ before the change ambiguous rather than merely tenant-less, and an archived chai
 **cannot be migrated** — rewriting it is exactly what the chain exists to detect.
 So it is written now, mostly `null`.
 
+### 10. The chain CI checks is written by a container and read from outside it
+
+Every unit test in `tests/unit/audit` would still pass if the gateway never
+called the audit log, and every integration test drives an in-process app. The
+`image · compose · smoke` job is the only place the artifact is produced by a
+real container and then verified — so it installs `uv` and runs `acp audit
+verify` **on the runner**, against the host-mounted file.
+
+`docker compose exec gateway acp audit verify` would be cheaper and would hand
+the check back to the thing under test. A chain declared consistent by the same
+image that wrote it is a claim about that image.
+
 ## The honest cuts
 
 **Clean firewall screenings are not chained.** Only findings are.
@@ -174,6 +210,10 @@ same anchor problem the checkpoint already states honestly.
 **Rotation is unsolved.** A chain spanning rotated files needs the head carried
 across the boundary. Today the file grows. Naming it beats discovering it.
 
+**Nothing in this repository is anchored.** Decision 5a explains why that is
+correct here and not a gap to be closed by committing a file. It does mean the
+truncation defence is exercised by tests and by hand, and not by CI.
+
 ## Alternatives considered
 
 **A logging handler.** Rejected — decision 1.
@@ -185,6 +225,8 @@ inclusion proofs for a third party, which matters when somebody else must verify
 a single entry without the whole log. Nobody is asking yet, and a linear chain is
 auditable by hand.
 **Fail open.** Rejected as the default — decision 6 — and available as a setting.
+**A committed checkpoint.** Rejected for this repository — decision 5a — and
+correct for a single long-lived deployment.
 
 ## Consequences
 
@@ -199,12 +241,17 @@ auditable by hand.
 - The operator's free-text `reason` **is** recorded, unlike every other
   caller-supplied string: it is written by a trusted, authenticated human who
   knows it is being kept.
+- `audit/` and `config/audit-checkpoint.json` are both gitignored; the compose
+  job installs `uv` so it can run the verifier from outside the container.
 
 ## References
 
 - ADR 0007 — events, not sentences (the vocabulary this shares)
-- ADR 0013 — a committed baseline as a drift anchor (the pattern `checkpoint` reuses)
-- ADR 0014 — `config/` is mounted read-only (why the anchor lives there)
+- ADR 0013 — a committed baseline as a drift anchor (the pattern `checkpoint`
+  reuses, and the one case where committing *is* right: a schema snapshot
+  describes the repository, an audit anchor describes a deployment)
+- ADR 0014 — `config/` is mounted read-only (why the anchor belongs there in a
+  deployment that has one)
 - ADR 0038 — a refusal never quotes the payload (why findings carry families, not text)
 - ADR 0045 — argument names, never values, in the decision log
 - ADR 0049 — the approval record's opposite answer, and why the axis is exposure

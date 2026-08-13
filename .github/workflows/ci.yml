@@ -147,6 +147,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # `uv` is not on a GitHub runner by default. The `quality` job installs
+      # it and this one did not, so the audit-verification step below died with
+      # `uv: command not found` — a shell error dressed up as a failed
+      # verification, which is the most misleading way this step could break.
+      #
+      # Installed HERE, before the image builds, rather than immediately before
+      # the step that needs it: a dependency problem then fails in fifteen
+      # seconds instead of after two `docker build`s and a Keycloak boot.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install the verifier
+        # `--no-dev`: this job runs exactly one command. pytest, mypy and ruff
+        # belong to `quality` and installing them here would buy nothing but
+        # wall clock.
+        #
+        # The verifier runs on the RUNNER, not inside the gateway container.
+        # `docker compose exec gateway acp audit verify` would be cheaper and
+        # would hand the check back to the thing under test — a chain declared
+        # consistent by the same image that wrote it is a claim about that
+        # image. Checking from outside is the entire point of this step.
+        run: uv sync --no-dev
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 

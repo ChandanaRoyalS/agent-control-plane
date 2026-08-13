@@ -41,8 +41,12 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, Final
 
-FINGERPRINT_VERSION: Final = "acp-approval-v1"
-"""Stamped into every fingerprint, so what "the same call" means can change
+FINGERPRINT_VERSION: Final = "acp-approval-v2"
+"""Stamped into every fingerprint. v2 added the tenant (task 58): without it,
+an approval granted to acme's alice would bind to a byte-identical call from
+globex's alice — a human's yes crossing a boundary the human was never shown.
+The bump invalidates nothing at rest (approvals live minutes, in memory) and is
+kept for the discipline: what "the same call" means can change
 without an in-flight approval being reinterpreted under the new rule."""
 
 TOKEN_BYTES: Final = 32
@@ -123,6 +127,7 @@ def canonical(arguments: Mapping[str, Any]) -> str | None:
 
 def fingerprint(
     *,
+    tenant: str | None,
     subject: str,
     actor: str | None,
     tool: str,
@@ -149,7 +154,7 @@ def fingerprint(
         return None
 
     material = json.dumps(
-        [FINGERPRINT_VERSION, subject, actor, tool, encoded],
+        [FINGERPRINT_VERSION, tenant, subject, actor, tool, encoded],
         separators=(",", ":"),
         ensure_ascii=False,
     )
@@ -204,6 +209,12 @@ class ApprovalRequest:
     """
 
     arguments_bytes: int = 0
+
+    tenant: str | None = None
+    """Shown to the operator (task 58). "alice wants to delete the dataset" and
+    "acme's alice wants to delete the dataset" are different sentences, and the
+    person deciding is entitled to the one that is true. Defaulted so the
+    single-tenant gateway constructs records exactly as before."""
     """Size of the canonical form, recorded even when it is withheld — so a
     withheld call reports *how* large rather than merely that it was too big."""
 
@@ -219,6 +230,7 @@ class ApprovalRequest:
 
 def request_for(
     *,
+    tenant: str | None,
     subject: str,
     actor: str | None,
     tool: str,
@@ -236,7 +248,9 @@ def request_for(
     encoded = canonical(arguments)
     if encoded is None:
         return None
-    digest = fingerprint(subject=subject, actor=actor, tool=tool, arguments=arguments)
+    digest = fingerprint(
+        tenant=tenant, subject=subject, actor=actor, tool=tool, arguments=arguments
+    )
     if digest is None:  # pragma: no cover — `canonical` already proved it encodes
         return None
     size = len(encoded.encode("utf-8"))
@@ -244,6 +258,7 @@ def request_for(
         token=new_token(),
         fingerprint=digest,
         subject=subject,
+        tenant=tenant,
         tool=tool,
         rule=rule,
         created_at=now,

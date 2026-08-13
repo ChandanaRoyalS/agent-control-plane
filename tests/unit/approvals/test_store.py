@@ -16,6 +16,7 @@ NOW = 1000.0
 
 def a_request(index: int = 0) -> ApprovalRequest:
     request = request_for(
+        tenant=None,
         subject=f"alice-{index}",
         actor=None,
         tool="crm__delete_record",

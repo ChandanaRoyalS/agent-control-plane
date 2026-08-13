@@ -74,6 +74,7 @@ class Resolution:
 def _binding_failure(
     held: ApprovalRequest,
     *,
+    tenant: str | None,
     subject: str,
     actor: str | None,
     tool: str,
@@ -93,9 +94,17 @@ def _binding_failure(
         # after it lapsed is still refused. "Late" is a decision the caller does
         # not get the benefit of.
         return "approval expired"
+    if held.tenant != tenant:
+        # Checked before the fingerprint, which would also catch it (the tenant
+        # is in the digest since v2), because this refusal must not depend on a
+        # hash comparison staying in the material list. Belt over braces, in
+        # the direction where slipping is an escalation.
+        return "approval belongs to another tenant"
     if held.subject != subject:
         return "approval belongs to another subject"
-    digest = fingerprint(subject=subject, actor=actor, tool=tool, arguments=arguments)
+    digest = fingerprint(
+        tenant=tenant, subject=subject, actor=actor, tool=tool, arguments=arguments
+    )
     if digest is None:
         return "call cannot be fingerprinted"
     if digest != held.fingerprint:
@@ -115,6 +124,7 @@ def resolve(
     store: ApprovalStore,
     token: str | None,
     *,
+    tenant: str | None,
     subject: str,
     actor: str | None,
     tool: str,
@@ -136,7 +146,7 @@ def resolve(
         return Resolution(Outcome.REFUSE, "unknown request_state")
 
     failure = _binding_failure(
-        held, subject=subject, actor=actor, tool=tool, arguments=arguments, now=now
+        held, tenant=tenant, subject=subject, actor=actor, tool=tool, arguments=arguments, now=now
     )
     if failure is not None:
         return Resolution(Outcome.REFUSE, failure, held)
@@ -185,6 +195,7 @@ def gate(
     store: ApprovalStore,
     *,
     token: str | None,
+    tenant: str | None,
     subject: str,
     actor: str | None,
     tool: str,
@@ -209,6 +220,7 @@ def gate(
         resolution = resolve(
             store,
             token,
+            tenant=tenant,
             subject=subject,
             actor=actor,
             tool=tool,
@@ -224,6 +236,7 @@ def gate(
         return Gate(resolution.outcome, resolution.reason)
 
     request = request_for(
+        tenant=tenant,
         subject=subject,
         actor=actor,
         tool=tool,

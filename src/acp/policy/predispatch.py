@@ -49,6 +49,7 @@ from acp.exceptions import ACPError
 from acp.identity.principal import Principal, current_principal
 from acp.policy.evaluate import matches_without_arguments
 from acp.policy.schema import Effect, Policy
+from acp.policy.tenancy import PolicySet
 from acp.upstream.envelope import NAME_BEARING_METHODS, decode_header_value
 
 logger = logging.getLogger(__name__)
@@ -134,10 +135,19 @@ class PreDispatchAuthorizationMiddleware:
     """
 
     def __init__(
-        self, app: Any, policy: Policy | None = None, audit: AuditLog | None = None
+        self,
+        app: Any,
+        policy: Policy | PolicySet | None = None,
+        audit: AuditLog | None = None,
     ) -> None:
         self._app = app
-        self._policy = policy
+        # A bare Policy wraps into a set whose default it is — the same
+        # normalisation `build_server` performs, done again here because this
+        # middleware is constructed independently and a rule enforced in one
+        # place and assumed in another is how the two drift (task 58).
+        self._policies = (
+            policy if isinstance(policy, PolicySet) or policy is None else PolicySet(policy)
+        )
         self._audit = audit
 
     def _record(self, *args: Any, **kwargs: Any) -> None:
@@ -155,7 +165,7 @@ class PreDispatchAuthorizationMiddleware:
             self._audit.record(*args, **kwargs)
 
     async def __call__(self, scope: Scope, receive: Any, send: Any) -> None:
-        if scope["type"] != "http" or self._policy is None:
+        if scope["type"] != "http" or self._policies is None:
             await self._app(scope, receive, send)
             return
 
@@ -168,7 +178,9 @@ class PreDispatchAuthorizationMiddleware:
             return
 
         principal = current_principal()
-        if principal is not None and could_ever_allow(self._policy, principal, tool):
+        if principal is not None and could_ever_allow(
+            self._policies.policy_for(principal.tenant), principal, tool
+        ):
             await self._app(scope, receive, send)
             return
 
@@ -188,11 +200,17 @@ class PreDispatchAuthorizationMiddleware:
         # that never reached `enforce_call` — leaving it out would make the fast
         # path a hole in the audit trail rather than an optimisation of it.
         if self._audit is not None:
-            self._audit.record(
+            # Through `_record`, which suppresses a sink failure — the call is
+            # being refused either way, so fail-closed is satisfied, and a 500
+            # here would answer a policy refusal with a different word than the
+            # policy used. (This previously called the sink directly; the
+            # helper existed, argued exactly this, and had no caller.)
+            self._record(
                 AuditCategory.AUTHORIZATION,
                 REFUSED_EVENT,
                 subject=principal.subject if principal else None,
                 actor=principal.actor.subject if principal and principal.actor else None,
+                tenant=principal.tenant if principal else None,
                 tool=tool,
                 outcome=AuditOutcome.DENIED,
                 reason="no policy rule could permit this call, whatever its arguments",

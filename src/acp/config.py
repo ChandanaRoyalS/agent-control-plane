@@ -207,6 +207,17 @@ class GatewaySettings(BaseSettings):
 
     policy_file: Path = Path("config/policy.yaml")
 
+    tenant_policy_dir: Path | None = None
+    """Where per-tenant policy files live: ``<dir>/<tenant>.yaml`` (task 58).
+
+    Required the moment any issuer registration declares a ``tenant`` label,
+    and every declared tenant must have a file — a missing one is a startup
+    failure naming the tenant, never a silent deny-all, because a tenant whose
+    every call answers "forbidden" with no explanation is an outage dressed as
+    a policy. Unset on a gateway with no tenant labels: the single-tenant
+    deployment does not know this setting exists.
+    """
+
     rate_limit_enabled: bool = False
     """Whether per-principal rate limiting is enforced. Off by default, opt-in
     like policy: a gateway with no budget configured behaves exactly as before."""

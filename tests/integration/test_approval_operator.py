@@ -59,6 +59,7 @@ def held_store(*, arguments: dict[str, Any] | None = None) -> InMemoryApprovalSt
     """A store with exactly one pending request in it."""
     store = InMemoryApprovalStore()
     request = request_for(
+        tenant=None,
         subject=ALICE,
         actor=None,
         tool=TOOL,

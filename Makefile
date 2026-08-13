@@ -33,8 +33,12 @@ cov:  ## Open the HTML coverage report
 image:  ## Build the container images
 	docker compose build
 
-up:  ## Bring up the whole stack and wait until it is ready
-	docker compose up -d --wait gateway
+up:  ## Build, bring up the whole stack, and wait until it is ready
+	@# --build is not optional. Compose builds only when the image is absent, so
+	@# without it `make up` serves whatever was last built — which is how a stack
+	@# ends up running the code from before the merge you are trying to
+	@# demonstrate. Warm cache makes it a few seconds.
+	docker compose up -d --build --wait gateway
 	@echo "gateway :8080  admin :9090  jaeger :16686  keycloak :8081 (admin/admin)"
 	@echo "the gateway now authenticates — 'make token' for one, 'make identity-smoke' to prove it"
 
@@ -77,8 +81,8 @@ probe-resource:  ## Measure what Keycloak does with RFC 8707's `resource`
 probe-cimd:  ## Measure whether Keycloak accepts a URL client_id (CIMD)
 	uv run python scripts/probe_cimd.py
 
-token:  ## Print an access token for alice (USER=bob for the other one)
-	@uv run python scripts/keycloak_token.py $(or $(USER),alice)
+token:  ## Print an access token for alice (ACP_USER=bob for the other one)
+	@uv run python scripts/keycloak_token.py $(or $(ACP_USER),alice)
 
 # Keycloak skips the import when the realm already exists, which is the right
 # default and the reason editing config/keycloak/acp-realm.json appears to do

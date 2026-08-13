@@ -168,7 +168,7 @@ paragraph describing which buttons to press.
 
 ```bash
 make up                 # gateway, mocks, Jaeger, Keycloak
-make token              # an access token for alice (USER=bob for the other one)
+make token              # an access token for alice (ACP_USER=bob for the other one)
 make identity-smoke     # sixteen assertions against the real server
 ```
 
@@ -595,7 +595,7 @@ make check      # lint, format check, types, tests — the same checks CI runs
 make fmt        # apply formatting and autofixes
 make test       # tests with coverage
 
-make up         # gateway, mocks and Jaeger, waited until healthy
+make up         # build, bring up gateway/mocks/Jaeger, wait until healthy
 make smoke      # assert the composed stack works end to end
 make logs       # follow the gateway
 make down       # tear it all down

@@ -180,7 +180,7 @@ AUTHORIZATION_EVENT = "policy.decision"
 TOOL_CALL_EVENT = "tool.called"
 
 
-def _chain(audit: AuditLog, *args: Any, **fields: Any) -> None:
+async def _chain(audit: AuditLog, *args: Any, **fields: Any) -> None:
     """Write one record, turning a fail-closed refusal into the caller's error.
 
     Without this, `AuditUnavailableError` escapes `on_call_tool` unconverted and
@@ -191,7 +191,11 @@ def _chain(audit: AuditLog, *args: Any, **fields: Any) -> None:
     it is worth nothing if the error never reaches the wire in one piece.
     """
     try:
-        audit.record(*args, **fields)
+        # `arecord`, not `record`: the write is a synchronous `fsync`, and
+        # running it here would park the event loop for every other request in
+        # the process (task 61, ADR 0053). Awaited, so this request still may
+        # not proceed until its entry is durable.
+        await audit.arecord(*args, **fields)
     except ACPError as exc:
         raise to_mcp_error(exc) from exc
 
@@ -200,7 +204,7 @@ def _actor_of(principal: Principal | None) -> str | None:
     return principal.actor.subject if principal is not None and principal.actor else None
 
 
-def _audit_decision(
+async def _audit_decision(
     audit: AuditLog | None,
     principal: Principal,
     params: types.CallToolRequestParams,
@@ -226,7 +230,7 @@ def _audit_decision(
     outcome = (
         AuditOutcome.HELD if held else (AuditOutcome.ALLOWED if allowed else AuditOutcome.DENIED)
     )
-    _chain(
+    await _chain(
         audit,
         AuditCategory.AUTHORIZATION,
         AUTHORIZATION_EVENT,
@@ -240,7 +244,7 @@ def _audit_decision(
     )
 
 
-def _audit_screening(
+async def _audit_screening(
     audit: AuditLog | None,
     principal: Principal | None,
     tool: str,
@@ -262,7 +266,7 @@ def _audit_screening(
     findings = inspection.screening.findings
     if audit is None or not findings:
         return
-    _chain(
+    await _chain(
         audit,
         AuditCategory.FIREWALL,
         FIREWALL_EVENT,
@@ -285,7 +289,7 @@ def _audit_screening(
     )
 
 
-def _audit_call(
+async def _audit_call(
     audit: AuditLog | None,
     principal: Principal | None,
     tool: str,
@@ -296,7 +300,7 @@ def _audit_call(
     """Chain the fact that a call did or did not reach an upstream."""
     if audit is None:
         return
-    _chain(
+    await _chain(
         audit,
         AuditCategory.TOOL_CALL,
         TOOL_CALL_EVENT,
@@ -485,10 +489,10 @@ def build_server(
                 # chain even though the caller never gets a result. An audit log
                 # that only contains the calls which succeeded answers the wrong
                 # question — the interesting row is always the one that stopped.
-                _audit_decision(audit, principal, params, allowed=False, rule=None)
+                await _audit_decision(audit, principal, params, allowed=False, rule=None)
                 raise to_mcp_error(exc) from exc
 
-            _audit_decision(
+            await _audit_decision(
                 audit,
                 principal,
                 params,
@@ -549,7 +553,7 @@ def build_server(
         try:
             result = await registry.call_tool(params.name, arguments)
         except ACPError as exc:
-            _audit_call(
+            await _audit_call(
                 audit, principal, params.name, AuditOutcome.FAILED, reason=type(exc).__name__
             )
             raise to_mcp_error(exc) from exc
@@ -558,7 +562,7 @@ def build_server(
         # authorization record above on purpose: "alice was allowed to search"
         # and "the search ran" are different facts, and a cache hit or a held
         # approval makes the first true while the second never happens.
-        _audit_call(audit, principal, params.name, AuditOutcome.COMPLETED)
+        await _audit_call(audit, principal, params.name, AuditOutcome.COMPLETED)
 
         # Screened on the miss path only. A cache hit was screened before it was
         # stored, so what is held is by construction what the firewall allowed —
@@ -566,7 +570,7 @@ def build_server(
         # The honest cost, and its two bounds, are in ADR 0038.
         if firewall is not None:
             inspection = firewall.inspect(result, tool=params.name, tools=registry.known_tools)
-            _audit_screening(audit, principal, params.name, inspection)
+            await _audit_screening(audit, principal, params.name, inspection)
             if inspection.refused:
                 # Returned unframed, and that is deliberate: the fence marks
                 # text the gateway did *not* write, so fencing the gateway's own

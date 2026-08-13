@@ -150,7 +150,7 @@ class PreDispatchAuthorizationMiddleware:
         )
         self._audit = audit
 
-    def _record(self, *args: Any, **kwargs: Any) -> None:
+    async def _record(self, *args: Any, **kwargs: Any) -> None:
         """Chain a refusal, swallowing a sink failure.
 
         A failure here does not change the outcome: the call is being refused
@@ -162,7 +162,10 @@ class PreDispatchAuthorizationMiddleware:
         if self._audit is None:  # pragma: no cover — guarded by the caller
             return
         with contextlib.suppress(ACPError):
-            self._audit.record(*args, **kwargs)
+            # On a thread (task 61). A refusal here is the fastest path through
+            # the gateway — it never parses a body — and parking the event loop
+            # to record it would make the cheap path the expensive one.
+            await self._audit.arecord(*args, **kwargs)
 
     async def __call__(self, scope: Scope, receive: Any, send: Any) -> None:
         if scope["type"] != "http" or self._policies is None:
@@ -205,7 +208,7 @@ class PreDispatchAuthorizationMiddleware:
             # here would answer a policy refusal with a different word than the
             # policy used. (This previously called the sink directly; the
             # helper existed, argued exactly this, and had no caller.)
-            self._record(
+            await self._record(
                 AuditCategory.AUTHORIZATION,
                 REFUSED_EVENT,
                 subject=principal.subject if principal else None,

@@ -48,6 +48,12 @@ down:  ## Tear the stack down, volumes included
 logs:  ## Follow the gateway's logs
 	docker compose logs -f gateway
 
+audit-verify:  ## Walk the composed stack's chain, checked against the anchor
+	uv run acp audit verify --log-file audit/audit.jsonl
+
+audit-checkpoint:  ## Anchor the chain at its current head, then COMMIT the result
+	uv run acp audit checkpoint --log-file audit/audit.jsonl
+
 smoke:  ## Assert the composed stack actually works
 	uv run python scripts/compose_smoke.py
 

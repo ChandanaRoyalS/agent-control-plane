@@ -251,6 +251,11 @@ def test_a_call_that_cannot_be_recorded_is_refused(keypair: Keypair, tmp_path: P
     class Broken:
         head = "0" * 64
         length = 0
+        blocking = True
+        """Required by the protocol since task 61, and `True` on purpose: this
+        double exists to prove a failed write refuses the call, and that has to
+        hold on the *threaded* path — the exception must cross the thread
+        boundary to reach the caller."""
 
         def append(self, _record: Any) -> Any:
             raise OSError("no space left on device")

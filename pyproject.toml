@@ -28,6 +28,7 @@ dependencies = [
     "starlette>=0.45",
     "uvicorn>=0.34",
     "pyjwt[crypto]>=2.10",
+    "anyio>=4.14.2",
 ]
 
 [project.scripts]

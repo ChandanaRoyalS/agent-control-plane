@@ -55,6 +55,24 @@ class AuditSink(Protocol):
     can be repaired by whoever broke it.
     """
 
+    @property
+    def blocking(self) -> bool:
+        """Whether `append` waits on hardware.
+
+        Task 61 moved the audit write to a worker thread so an `fsync` could
+        not park the event loop. Task 61's own measurement then showed the
+        thread hop is a **fixed cost** — two context switches and a limiter
+        acquisition — that is worth paying only when the write actually waits:
+        with `fsync` off, offloading cost 29% of throughput for nothing.
+
+        So the sink declares it, because the sink is the only thing that knows.
+        The rule is not "is this write slow" (unknowable) but the sharper
+        physical one: **does it wait on hardware?** `fsync` does. A `write()`
+        into a line-buffered file copies into the kernel's page cache and
+        returns, which is not something to leave the event loop for.
+        """
+        ...
+
     def append(self, record: AuditRecord) -> Entry:
         """Chain this record and durably record it. Raises if it cannot."""
 
@@ -88,6 +106,9 @@ class MemoryAuditSink:
     def __init__(self) -> None:
         self._chain = Chain()
         self.entries: list[Entry] = []
+
+    blocking = False
+    """Nothing to wait for: a list append. Offloading it would be pure cost."""
 
     def append(self, record: AuditRecord) -> Entry:
         entry = self._chain.append(record)
@@ -188,6 +209,17 @@ class FileAuditSink:
         self._path = path
         self._chain = Chain(head=head, seq=seq)
         self._fsync = fsync
+
+    @property
+    def blocking(self) -> bool:
+        """True exactly when this sink calls `fsync`.
+
+        Without it the write is `write()` plus `flush()` into the page cache —
+        microseconds, and not worth a thread. With it the call waits for the
+        disk, and every other request in the process waits with it unless the
+        writer moves off the loop.
+        """
+        return self._fsync
 
     def append(self, record: AuditRecord) -> Entry:
         """Chain and write, or raise.

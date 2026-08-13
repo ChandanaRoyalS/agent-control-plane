@@ -24,6 +24,7 @@ from typing import Any
 from starlette.applications import Starlette
 
 from acp.approvals import DEFAULT_TTL_SECONDS, ApprovalStore, InMemoryApprovalStore
+from acp.audit import AuditLog, FileAuditSink
 from acp.budget import CostTable, QuotaCounter, RateLimiter, load_costs
 from acp.config import GatewaySettings, allowed_hosts_for, load_issuers, load_upstreams
 from acp.exceptions import ConfigurationError
@@ -106,6 +107,7 @@ async def gateway_from_configs(
     firewall: Firewall | None = None,
     approvals: ApprovalStore | None = None,
     approval_ttl: float = DEFAULT_TTL_SECONDS,
+    audit: AuditLog | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -177,6 +179,7 @@ async def gateway_from_configs(
             firewall=firewall,
             approvals=approvals,
             approval_ttl=approval_ttl,
+            audit=audit,
         )
         # Attached rather than yielded, so the signature every existing caller
         # and test depends on is unchanged. The probe loop itself is started by
@@ -190,6 +193,7 @@ async def gateway_from_configs(
         # listener. Attached rather than returned for the same reason the other
         # two are: the signature every existing caller depends on is unchanged.
         app.state.approvals = approvals
+        app.state.audit = audit
         yield app
     finally:
         # Reverse order, and every close attempted even if one raises — a
@@ -202,6 +206,65 @@ async def gateway_from_configs(
                     "gateway.upstream_close_failed", extra={"upstream": client.config.name}
                 )
         logger.info("gateway.stopped", extra={"upstream_count": len(clients)})
+
+
+def build_audit_log(settings: GatewaySettings) -> AuditLog | None:
+    """Open the audit chain, or return ``None`` when none is configured.
+
+    Presence-based on the path, like the secret store: a boolean would let a
+    deployment believe it had an audit log because a flag said `true` while the
+    path it needed was never set. There is deliberately no default path — an
+    evidentiary artifact appearing in somebody's working directory the first time
+    they run the gateway is one that gets gitignored, then forgotten.
+
+    **The two states are both logged, and differently.** Running without a chain
+    is a legitimate choice; running with one that is not required is a *third*
+    state, and the one worth naming loudly, because it means the gateway will
+    keep serving calls it cannot record. `ACP_AUDIT_REQUIRED=false` gets the same
+    treatment `ACP_AUTH_REQUIRED=false` gets: a warning that says what the
+    deployment has traded away, every single start.
+
+    A failure to open is fatal. Every other configuration failure in this module
+    is (a gateway that starts with a broken policy has already failed open), and
+    an unopenable audit sink is the same class: the alternative is a process that
+    serves without the record it was configured to keep.
+    """
+    if settings.audit_file is None:
+        logger.info(
+            "audit.disabled",
+            extra={
+                "reason": "ACP_AUDIT_FILE is not set",
+                "consequence": "no tamper-evident record of authorization decisions is kept",
+            },
+        )
+        return None
+
+    sink = FileAuditSink(settings.audit_file, fsync=settings.audit_fsync)
+
+    if not settings.audit_required:
+        logger.warning(
+            "audit.not_required",
+            extra={
+                "reason": "ACP_AUDIT_REQUIRED is false",
+                "consequence": (
+                    "a call this gateway cannot record will proceed anyway, so the "
+                    "chain may contain gaps that nothing in it can reveal — watch "
+                    'acp_audit_writes_total{outcome="failed"}'
+                ),
+            },
+        )
+
+    logger.info(
+        "audit.enabled",
+        extra={
+            "path": str(settings.audit_file),
+            "entries": sink.length,
+            "head": sink.head[:16],
+            "required": settings.audit_required,
+            "fsync": settings.audit_fsync,
+        },
+    )
+    return AuditLog(sink, required=settings.audit_required)
 
 
 def build_approval_store(settings: GatewaySettings, policy: Policy | None) -> ApprovalStore | None:
@@ -492,6 +555,7 @@ def build_token_exchanger(
     settings: GatewaySettings,
     validator: TokenValidator | None,
     upstreams: Sequence[UpstreamConfig] = (),
+    audit: AuditLog | None = None,
 ) -> TokenExchanger | None:
     """Assemble RFC 8693 token exchange, or ``None`` when it is not configured.
 
@@ -529,6 +593,9 @@ def build_token_exchanger(
         # which was correct while the key had not been argued over; ADR 0022 is
         # that argument.
         cache=CredentialCache(max_entries=settings.auth_credential_cache_max_entries),
+        # So a minted credential appears in the chain beside the call that
+        # needed it. Four categories, four emit points, one artifact.
+        audit=audit,
     )
 
 
@@ -701,8 +768,10 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     )
     firewall = build_firewall(settings)
     approvals = build_approval_store(settings, policy)
+    # Before the exchanger, which is handed it.
+    audit = build_audit_log(settings)
     validator = await build_token_validator(settings)
-    exchanger = build_token_exchanger(settings, validator, upstreams)
+    exchanger = build_token_exchanger(settings, validator, upstreams, audit)
     check_upstream_audiences(upstreams, exchanging=exchanger is not None)
 
     store = build_secret_store(settings)
@@ -732,6 +801,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             firewall=firewall,
             approvals=approvals,
             approval_ttl=settings.approval_ttl_seconds,
+            audit=audit,
         ) as app:
             yield app
     finally:
@@ -742,3 +812,6 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             await exchanger.aclose()
         if validator is not None:
             await validator.issuers.aclose()
+        if audit is not None:
+            # Last, so anything the teardown above wanted to record still can.
+            audit.close()

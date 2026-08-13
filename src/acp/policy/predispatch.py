@@ -36,11 +36,16 @@ See ADR 0043.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from collections.abc import MutableMapping, Sequence
 from typing import Any, Final
 
+from acp.audit import AuditLog
+from acp.audit import Category as AuditCategory
+from acp.audit import Outcome as AuditOutcome
+from acp.exceptions import ACPError
 from acp.identity.principal import Principal, current_principal
 from acp.policy.evaluate import matches_without_arguments
 from acp.policy.schema import Effect, Policy
@@ -128,9 +133,26 @@ class PreDispatchAuthorizationMiddleware:
     ``add_middleware`` inserts at the front, so first added is innermost.
     """
 
-    def __init__(self, app: Any, policy: Policy | None = None) -> None:
+    def __init__(
+        self, app: Any, policy: Policy | None = None, audit: AuditLog | None = None
+    ) -> None:
         self._app = app
         self._policy = policy
+        self._audit = audit
+
+    def _record(self, *args: Any, **kwargs: Any) -> None:
+        """Chain a refusal, swallowing a sink failure.
+
+        A failure here does not change the outcome: the call is being refused
+        either way, so fail-closed is already satisfied — nothing happens that
+        is not recorded, because nothing happens. What must not happen is a 500,
+        which would answer a policy refusal with a different word than the policy
+        used. The writer has already logged at ERROR and moved the metric.
+        """
+        if self._audit is None:  # pragma: no cover — guarded by the caller
+            return
+        with contextlib.suppress(ACPError):
+            self._audit.record(*args, **kwargs)
 
     async def __call__(self, scope: Scope, receive: Any, send: Any) -> None:
         if scope["type"] != "http" or self._policy is None:
@@ -161,6 +183,20 @@ class PreDispatchAuthorizationMiddleware:
                 "reason": "no principal" if principal is None else "no rule could allow",
             },
         )
+        # Chained before the 403 is written. A refusal made at the header is
+        # still an authorization decision, and it is the *only* record of a call
+        # that never reached `enforce_call` — leaving it out would make the fast
+        # path a hole in the audit trail rather than an optimisation of it.
+        if self._audit is not None:
+            self._audit.record(
+                AuditCategory.AUTHORIZATION,
+                REFUSED_EVENT,
+                subject=principal.subject if principal else None,
+                actor=principal.actor.subject if principal and principal.actor else None,
+                tool=tool,
+                outcome=AuditOutcome.DENIED,
+                reason="no policy rule could permit this call, whatever its arguments",
+            )
         await _refuse(send)
 
 

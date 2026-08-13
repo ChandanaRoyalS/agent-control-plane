@@ -96,6 +96,47 @@ class GatewaySettings(BaseSettings):
 
     admin_enabled: bool = True
 
+    audit_file: Path | None = None
+    """Where the tamper-evident audit chain is written (task 56).
+
+    Unset means **no chain is written at all**. Presence-based like the secret
+    store and token exchange, and for the same reason: a boolean would let a
+    deployment believe it had an audit log because a flag said `true`, while the
+    path it needed was never configured.
+
+    Deliberately *not* defaulted to a path. An audit log that appears in a
+    developer's working directory the first time they run the gateway is one that
+    gets `.gitignore`d, then forgotten, then discovered half-committed. Writing
+    an evidentiary artifact should be a thing somebody chose.
+    """
+
+    audit_required: bool = True
+    """Refuse a call this gateway cannot record.
+
+    On by default, and the escape hatch is loud. An audit log that stops
+    recording while the gateway keeps serving is worse than none, because the
+    record then *asserts by omission* that nothing happened during the window
+    somebody will eventually ask about.
+
+    `false` is a real mode — a deployment that would rather serve than record,
+    which is a legitimate choice for a gateway in front of nothing sensitive —
+    and it is logged at startup every time, the same treatment
+    `ACP_AUTH_REQUIRED=false` gets.
+
+    Inert when `audit_file` is unset: there is no chain to fail to write to, and
+    refusing every call because an unconfigured feature is unavailable would be
+    absurd. Startup says which of the two situations a deployment is in.
+    """
+
+    audit_fsync: bool = True
+    """`fsync` each entry before the call proceeds.
+
+    A record buffered in the kernel when the machine loses power describes a call
+    that really happened, and that is exactly the crash-adjacent window an
+    investigation cares about. The cost is real — it bounds write throughput to
+    the disk's sync rate — and Phase 8 measures it rather than guessing.
+    """
+
     approval_operator_token: str = ""
     """Credential for the approval channel on the admin listener (task 55).
 

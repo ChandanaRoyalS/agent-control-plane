@@ -108,6 +108,7 @@ class _Collectors:
     bulkhead_capacity: Any
     credential_cache: Any
     result_cache: Any
+    audit_writes: Any
     firewall_decisions: Any
     firewall_findings: Any
     schema_drift: Any
@@ -208,6 +209,22 @@ def _build() -> _Collectors | None:
             # audience is bounded but omitted too: hit rate per upstream is a
             # tuning question, and this counter exists to answer a correctness
             # one, which is whether the thing caches at all.
+            ["outcome"],
+            namespace=NAMESPACE,
+            registry=registry,
+        ),
+        audit_writes=Counter(
+            "audit_writes_total",
+            "Audit chain entries, by whether they reached the sink.",
+            # Two series: written, failed. The denominator is here for the same
+            # reason the firewall's is — a failure count with no traffic beside
+            # it cannot be turned into "how much of the record is missing", and
+            # that is the only question anybody asks of this counter.
+            #
+            # This is also the ONLY signal for a failure the audit log itself
+            # cannot record. A scrape that shows `failed` climbing is how an
+            # operator learns the chain has holes, because the place that would
+            # normally say so is the thing that broke.
             ["outcome"],
             namespace=NAMESPACE,
             registry=registry,
@@ -335,6 +352,20 @@ def record_result_cache(*, outcome: str) -> None:
     if _C is None:
         return
     _C.result_cache.labels(outcome).inc()
+
+
+def record_audit_write(*, outcome: str) -> None:
+    """One audit chain entry, written or not (task 56).
+
+    ``failed`` climbing is the one alarm that cannot come from the audit log, so
+    it has to come from here. Alert on it: with `ACP_AUDIT_REQUIRED` on it means
+    calls are being refused, and with it off it means the record has holes
+    nobody will otherwise notice until they go looking for the entry that is not
+    there.
+    """
+    if _C is None:
+        return
+    _C.audit_writes.labels(outcome).inc()
 
 
 def record_firewall_decision(*, decision: str) -> None:

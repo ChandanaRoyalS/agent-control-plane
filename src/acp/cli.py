@@ -24,6 +24,8 @@ import anyio
 
 from acp import __version__
 from acp.admin import build_admin_app
+from acp.audit.checkpoint import DEFAULT_CHECKPOINT_PATH
+from acp.audit.cli import checkpoint_command, verify_command
 from acp.config import load_settings, load_upstreams
 from acp.exceptions import ACPError
 from acp.identity.principal import Actor, Principal
@@ -70,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--upstreams-file", help="override ACP_UPSTREAMS_FILE")
 
     _add_schemas_commands(subparsers)
+    _add_audit_commands(subparsers)
     _add_secrets_commands(subparsers)
     _add_policy_commands(subparsers)
 
@@ -293,6 +296,68 @@ def _add_schemas_commands(subparsers: Any) -> None:
     _add_baseline_arguments(check)
 
 
+def _add_audit_commands(subparsers: Any) -> None:
+    """``acp audit verify | checkpoint`` (task 57).
+
+    Argparse wiring only; every decision lives in ``acp.audit.cli``, which has no
+    SDK import and is therefore testable and type-checkable in the environment it
+    is authored in. The same split as ``acp secrets``, for the same reason.
+    """
+    audit = subparsers.add_parser(
+        "audit", help="verify the tamper-evident audit chain, and anchor it"
+    )
+    verbs = audit.add_subparsers(dest="audit_command", metavar="<verb>")
+
+    for verb, help_text in (
+        ("verify", "walk the chain and report any tampering; exit 1 on a break"),
+        ("checkpoint", "record the current head as the anchor to verify against"),
+    ):
+        sub = verbs.add_parser(verb, help=help_text)
+        sub.add_argument(
+            "--log-file",
+            type=Path,
+            default=None,
+            help="the audit chain (default: ACP_AUDIT_FILE)",
+        )
+        sub.add_argument(
+            "--checkpoint",
+            type=Path,
+            default=DEFAULT_CHECKPOINT_PATH,
+            help="the committed anchor (default: %(default)s)",
+        )
+
+
+def _audit_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    """Dispatch to ``acp.audit.cli``, resolving the log path from settings.
+
+    ``--log-file`` beats ``ACP_AUDIT_FILE``, and a deployment with neither is a
+    usage error rather than a silent success: "verified" printed over a file the
+    command never found would be the worst possible output from this program.
+    """
+    if args.audit_command is None:
+        parser.parse_args(["audit", "--help"])
+        return USAGE_ERROR  # pragma: no cover — argparse exits inside --help
+
+    log_file = args.log_file
+    if log_file is None:
+        try:
+            log_file = load_settings().audit_file
+        except ACPError as exc:
+            return _usage_error(exc.message)
+    if log_file is None:
+        return _usage_error(
+            "no audit log configured. Pass --log-file, or set ACP_AUDIT_FILE to "
+            "the path this gateway writes its chain to."
+        )
+
+    try:
+        if args.audit_command == "checkpoint":
+            return checkpoint_command(log_file, checkpoint_path=args.checkpoint)
+        return verify_command(log_file, checkpoint_path=args.checkpoint)
+    except ACPError as exc:
+        return _usage_error(exc.message)
+
+
 def _add_secrets_commands(subparsers: Any) -> None:
     """``acp secrets init | set | list`` (task 29).
 
@@ -409,18 +474,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help(sys.stderr)
         return USAGE_ERROR
 
+    # A table rather than a chain of `if`s. The chain grew a branch per task and
+    # tripped the return-count lint at seven, which is the lint doing its job:
+    # the next command should be one line here, not one more branch to read past.
+    grouped = {
+        "schemas": _schemas_command,
+        "audit": _audit_command,
+        "secrets": _secrets_command,
+        "policy": _policy_command,
+    }
     if args.command == "serve":
         return _serve_command(args)
-
-    if args.command == "schemas":
-        return _schemas_command(parser, args)
-
-    if args.command == "secrets":
-        return _secrets_command(parser, args)
-
-    if args.command == "policy":
-        return _policy_command(parser, args)
-
+    handler = grouped.get(args.command)
+    if handler is not None:
+        return handler(parser, args)
     return _upstream_command(args)
 
 
@@ -504,6 +571,7 @@ def _serve_command(args: argparse.Namespace) -> int:
                     # second store would answer approvals nobody is waiting on.
                     getattr(app.state, "approvals", None),
                     settings.approval_operator_token,
+                    getattr(app.state, "audit", None),
                 ),
                 settings.admin_host,
                 settings.admin_port,

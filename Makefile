@@ -60,6 +60,21 @@ audit-verify:  ## Walk the composed stack's chain, checked against the anchor
 audit-checkpoint:  ## Anchor the chain at its current head, then COMMIT the result
 	uv run acp audit checkpoint --log-file audit/audit.jsonl
 
+load-nofsync:  ## The same load test with the audit sink's fsync off (ADR 0050 §8)
+	@echo "Restarting the gateway with ACP_AUDIT_FSYNC=false ..."
+	ACP_AUDIT_FSYNC=false docker compose up -d --wait gateway
+	-$(MAKE) load
+	@echo "Restoring the default (fsync on) ..."
+	docker compose up -d --wait gateway
+
+load:  ## Load-test the composed stack for 30s and report latency by outcome
+	uv run locust -f perf/locustfile.py --host http://127.0.0.1:8080 \
+		--headless --users 20 --spawn-rate 10 --run-time 30s
+
+load-long:  ## The same, for 5 minutes at 100 users — for profiling (task 61)
+	uv run locust -f perf/locustfile.py --host http://127.0.0.1:8080 \
+		--headless --users 100 --spawn-rate 20 --run-time 5m
+
 smoke:  ## Assert the composed stack actually works
 	uv run python scripts/compose_smoke.py
 

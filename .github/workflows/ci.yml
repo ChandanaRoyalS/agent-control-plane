@@ -187,7 +187,7 @@ jobs:
         # for the one-shot readiness gate to *complete* — while keeping a
         # container that deliberately exits out of the set compose is asked to
         # see running.
-        run: docker compose up -d --wait gateway
+        run: mkdir -p audit && chmod 777 audit && docker compose up -d --wait gateway
 
       - name: Keycloak's log if it did not come up
         if: failure()

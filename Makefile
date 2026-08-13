@@ -34,6 +34,12 @@ image:  ## Build the container images
 	docker compose build
 
 up:  ## Build, bring up the whole stack, and wait until it is ready
+	@# The audit chain's directory, before compose can create it as root.
+	@# It is gitignored, so a fresh checkout does not have one — and Docker
+	@# creating the bind-mount source itself makes it root-owned, which the
+	@# container (uid 10001) cannot write to. The sink then fails to open,
+	@# which is fatal by design, and the symptom is an unhealthy gateway.
+	@mkdir -p audit && chmod 777 audit
 	@# --build is not optional. Compose builds only when the image is absent, so
 	@# without it `make up` serves whatever was last built — which is how a stack
 	@# ends up running the code from before the merge you are trying to

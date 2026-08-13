@@ -44,6 +44,9 @@ dev = [
     "types-pyyaml>=6.0",
     "pre-commit>=4.0",
 ]
+perf = [
+    "locust>=2.46.3",
+]
 
 [build-system]
 requires = ["hatchling"]

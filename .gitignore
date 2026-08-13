@@ -39,6 +39,12 @@ htmlcov/
 config/secret.key
 config/secrets.enc
 
+# The composed stack's audit chain. Never committed: it is per-run evidence, it
+# grows without bound, and a chain in git would make every `git checkout` a
+# rewrite of an audit log — which is precisely what the chain exists to detect.
+# The CHECKPOINT that anchors it *is* committed, and lives in config/.
+audit/
+
 # Editors
 .vscode/
 .idea/

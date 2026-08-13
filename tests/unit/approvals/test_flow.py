@@ -46,6 +46,7 @@ def a_request(
     now: float = NOW,
 ) -> ApprovalRequest:
     request = request_for(
+        tenant=None,
         subject=subject,
         actor=actor,
         tool=tool,
@@ -76,6 +77,7 @@ def retry(
     return resolve(
         store,
         token,
+        tenant=None,
         subject=subject,
         actor=actor,
         tool=tool,
@@ -300,6 +302,7 @@ def test_a_call_that_cannot_be_fingerprinted_is_never_held() -> None:
     cannot be bound to a call is an approval for anything."""
     assert (
         request_for(
+            tenant=None,
             subject=SUBJECT,
             actor=ACTOR,
             tool=TOOL,
@@ -326,12 +329,78 @@ def test_the_token_is_not_derived_from_the_call() -> None:
 
 
 def test_the_fingerprint_covers_the_tool() -> None:
-    assert fingerprint(subject=SUBJECT, actor=ACTOR, tool="a", arguments={}) != fingerprint(
-        subject=SUBJECT, actor=ACTOR, tool="b", arguments={}
-    )
+    assert fingerprint(
+        tenant=None, subject=SUBJECT, actor=ACTOR, tool="a", arguments={}
+    ) != fingerprint(tenant=None, subject=SUBJECT, actor=ACTOR, tool="b", arguments={})
 
 
 def test_an_absent_actor_is_not_the_same_as_any_actor() -> None:
-    assert fingerprint(subject=SUBJECT, actor=None, tool=TOOL, arguments={}) != fingerprint(
-        subject=SUBJECT, actor="", tool=TOOL, arguments={}
+    assert fingerprint(
+        tenant=None, subject=SUBJECT, actor=None, tool=TOOL, arguments={}
+    ) != fingerprint(tenant=None, subject=SUBJECT, actor="", tool=TOOL, arguments={})
+
+
+# ---------------------------------------------------------------------------
+# Tenancy (task 58): an approval cannot cross a tenant boundary
+# ---------------------------------------------------------------------------
+
+
+def test_the_fingerprint_covers_the_tenant() -> None:
+    """v2's reason to exist: without the tenant, an approval granted to acme's
+    alice would bind to a byte-identical call from globex's alice."""
+    assert fingerprint(
+        tenant="acme", subject=SUBJECT, actor=ACTOR, tool=TOOL, arguments={}
+    ) != fingerprint(tenant="globex", subject=SUBJECT, actor=ACTOR, tool=TOOL, arguments={})
+
+
+def test_no_tenant_is_not_the_same_as_any_tenant() -> None:
+    assert fingerprint(
+        tenant=None, subject=SUBJECT, actor=ACTOR, tool=TOOL, arguments={}
+    ) != fingerprint(tenant="", subject=SUBJECT, actor=ACTOR, tool=TOOL, arguments={})
+
+
+def test_an_approval_from_another_tenant_is_refused_by_name() -> None:
+    """One tenant's operator says yes; the identical call arrives from the
+    other tenant's alice wearing the token. Refused on the tenant check —
+    before the fingerprint comparison would also catch it, because an
+    escalation control gets belt and braces."""
+    store = InMemoryApprovalStore()
+    request = request_for(
+        tenant="acme",
+        subject=SUBJECT,
+        actor=ACTOR,
+        tool=TOOL,
+        arguments=ARGS,
+        rule="approve-deletes",
+        now=NOW,
     )
+    assert request is not None
+    store.create(request)
+    store.decide(request.token, approved=True)
+
+    resolution = resolve(
+        store,
+        request.token,
+        tenant="globex",
+        subject=SUBJECT,
+        actor=ACTOR,
+        tool=TOOL,
+        arguments=ARGS,
+        now=NOW + 1.0,
+    )
+    assert resolution.outcome is Outcome.REFUSE
+    assert resolution.reason == "approval belongs to another tenant"
+
+    # And the approval was NOT consumed by the failed attempt: the tenant it
+    # belongs to can still spend it.
+    honest = resolve(
+        store,
+        request.token,
+        tenant="acme",
+        subject=SUBJECT,
+        actor=ACTOR,
+        tool=TOOL,
+        arguments=ARGS,
+        now=NOW + 1.0,
+    )
+    assert honest.outcome is Outcome.PROCEED

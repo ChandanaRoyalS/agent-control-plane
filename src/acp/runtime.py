@@ -44,9 +44,9 @@ from acp.identity import (
     require_token_endpoints,
 )
 from acp.identity.cache import CredentialCache
-from acp.identity.issuers import registry_from_documents
-from acp.policy import Effect, Policy
-from acp.policy.loader import load_policy
+from acp.identity.issuers import registry_from_documents, tenant_labels
+from acp.policy import Effect, Policy, PolicySet
+from acp.policy.tenancy import load_policy_set
 from acp.results import CacheableTools, ResultCache, load_cacheable
 from acp.schema import DEFAULT_BASELINE_PATH, DriftDetector, SchemaSnapshot
 from acp.secrets import EmptyStore, EncryptedFileStore, SecretStore, read_key
@@ -97,7 +97,7 @@ async def gateway_from_configs(
     resource: ProtectedResource | None = None,
     credentials: ExchangedCredentials | None = None,
     secrets: Mapping[str, str] | None = None,
-    policy: Policy | None = None,
+    policy: Policy | PolicySet | None = None,
     limiter: RateLimiter | None = None,
     costs: CostTable | None = None,
     quota: QuotaCounter | None = None,
@@ -267,7 +267,24 @@ def build_audit_log(settings: GatewaySettings) -> AuditLog | None:
     return AuditLog(sink, required=settings.audit_required)
 
 
-def build_approval_store(settings: GatewaySettings, policy: Policy | None) -> ApprovalStore | None:
+def _gated_rule_names(policy: Policy | PolicySet) -> set[str]:
+    """Every rule, in any tenant's policy, that can hold a call for a person.
+
+    Duplicate names across tenants collapse in the set, which is correct for a
+    startup log line and would be wrong for enforcement — enforcement never
+    reads this; it selects one tenant's policy and reads that (task 58).
+    """
+    if isinstance(policy, Policy):
+        return {r.name for r in policy.rules if r.effect is Effect.REQUIRE_APPROVAL}
+    names = {r.name for r in policy.default.rules if r.effect is Effect.REQUIRE_APPROVAL}
+    for tenant_policy in policy.tenants.values():
+        names |= {r.name for r in tenant_policy.rules if r.effect is Effect.REQUIRE_APPROVAL}
+    return names
+
+
+def build_approval_store(
+    settings: GatewaySettings, policy: Policy | PolicySet | None
+) -> ApprovalStore | None:
     """A store when the policy can hold a call, and nothing when it cannot.
 
     Presence-based on the *policy* rather than on a flag, because the rule that
@@ -304,9 +321,7 @@ def build_approval_store(settings: GatewaySettings, policy: Policy | None) -> Ap
     logger.info(
         "approval.enabled",
         extra={
-            "gated_rules": [
-                rule.name for rule in policy.rules if rule.effect is Effect.REQUIRE_APPROVAL
-            ],
+            "gated_rules": sorted(_gated_rule_names(policy)),
             "ttl_seconds": settings.approval_ttl_seconds,
             "max_pending": settings.approval_max_pending,
             "operator_channel": bool(settings.approval_operator_token),
@@ -734,7 +749,21 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     malformed config fails without side effects.
     """
     upstreams = load_upstreams(settings.upstreams_file)
-    policy = load_policy(settings.policy_file)
+    # The whole set, not one file: the default policy plus one per declared
+    # tenant, each validated at startup so a malformed or missing tenant policy
+    # is a boot failure naming the tenant rather than a surprise on that
+    # tenant's first request (task 58). With no tenant labels this collapses to
+    # exactly the old single-policy behaviour.
+    tenants = (
+        tenant_labels(_issuer_documents(settings))
+        if settings.authentication_configured
+        else frozenset()
+    )
+    policy = load_policy_set(
+        settings.policy_file,
+        tenant_policy_dir=settings.tenant_policy_dir,
+        tenants=tenants,
+    )
     limiter = (
         RateLimiter(
             capacity=settings.rate_limit_capacity,

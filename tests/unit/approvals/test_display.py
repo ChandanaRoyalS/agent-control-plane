@@ -45,6 +45,7 @@ def held(arguments: Mapping[str, object], *, now: float = 0.0) -> ApprovalReques
     sites work.
     """
     request = request_for(
+        tenant=None,
         subject=SUBJECT,
         actor=None,
         tool=TOOL,
@@ -83,6 +84,7 @@ def test_a_call_that_cannot_be_encoded_is_not_held() -> None:
     that cannot be bound to a call is an approval for anything."""
     assert (
         request_for(
+            tenant=None,
             subject=SUBJECT,
             actor=None,
             tool=TOOL,
@@ -111,7 +113,7 @@ def test_the_stored_arguments_are_the_fingerprinted_ones() -> None:
 
     assert request.arguments_json == canonical(arguments)
     assert request.fingerprint == fingerprint(
-        subject=SUBJECT, actor=None, tool=TOOL, arguments=arguments
+        tenant=None, subject=SUBJECT, actor=None, tool=TOOL, arguments=arguments
     )
 
 
@@ -172,7 +174,7 @@ def test_a_withheld_call_is_still_fingerprinted_over_everything() -> None:
     request = held(arguments)
 
     assert request.fingerprint == fingerprint(
-        subject=SUBJECT, actor=None, tool=TOOL, arguments=arguments
+        tenant=None, subject=SUBJECT, actor=None, tool=TOOL, arguments=arguments
     )
 
 

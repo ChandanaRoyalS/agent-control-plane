@@ -130,6 +130,7 @@ def test_the_configured_bound_reaches_the_store() -> None:
 
     for index in range(5):
         request = request_for(
+            tenant=None,
             subject=ALICE,
             actor=None,
             tool=TOOL,

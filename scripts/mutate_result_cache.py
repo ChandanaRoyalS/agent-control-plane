@@ -25,6 +25,11 @@ Each mutation is a key somebody could plausibly write:
    gateway whose whole model is an agent acting *for* a human.
 3. **Drop the arguments.** Not a cross-caller leak, but a caller served their
    own answer to a different question, which is its own kind of wrong.
+4. **Drop the tenant.** Restores the key exactly as it stood before task 58,
+   which is the honest way to state what that task fixed: two identity
+   providers each with an `alice`, one cache entry between them. The
+   subject-isolation test is blind to it — both callers *are* alice — so this
+   mutation is caught by the two-tenant test or by nothing.
 """
 
 from __future__ import annotations
@@ -39,22 +44,45 @@ SUITE = "tests/integration/test_result_caching.py"
 
 ISOLATION = "test_a_second_caller_never_receives_the_first_ones_result"
 ACTOR = "test_two_agents_acting_for_one_person_do_not_share_an_entry"
+TENANT = "test_two_tenants_with_the_same_subject_do_not_share_an_entry"
 
 ANCHOR = """    material = json.dumps(
-        [KEY_VERSION, subject, actor, upstream, tool, encoded_arguments],"""
+        [KEY_VERSION, tenant, subject, actor, upstream, tool, encoded_arguments],"""
 
 
 def dropping(field: str) -> str:
     """The key material with one field removed."""
     kept = [
         name
-        for name in ("KEY_VERSION", "subject", "actor", "upstream", "tool", "encoded_arguments")
+        for name in (
+            "KEY_VERSION",
+            "tenant",
+            "subject",
+            "actor",
+            "upstream",
+            "tool",
+            "encoded_arguments",
+        )
         if name != field
     ]
     return f"    material = json.dumps(\n        [{', '.join(kept)}],"
 
 
 MUTATIONS: tuple[Mutation, ...] = (
+    Mutation(
+        name="drop the tenant from the key",
+        path=CACHE,
+        anchor=ANCHOR,
+        replacement=dropping("tenant"),
+        # Task 58's boundary. Dropping it leaves the key exactly as it was
+        # before tenancy existed — which is the point: this mutation restores
+        # the bug, and the assertion that must notice is the one written for
+        # it. The subject-isolation test does NOT catch this (both callers are
+        # "alice", so it is satisfied either way), which is precisely why the
+        # tenant needed its own test rather than a wider existing one.
+        caught_by=frozenset({TENANT}),
+        suite=SUITE,
+    ),
     Mutation(
         name="drop the subject from the key",
         path=CACHE,

@@ -36,6 +36,7 @@ def ask(
     return gate(
         store,
         token=token,
+        tenant=None,
         subject=subject,
         actor=ACTOR,
         tool=TOOL,

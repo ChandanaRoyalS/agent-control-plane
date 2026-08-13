@@ -167,6 +167,7 @@ def test_log_fields_carry_identifiers_and_nothing_else() -> None:
         "principal_issuer": "https://idp.test",
         "actor": "agent-7",
         "client_id": None,
+        "tenant": None,
     }
     assert "alice@example.test" not in str(fields)
     assert "Alice Example" not in str(fields)

@@ -125,6 +125,28 @@ services:
       # features did nothing in the only deployment anybody actually runs.
       ACP_COST_FILE: /app/config/costs.yaml
       ACP_CACHE_FILE: /app/config/cache.yaml
+      # -- and the controls that spend against that cost table ---------------
+      #
+      # Without these two, ACP_COST_FILE above is parsed at every start and
+      # never read: `_charge` returns immediately when there is no limiter and
+      # no quota. Tasks 39, 41 and 42, inert in the only deployment anybody
+      # runs, until task 62's configuration register printed them as OFF.
+      #
+      # NOT the shipped defaults (burst 60, 1/second). Those are right for a
+      # real deployment and would make `make load` report ninety percent
+      # THROTTLED — a load test measuring the limiter rather than the gateway.
+      # These bind for an abusive caller and not for the load mix: one
+      # principal there offers about 28 calls/second.
+      ACP_RATE_LIMIT_ENABLED: "${ACP_RATE_LIMIT_ENABLED:-true}"
+      ACP_RATE_LIMIT_CAPACITY: "${ACP_RATE_LIMIT_CAPACITY:-500}"
+      ACP_RATE_LIMIT_REFILL_PER_SECOND: "${ACP_RATE_LIMIT_REFILL_PER_SECOND:-200}"
+      # In the same units the cost table weights, so a summarise costs ten of
+      # these and a search three. The load mix averages ~2.8 per call.
+      ACP_QUOTA_ENABLED: "${ACP_QUOTA_ENABLED:-true}"
+      ACP_QUOTA_LIMIT: "${ACP_QUOTA_LIMIT:-500000}"
+      # Interpolated so a demo can make either bind for one run:
+      #   ACP_RATE_LIMIT_CAPACITY=5 ACP_RATE_LIMIT_REFILL_PER_SECOND=1 \
+      #       docker compose up -d --wait gateway
       # Two more content blocks than the upstream sent, which is a visible
       # change to the wire and therefore a deliberate one (ADR 0037). On here
       # because the firewall below is on: with framing enabled an unfenced block

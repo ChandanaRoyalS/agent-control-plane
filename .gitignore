@@ -50,3 +50,4 @@ audit/
 .idea/
 *.swp
 .DS_Store
+config/audit-checkpoint.json

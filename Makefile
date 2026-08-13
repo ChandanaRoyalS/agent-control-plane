@@ -60,6 +60,20 @@ audit-verify:  ## Walk the composed stack's chain, checked against the anchor
 audit-checkpoint:  ## Anchor the chain at its current head, then COMMIT the result
 	uv run acp audit checkpoint --log-file audit/audit.jsonl
 
+load-ab:  ## Three alternating fsync on/off runs, so the numbers carry a range
+	@echo "Six 30s runs, alternating. About five minutes. Do not use the machine."
+	@for rep in 1 2 3; do \
+		for sync in true false; do \
+			ACP_AUDIT_FSYNC=$$sync docker compose up -d --wait gateway >/dev/null 2>&1; \
+			echo "=== rep $$rep  fsync=$$sync ==="; \
+			uv run locust -f perf/locustfile.py --host http://127.0.0.1:8080 \
+				--headless --users 20 --spawn-rate 10 --run-time 30s 2>/dev/null \
+				| grep -E '^  (throughput|served|listed|held) '; \
+		done; \
+	done
+	@echo "Restoring the default (fsync on) ..."
+	@docker compose up -d --wait gateway >/dev/null 2>&1
+
 load-nofsync:  ## The same load test with the audit sink's fsync off (ADR 0050 §8)
 	@echo "Restarting the gateway with ACP_AUDIT_FSYNC=false ..."
 	ACP_AUDIT_FSYNC=false docker compose up -d --wait gateway

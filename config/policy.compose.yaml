@@ -24,8 +24,14 @@ rules:
   # wins (ADR 0026), so a narrow `require_approval` in front of a broad `allow`
   # is how an operator expresses "everything is fine except this one thing".
   #
-  # `mock-a__create-ticket` is the destructive-ish tool in the mock fleet, so it
-  # is the one that stops and waits for a person. The tool stays *visible* in
+  # `mock-a__create_ticket` is the destructive-ish tool in the mock fleet, so it
+  # is the one that stops and waits for a person. **The underscore is not a
+  # typo and the separator is not one either**: the qualified name is
+  # `<upstream>__<tool>`, and the tool's own name keeps whatever spelling the
+  # upstream gave it. `mock-a__create-ticket` names nothing, and a policy rule
+  # naming nothing does not fail — it simply never matches, and the broad
+  # allow below decides instead. tests/integration/test_compose_config.py
+  # exists because that mistake shipped once. The tool stays *visible* in
   # `tools/list` — a gated tool must be, because the agent naming it is what
   # starts the approval — which is also why the smoke test still counts six.
   #
@@ -49,7 +55,7 @@ rules:
   # Two ports, two credentials, two participants — which is the whole control.
   - name: approve-ticket-creation
     effect: require_approval
-    tools: [mock-a__create-ticket]
+    tools: [mock-a__create_ticket]
 
   - name: allow-any-authenticated-caller
     effect: allow

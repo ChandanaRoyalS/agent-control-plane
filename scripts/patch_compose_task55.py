@@ -23,7 +23,7 @@ ANCHOR = "      ACP_SCHEMA_BASELINE_FILE: /app/config/schema-baseline.json\n"
 
 ADDITION = """      # -- human-in-the-loop approvals (task 55) ---------------------------
       #
-      # `policy.compose.yaml` holds `mock-a__create-ticket` for a person. This
+      # `policy.compose.yaml` holds `mock-a__create_ticket` for a person. This
       # is what makes answering possible: with no operator credential the
       # approval routes are not mounted at all, so every gated call would wait
       # out its TTL and be refused. The gateway says so at startup

@@ -585,7 +585,7 @@ operations against a shared row so the Redis implementation is a class, not a
 redesign. See [ADR 0048](docs/decisions/0048-an-approval-is-for-a-call-not-a-token.md)
 and [ADR 0049](docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md).
 
-`make up` runs it: the composed policy holds `mock-a__create-ticket`, and
+`make up` runs it: the composed policy holds `mock-a__create_ticket`, and
 `config/policy.compose.yaml` has the four commands end to end.
 
 ## Development

@@ -41,7 +41,7 @@ recorded in the log where the operator — who is not the attacker — can read 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import jwt
@@ -151,13 +151,23 @@ class TokenValidator:
             raise _rejected(type(exc).__name__) from exc
 
         try:
-            return from_claims(claims)
+            principal = from_claims(claims)
         except ValueError as exc:
             # Signed, unexpired, correctly addressed — and it does not say who
             # it is for. A token like that is not usable as an identity, and
             # accepting it would mean a request executing under no principal at
             # all while every log line claimed otherwise.
             raise _rejected("UnusableClaims") from exc
+
+        # The tenant comes from the REGISTRATION, after verification — never
+        # from a claim (task 58). The registration was selected by `iss` and
+        # then proven: the signature verified against ITS keys and `iss`
+        # matched ITS issuer. A token cannot reach this line under a
+        # registration that did not issue it, so the tenant stamped here
+        # inherits the mix-up defence rather than adding a new thing to trust.
+        if registration.tenant is not None:
+            principal = replace(principal, tenant=registration.tenant)
+        return principal
 
     # -- internals ---------------------------------------------------------
 

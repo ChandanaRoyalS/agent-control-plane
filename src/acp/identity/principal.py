@@ -79,6 +79,16 @@ class Principal:
     client_id: str | None = None
     scopes: frozenset[str] = field(default_factory=frozenset)
     expires_at: int | None = None
+    tenant: str | None = None
+    """Which tenant this principal belongs to (task 58).
+
+    Stamped by the validator from the *registration* that verified the token —
+    never from a claim. A field here rather than a lookup at each use site,
+    because every consumer (budgets, cache, policy selection, audit) must agree
+    on the answer, and eleven call sites resolving it independently is how one
+    of them resolves it differently.
+    """
+
     delegation_chain: tuple[str, ...] = ()
     """Every actor from the immediate one outward, when the token carries a
     chain. Kept because "the CFO's token, via an agent, via a scheduler nobody
@@ -115,6 +125,7 @@ class Principal:
             "principal_issuer": self.issuer,
             "actor": self.actor.subject if self.actor else None,
             "client_id": self.client_id,
+            "tenant": self.tenant,
         }
 
 

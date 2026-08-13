@@ -32,6 +32,7 @@ from acp.budget import (
     CostTable,
     QuotaCounter,
     RateLimiter,
+    account,
     enforce_quota,
     enforce_rate_limit,
 )
@@ -50,6 +51,7 @@ from acp.identity.principal import Principal, current_principal
 from acp.observability import RequestContextMiddleware, metrics
 from acp.policy import Policy, enforce_call, visible_tools
 from acp.policy.predispatch import PreDispatchAuthorizationMiddleware
+from acp.policy.tenancy import PolicySet
 from acp.results import CacheableTools, ResultCache, ResultKey, key_for
 from acp.upstream.models import CallToolResult
 
@@ -106,6 +108,7 @@ def _result_key(
     if ttl is None or results is None or principal is None:
         return None
     return key_for(
+        tenant=principal.tenant,
         subject=principal.subject,
         actor=principal.actor.subject if principal.actor else None,
         upstream=upstream_of(tool),
@@ -126,7 +129,7 @@ def _framed(result: CallToolResult, tool: str, provenance: bool) -> CallToolResu
 
 def _charge(
     *,
-    subject: str | None,
+    payer: str | None,
     tool: str,
     limiter: RateLimiter | None,
     costs: CostTable | None,
@@ -134,8 +137,10 @@ def _charge(
 ) -> None:
     """Draw this call against both budgets, or raise the refusal it earns.
 
-    Both key on the principal's subject; with no principal (auth off) there is
-    no per-caller budget to charge, so both are skipped. The cost is resolved
+    ``payer`` is the tenant-qualified account (`acp.budget.account`), not the
+    bare subject — two tenants' alices must drain two buckets (task 58). With
+    no principal (auth off) there is no per-caller budget to charge, so both
+    are skipped. The cost is resolved
     once and shared, because a tool that costs ten should cost ten to each
     budget rather than ten to one and one to the other.
 
@@ -144,18 +149,18 @@ def _charge(
     security argument in that function should be able to see the whole ordering
     on one screen.
     """
-    if subject is None or (limiter is None and quota is None):
+    if payer is None or (limiter is None and quota is None):
         return
     cost = costs.cost_of(tool) if costs is not None else 1.0
     try:
         if limiter is not None:
             # A monotonic clock for the rate: a wall-clock jump must not hand
             # out or withhold burst allowance.
-            enforce_rate_limit(limiter, subject, time.monotonic(), cost)
+            enforce_rate_limit(limiter, payer, time.monotonic(), cost)
         if quota is not None:
             # Wall-clock time for the window: a daily quota aligns to real
             # calendar time, not to how long the process has been running.
-            enforce_quota(quota, subject, time.time(), cost)
+            enforce_quota(quota, payer, time.time(), cost)
     except ACPError as exc:
         raise to_mcp_error(exc) from exc
 
@@ -227,6 +232,7 @@ def _audit_decision(
         AUTHORIZATION_EVENT,
         subject=principal.subject,
         actor=_actor_of(principal),
+        tenant=principal.tenant,
         tool=params.name,
         rule=rule,
         outcome=outcome,
@@ -262,6 +268,7 @@ def _audit_screening(
         FIREWALL_EVENT,
         subject=principal.subject if principal is not None else None,
         actor=_actor_of(principal),
+        tenant=principal.tenant if principal is not None else None,
         tool=tool,
         outcome=AuditOutcome.DENIED if inspection.refused else AuditOutcome.ALLOWED,
         detail={
@@ -295,6 +302,7 @@ def _audit_call(
         TOOL_CALL_EVENT,
         subject=principal.subject if principal is not None else None,
         actor=_actor_of(principal),
+        tenant=principal.tenant if principal is not None else None,
         tool=tool,
         outcome=outcome,
         reason=reason,
@@ -332,6 +340,7 @@ def _await_approval(
     outcome = gate(
         store,
         token=params.request_state,
+        tenant=principal.tenant,
         subject=principal.subject,
         actor=principal.actor.subject if principal.actor else None,
         tool=params.name,
@@ -363,7 +372,7 @@ def _await_approval(
 def build_server(
     registry: UpstreamRegistry,
     *,
-    policy: Policy | None = None,
+    policy: Policy | PolicySet | None = None,
     limiter: RateLimiter | None = None,
     costs: CostTable | None = None,
     quota: QuotaCounter | None = None,
@@ -384,6 +393,14 @@ def build_server(
     withdrawal (task 18) possible later.
     """
 
+    # A bare `Policy` still works everywhere one was accepted, wrapped as a
+    # set whose default it is. The wrapping is what makes tenancy fail closed
+    # from every direction: a tenanted principal reaching a gateway built with
+    # a bare policy selects an unknown tenant and gets DENY_ALL — never the
+    # single-tenant rules, which from that principal's point of view are some
+    # other tenant's policy (task 58).
+    policies = policy if isinstance(policy, PolicySet) or policy is None else PolicySet(policy)
+
     # `_ctx` and `_params` are positional in the SDK's handler contract, so
     # they cannot be dropped. Underscore-prefixed until they are used:
     # `_ctx` carries the HTTP request (headers, auth) and becomes load-bearing
@@ -394,13 +411,17 @@ def build_server(
     ) -> types.ListToolsResult:
         catalogue = await registry.list_tools()
 
-        if policy is not None:
+        if policies is not None:
             # Show only what this principal may call. Fail-closed, like
             # on_call_tool: a loaded policy with no principal sees an
-            # empty catalogue, not the full one.
+            # empty catalogue, not the full one. Selection happens per
+            # request: the catalogue acme's alice sees is filtered by acme's
+            # rules and nobody else's.
             principal = current_principal()
             visible = (
-                visible_tools(policy, principal, catalogue.tools) if principal is not None else []
+                visible_tools(policies.policy_for(principal.tenant), principal, catalogue.tools)
+                if principal is not None
+                else []
             )
             catalogue = replace(catalogue, tools=visible)
 
@@ -446,14 +467,19 @@ def build_server(
         params: types.CallToolRequestParams,
     ) -> types.CallToolResult | types.InputRequiredResult:
         principal = current_principal()
-        if policy is not None:
+        if policies is not None:
             # Fail-closed: a loaded policy means authorization is
             # expected. A missing principal here is a misconfiguration
             # (policy set, auth not), and must deny rather than permit.
             if principal is None:
                 raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
             try:
-                decision = enforce_call(policy, principal, params.name, params.arguments or {})
+                decision = enforce_call(
+                    policies.policy_for(principal.tenant),
+                    principal,
+                    params.name,
+                    params.arguments or {},
+                )
             except ACPError as exc:
                 # Recorded before the refusal is raised, so a denial reaches the
                 # chain even though the caller never gets a result. An audit log
@@ -485,7 +511,7 @@ def build_server(
         # After authorization: a denied call must not spend budget, and charging
         # a call we would refuse anyway is wasted work.
         _charge(
-            subject=principal.subject if principal is not None else None,
+            payer=account(principal.tenant, principal.subject) if principal is not None else None,
             tool=params.name,
             limiter=limiter,
             costs=costs,
@@ -575,7 +601,7 @@ def build_app(
     allowed_origins: Sequence[str] = (),
     validator: TokenValidator | None = None,
     resource: ProtectedResource | None = None,
-    policy: Policy | None = None,
+    policy: Policy | PolicySet | None = None,
     limiter: RateLimiter | None = None,
     costs: CostTable | None = None,
     quota: QuotaCounter | None = None,

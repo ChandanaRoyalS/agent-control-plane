@@ -31,7 +31,7 @@ from starlette.applications import Starlette
 
 from acp.gateway import UpstreamRegistry, build_app
 from acp.identity import AuthenticationMiddleware
-from acp.identity.issuers import single_issuer
+from acp.identity.issuers import IssuerRegistration, IssuerRegistry, single_issuer
 from acp.identity.keys import JwksCache
 from acp.identity.validator import TokenPolicy, TokenValidator
 from acp.policy import Effect, Policy, Rule
@@ -49,6 +49,12 @@ MCP_HEADERS = {
 
 ALICE = "alice@example.test"
 BOB = "bob@example.test"
+
+# Task 58. A second authorization server, so two tenants can each have an
+# "alice" — which is the whole point: within one issuer a subject is unique,
+# and across two it is not, and every key in this file was built when there
+# was only one.
+OTHER_ISSUER = "https://idp.globex.test/realms/acp"
 CACHED_TOOL = "mock-a__search"
 UNCACHED_TOOL = "mock-a__create_ticket"
 POLICY_DENIED = -32040
@@ -111,6 +117,42 @@ def validator_for(keypair: Keypair) -> TokenValidator:
     )
 
 
+def tenanted_validator(keypair: Keypair) -> TokenValidator:
+    """Two registrations, two tenants, one signing key (task 58).
+
+    One key deliberately: the tenant boundary must not depend on the two
+    issuers having different keys. If it did, this test would be proving the
+    mix-up defence over again rather than proving that the TENANT LABEL is
+    what separates the cache entries.
+    """
+
+    def handle(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=keypair.jwks())
+
+    def keys() -> JwksCache:
+        return JwksCache(
+            "https://idp.test/jwks",
+            client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+        )
+
+    return TokenValidator(
+        issuers=IssuerRegistry(
+            [
+                IssuerRegistration(
+                    policy=TokenPolicy(issuer=ISSUER, audience=AUDIENCE),
+                    keys=keys(),
+                    tenant="acme",
+                ),
+                IssuerRegistration(
+                    policy=TokenPolicy(issuer=OTHER_ISSUER, audience=AUDIENCE),
+                    keys=keys(),
+                    tenant="globex",
+                ),
+            ]
+        )
+    )
+
+
 def parse(response: httpx.Response) -> dict[str, Any]:
     text = response.text
     if text.lstrip().startswith("{"):
@@ -140,6 +182,7 @@ def conversation(
     policy: Policy | None = None,
     cacheable: CacheableTools | None = None,
     queries: list[str] | None = None,
+    validator: TokenValidator | None = None,
 ) -> list[str]:
     """Drive several calls through one gateway process, returning what each
     caller received.
@@ -154,6 +197,16 @@ def conversation(
     """
     table = cacheable or CacheableTools(ttls={CACHED_TOOL: 30.0})
 
+    def build_validator() -> TokenValidator:
+        """The validator for this conversation.
+
+        A function rather than a value because the untenanted path builds a
+        *fresh* validator for the app and again for the middleware, each with
+        its own key cache. Collapsing them into one shared instance would
+        quietly change what every existing test in this file exercises.
+        """
+        return validator if validator is not None else validator_for(keypair)
+
     async def _run() -> list[str]:
         client = UpstreamClient(
             UpstreamConfig(name="mock-a", url="http://mock/mcp"),
@@ -161,12 +214,12 @@ def conversation(
         )
         app: Starlette = build_app(
             UpstreamRegistry([client]),
-            validator=validator_for(keypair),
+            validator=build_validator(),
             policy=policy,
             cacheable=table,
             results=ResultCache(),
         )
-        app.add_middleware(AuthenticationMiddleware, validator=validator_for(keypair))
+        app.add_middleware(AuthenticationMiddleware, validator=build_validator())
 
         received: list[str] = []
         async with contextlib.AsyncExitStack() as stack:
@@ -231,6 +284,52 @@ def test_two_agents_acting_for_one_person_do_not_share_an_entry(keypair: Keypair
 
     assert upstream.calls == 2
     assert received[0] != received[1]
+
+
+def test_two_tenants_with_the_same_subject_do_not_share_an_entry(keypair: Keypair) -> None:
+    """Task 58's breach, on the real path.
+
+    Two authorization servers, two tenants, and an `alice` in each. Same
+    subject string, same actor, same tool, same arguments — everything the key
+    held before the tenant joined it. Until task 58 these two calls produced
+    one cache entry, and the second alice read the first alice's records.
+
+    Nothing about that failure is observable from inside either tenant: the
+    answer is well-formed, the policy allowed the call, and the upstream logged
+    one read by "alice", which is true. The counter is the only instrument that
+    can see it.
+    """
+    upstream = CountingUpstream()
+    acme_alice = keypair.sign(claims(sub=ALICE))
+    globex_alice = keypair.sign(claims(sub=ALICE, iss=OTHER_ISSUER))
+
+    received = conversation(
+        upstream,
+        keypair,
+        [(acme_alice, CACHED_TOOL), (globex_alice, CACHED_TOOL)],
+        validator=tenanted_validator(keypair),
+    )
+
+    assert upstream.calls == 2, "globex's alice was answered from acme's alice's entry"
+    assert received[0] != received[1], f"both tenants received {received[0]!r}"
+
+
+def test_one_tenants_caller_is_still_served_from_the_cache(keypair: Keypair) -> None:
+    """The other direction, so the test above cannot pass by the tenanted
+    validator simply breaking caching altogether — which would satisfy every
+    isolation assertion in this file and quietly disable the feature."""
+    upstream = CountingUpstream()
+    acme_alice = keypair.sign(claims(sub=ALICE))
+
+    received = conversation(
+        upstream,
+        keypair,
+        [(acme_alice, CACHED_TOOL), (acme_alice, CACHED_TOOL)],
+        validator=tenanted_validator(keypair),
+    )
+
+    assert upstream.calls == 1, "the second call went upstream"
+    assert received[0] == received[1]
 
 
 def test_the_same_caller_is_served_from_the_cache(keypair: Keypair) -> None:

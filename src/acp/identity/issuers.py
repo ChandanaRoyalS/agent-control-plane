@@ -35,6 +35,7 @@ bag of keys has no opinion about which server a token came from.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -61,6 +62,18 @@ class IssuerRegistration:
 
     policy: TokenPolicy
     keys: JwksCache
+    tenant: str | None = None
+    """Which tenant this authorization server's principals belong to (task 58).
+
+    On the *registration*, deliberately, rather than read from a token claim.
+    Lying about ``iss`` already fails signature verification, so a token cannot
+    claim its way into another tenant — the tenant boundary inherits the
+    strength of the mix-up defence this whole module exists for, and no new
+    trust is placed in anything a token says about itself. ``None`` means this
+    gateway is not multi-tenant on this issuer, and everything downstream
+    behaves exactly as it did before the field existed.
+    """
+
     token_endpoint: str = ""
     """Where this server exchanges tokens (RFC 8693, task 27).
 
@@ -163,6 +176,7 @@ def registry_from_documents(
         jwks_url = _required(document, "jwks_url", label)
         _reject_plaintext_keys(jwks_url, label, insecure_hosts)
         token_endpoint = document.get("token_endpoint")
+        tenant = _tenant_label(document.get("tenant"), label)
         algorithms = document.get("algorithms") or list(default_algorithms)
         if not isinstance(algorithms, list):
             msg = f"issuer {label!r}: `algorithms` must be a list"
@@ -178,9 +192,53 @@ def registry_from_documents(
                 ),
                 keys=JwksCache(jwks_url, ttl=cache_ttl, min_refresh_interval=min_refresh_interval),
                 token_endpoint=token_endpoint if isinstance(token_endpoint, str) else "",
+                tenant=tenant,
             )
         )
     return registrations
+
+
+TENANT_LABEL = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+"""Lowercase slug, 64 characters, nothing else.
+
+Restrictive on purpose. A tenant label becomes part of budget accounts, cache
+keys, audit records and — with per-tenant policy — a *filename*. A label that
+can carry ``/``, ``..``, a quote or a newline is a label that can traverse a
+directory or forge a key boundary, and validating once at configuration time is
+cheaper than defending four downstream encodings forever.
+"""
+
+
+def tenant_labels(documents: Iterable[Mapping[str, object]]) -> frozenset[str]:
+    """Every tenant the issuer documents declare, validated.
+
+    The startup question "which tenants must have a policy file" is asked
+    before registrations are built (policy loads first; key discovery is
+    async and later), so this reads the same documents through the same
+    validation — one rule for what a label is, applied on both paths.
+    """
+    labels = set()
+    for index, document in enumerate(documents):
+        label = _tenant_label(document.get("tenant"), document.get("issuer") or f"#{index}")
+        if label is not None:
+            labels.add(label)
+    return frozenset(labels)
+
+
+def _tenant_label(value: object, label: object) -> str | None:
+    """The issuer's tenant label, validated, or ``None`` when not multi-tenant."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not TENANT_LABEL.fullmatch(value):
+        msg = (
+            f"issuer {label!r}: `tenant` must be a lowercase slug "
+            f"(letters, digits, `-`, `_`; max 64), got {value!r}. The label is "
+            f"used in budget accounts, cache keys, audit records and policy "
+            f"filenames, so it is validated here once rather than escaped in "
+            f"four places forever."
+        )
+        raise ConfigurationError(msg)
+    return value
 
 
 def _reject_plaintext_keys(jwks_url: str, label: object, insecure_hosts: Iterable[str]) -> None:

@@ -39,6 +39,7 @@ def key(
     arguments: dict[str, object] | None = None,
 ) -> ResultKey:
     made = key_for(
+        tenant=None,
         subject=subject,
         actor=actor,
         upstream=upstream,
@@ -133,7 +134,10 @@ def test_a_short_key_is_safe_to_log() -> None:
 def test_the_key_is_versioned() -> None:
     """So the encoding can change without an entry written under the old scheme
     being read under the new one — the one failure a cache must never have."""
-    assert KEY_VERSION == "acp-result-v1"
+    # v2: the tenant joined the key (task 58). This assertion exists so a
+    # version change is always a deliberate edit here too — two files agreeing
+    # is the point, not a redundancy.
+    assert KEY_VERSION == "acp-result-v2"
 
 
 def test_arguments_that_will_not_encode_are_not_cached() -> None:
@@ -143,7 +147,12 @@ def test_arguments_that_will_not_encode_are_not_cached() -> None:
     trip."""
     assert (
         key_for(
-            subject=ALICE, actor=AGENT, upstream=UPSTREAM, tool=TOOL, arguments={"when": object()}
+            tenant=None,
+            subject=ALICE,
+            actor=AGENT,
+            upstream=UPSTREAM,
+            tool=TOOL,
+            arguments={"when": object()},
         )
         is None
     )
@@ -154,7 +163,12 @@ def test_a_nan_argument_is_not_cached() -> None:
     accepts — a value that round-trips within this process and nowhere else."""
     assert (
         key_for(
-            subject=ALICE, actor=AGENT, upstream=UPSTREAM, tool=TOOL, arguments={"n": float("nan")}
+            tenant=None,
+            subject=ALICE,
+            actor=AGENT,
+            upstream=UPSTREAM,
+            tool=TOOL,
+            arguments={"n": float("nan")},
         )
         is None
     )
@@ -306,3 +320,56 @@ def test_a_negative_ttl_stores_nothing(ttl: float) -> None:
     cache.put(key(), result(), ttl=ttl)
 
     assert len(cache) == 0
+
+
+# ---------------------------------------------------------------------------
+# Tenancy (task 58): the key change that motivated KEY_VERSION v2
+# ---------------------------------------------------------------------------
+
+
+def test_two_tenants_same_subject_get_different_keys() -> None:
+    """The bug tenancy exists to close: two IdPs each have an `alice`, and
+    before the tenant joined the key they shared cache entries — one tenant's
+    alice served a result fetched for the other's. Same subject, same actor,
+    same call; different tenant; different key."""
+    acme = key_for(
+        tenant="acme",
+        subject="alice",
+        actor=None,
+        upstream="mock-a",
+        tool="mock-a__search",
+        arguments={"query": "q"},
+    )
+    globex = key_for(
+        tenant="globex",
+        subject="alice",
+        actor=None,
+        upstream="mock-a",
+        tool="mock-a__search",
+        arguments={"query": "q"},
+    )
+    assert acme is not None
+    assert globex is not None
+    assert acme != globex
+
+
+def test_untenanted_and_tenanted_get_different_keys() -> None:
+    untenanted = key_for(
+        tenant=None,
+        subject="alice",
+        actor=None,
+        upstream="mock-a",
+        tool="mock-a__search",
+        arguments={},
+    )
+    tenanted = key_for(
+        tenant="acme",
+        subject="alice",
+        actor=None,
+        upstream="mock-a",
+        tool="mock-a__search",
+        arguments={},
+    )
+    assert untenanted is not None
+    assert tenanted is not None
+    assert untenanted != tenanted

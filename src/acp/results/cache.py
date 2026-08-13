@@ -53,8 +53,13 @@ from acp.upstream.models import CallToolResult
 
 logger = logging.getLogger(__name__)
 
-KEY_VERSION: Final = "acp-result-v1"
+KEY_VERSION: Final = "acp-result-v2"
 """Stamped into every key.
+
+v2 added the tenant (task 58). The bump is the mechanism working as designed:
+every v1 entry misses rather than being reinterpreted, so a cache filled
+before tenancy existed cannot serve across a boundary that did not exist when
+it was written. One miss per warm entry is the entire cost.
 
 So the encoding below can change — a new field, a different canonical form —
 without any chance of an entry written under the old scheme being read under the
@@ -96,6 +101,7 @@ class ResultKey:
 
 def key_for(
     *,
+    tenant: str | None,
     subject: str,
     actor: str | None,
     upstream: str,
@@ -133,7 +139,7 @@ def key_for(
     # invites a subject containing that separator to forge a different key —
     # the classic canonicalisation bug, and free to avoid here.
     material = json.dumps(
-        [KEY_VERSION, subject, actor, upstream, tool, encoded_arguments],
+        [KEY_VERSION, tenant, subject, actor, upstream, tool, encoded_arguments],
         separators=(",", ":"),
         ensure_ascii=False,
     )

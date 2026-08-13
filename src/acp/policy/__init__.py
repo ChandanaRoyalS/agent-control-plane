@@ -16,13 +16,17 @@ from acp.policy.enforce import enforce_call
 from acp.policy.evaluate import Decision, evaluate
 from acp.policy.filtering import visible_tools
 from acp.policy.schema import Effect, Policy, Rule
+from acp.policy.tenancy import DENY_ALL, PolicySet, load_policy_set
 
 __all__ = [
+    "DENY_ALL",
     "Decision",
     "Effect",
     "Policy",
+    "PolicySet",
     "Rule",
     "enforce_call",
     "evaluate",
+    "load_policy_set",
     "visible_tools",
 ]

@@ -291,6 +291,7 @@ class TokenExchanger:
                 "auth.exchanged",
                 subject=acting.subject if acting else None,
                 actor=acting.actor.subject if acting and acting.actor else None,
+                tenant=acting.tenant if acting else None,
                 upstream=audience,
                 outcome=AuditOutcome.ALLOWED,
                 detail={"issuer": issuer, "expires_in": expires_in},

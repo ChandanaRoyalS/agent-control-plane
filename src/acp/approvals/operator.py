@@ -114,6 +114,7 @@ def as_view(request: ApprovalRequest, now: float) -> dict[str, Any]:
 
     return {
         "token": request.token,
+        "tenant": request.tenant,
         "subject": request.subject,
         "tool": request.tool,
         "rule": request.rule,

@@ -91,6 +91,23 @@ services:
       # window in which one person's yes can still be spent.
       ACP_APPROVAL_TTL_SECONDS: "300"
       ACP_APPROVAL_MAX_PENDING: "256"
+      # -- the tamper-evident audit chain (tasks 56, 57) -------------------
+      #
+      # Presence of the path is what enables it; there is deliberately no
+      # default, because an evidentiary artifact appearing in somebody's working
+      # directory the first time they run the gateway is one that gets
+      # gitignored, then forgotten.
+      #
+      # /app/audit is a HOST-MOUNTED directory, not a named volume, so
+      # `acp audit verify` can be run by a person rather than through
+      # `docker exec`. A verifier that is awkward to run is one that runs after
+      # an incident instead of before.
+      ACP_AUDIT_FILE: /app/audit/audit.jsonl
+      # Fail closed: a call this gateway cannot record does not happen. An audit
+      # log that stops recording while the gateway keeps serving is worse than
+      # none, because the record then asserts by omission that nothing happened
+      # during the window somebody will eventually ask about.
+      ACP_AUDIT_REQUIRED: "true"
       # -- budgets, caching and the firewall -------------------------------
       #
       # All four of these files were already mounted by `./config:/app/config:ro`
@@ -179,6 +196,14 @@ services:
       # `acp schemas capture` is a human act performed on the host and reviewed
       # as a diff.
       - ./config:/app/config:ro
+      #
+      # Writable, and the only writable mount this container has. The chain goes
+      # here; the CHECKPOINT that anchors it goes in `config/` above, which is
+      # read-only — so the gateway can write its own log and cannot write the
+      # thing that proves it has not rewritten that log. ADR 0050 argues the
+      # anchor is worth exactly the distance between it and the writer, and this
+      # is that distance expressed as a mount option rather than as discipline.
+      - ./audit:/app/audit
     ports:
       - "8080:8080"
       - "9090:9090"

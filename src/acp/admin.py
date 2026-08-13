@@ -31,6 +31,7 @@ from starlette.routing import Route
 from acp import __version__
 from acp.approvals.operator import operator_routes
 from acp.approvals.store import ApprovalStore
+from acp.audit import AuditLog
 from acp.health import HealthMonitor
 from acp.observability import metrics
 from acp.schema import DriftDetector
@@ -133,6 +134,7 @@ def build_admin_app(
     drift: DriftDetector | None = None,
     approvals: ApprovalStore | None = None,
     operator_credential: str = "",
+    audit: AuditLog | None = None,
 ) -> Starlette:
     """The admin ASGI app. Small on purpose — it must not be able to fail.
 
@@ -152,6 +154,6 @@ def build_admin_app(
             Route(HEALTH_PATH, _healthz, methods=["GET"]),
             Route(READY_PATH, build_readyz(health), methods=["GET"]),
             Route(SCHEMAS_PATH, build_schemas(drift), methods=["GET"]),
-            *operator_routes(approvals, operator_credential),
+            *operator_routes(approvals, operator_credential, audit),
         ]
     )

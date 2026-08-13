@@ -25,6 +25,9 @@ from starlette.applications import Starlette
 
 from acp import __version__
 from acp.approvals import DEFAULT_TTL_SECONDS, ApprovalStore, Outcome, gate
+from acp.audit import AuditLog
+from acp.audit import Category as AuditCategory
+from acp.audit import Outcome as AuditOutcome
 from acp.budget import (
     CostTable,
     QuotaCounter,
@@ -33,7 +36,7 @@ from acp.budget import (
     enforce_rate_limit,
 )
 from acp.exceptions import ACPError, PolicyDeniedError
-from acp.firewall import Firewall, frame
+from acp.firewall import Firewall, Inspection, frame
 from acp.gateway.converters import to_input_required, to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.naming import upstream_of
 from acp.gateway.registry import UpstreamRegistry
@@ -167,6 +170,137 @@ def _served_from_cache(results: ResultCache, key: ResultKey, tool: str) -> CallT
     return held
 
 
+FIREWALL_EVENT = "firewall.screened"
+AUTHORIZATION_EVENT = "policy.decision"
+TOOL_CALL_EVENT = "tool.called"
+
+
+def _chain(audit: AuditLog, *args: Any, **fields: Any) -> None:
+    """Write one record, turning a fail-closed refusal into the caller's error.
+
+    Without this, `AuditUnavailableError` escapes `on_call_tool` unconverted and
+    the SDK renders it as `-32603 Handler returned an invalid result` — the
+    caller is still refused, which is the guarantee, but they are refused with a
+    code that says *the gateway is broken* rather than one that says *wait and
+    retry*. `recoverable` exists precisely so an agent can tell those apart, and
+    it is worth nothing if the error never reaches the wire in one piece.
+    """
+    try:
+        audit.record(*args, **fields)
+    except ACPError as exc:
+        raise to_mcp_error(exc) from exc
+
+
+def _actor_of(principal: Principal | None) -> str | None:
+    return principal.actor.subject if principal is not None and principal.actor else None
+
+
+def _audit_decision(
+    audit: AuditLog | None,
+    principal: Principal,
+    params: types.CallToolRequestParams,
+    *,
+    allowed: bool,
+    rule: str | None,
+    held: bool = False,
+) -> None:
+    """Chain one authorization decision.
+
+    Three outcomes rather than two, because a held call is neither. Folding it
+    into `DENIED` would make the approval flow invisible in the one record meant
+    to explain what happened — the same argument `Decision.requires_approval`
+    makes in the evaluator, carried into the artifact an auditor reads.
+
+    **Argument names, never values.** The same rule the decision log follows
+    (ADR 0045): a `doc_id` is as likely to be a patient record as a public page,
+    and this file is durable and widely readable. The names still buy something
+    real — a rule constraining an argument the call never sent cannot have fired.
+    """
+    if audit is None:
+        return
+    outcome = (
+        AuditOutcome.HELD if held else (AuditOutcome.ALLOWED if allowed else AuditOutcome.DENIED)
+    )
+    _chain(
+        audit,
+        AuditCategory.AUTHORIZATION,
+        AUTHORIZATION_EVENT,
+        subject=principal.subject,
+        actor=_actor_of(principal),
+        tool=params.name,
+        rule=rule,
+        outcome=outcome,
+        detail={"argument_names": sorted(params.arguments or {})},
+    )
+
+
+def _audit_screening(
+    audit: AuditLog | None,
+    principal: Principal | None,
+    tool: str,
+    inspection: Inspection,
+) -> None:
+    """Chain a screening finding, when there was one.
+
+    Nothing is recorded for a result with no findings at all. The chain is evidence, not
+    telemetry: `firewall_decisions_total` already counts every screening
+    including the clean ones, because a detection count without its denominator
+    is not a rate. Writing a chained, fsynced entry per clean result would
+    multiply the log by every call for a fact the metric already carries.
+
+    **Families and confidences, never the matched text.** A refusal that quotes
+    the payload is a better attack than the original (ADR 0038), and an audit
+    log is precisely the place that payload would be read out of, years later,
+    by somebody with no idea it was hostile.
+    """
+    findings = inspection.screening.findings
+    if audit is None or not findings:
+        return
+    _chain(
+        audit,
+        AuditCategory.FIREWALL,
+        FIREWALL_EVENT,
+        subject=principal.subject if principal is not None else None,
+        actor=_actor_of(principal),
+        tool=tool,
+        outcome=AuditOutcome.DENIED if inspection.refused else AuditOutcome.ALLOWED,
+        detail={
+            "families": sorted({str(f.family) for f in findings}),
+            "confidences": sorted({str(f.confidence) for f in findings}),
+            "finding_count": len(findings),
+            # What was found, and what crossed the bar. Both, because they are
+            # different questions and the gap between them is the whole of
+            # ADR 0039: `trigger_count` is 0 for a document that was flagged and
+            # served, which is the common case and the one a reader would
+            # otherwise misread as a withheld result.
+            "trigger_count": len(inspection.triggers),
+        },
+    )
+
+
+def _audit_call(
+    audit: AuditLog | None,
+    principal: Principal | None,
+    tool: str,
+    outcome: AuditOutcome,
+    *,
+    reason: str | None = None,
+) -> None:
+    """Chain the fact that a call did or did not reach an upstream."""
+    if audit is None:
+        return
+    _chain(
+        audit,
+        AuditCategory.TOOL_CALL,
+        TOOL_CALL_EVENT,
+        subject=principal.subject if principal is not None else None,
+        actor=_actor_of(principal),
+        tool=tool,
+        outcome=outcome,
+        reason=reason,
+    )
+
+
 def _await_approval(
     store: ApprovalStore | None,
     principal: Principal,
@@ -239,6 +373,7 @@ def build_server(
     firewall: Firewall | None = None,
     approvals: ApprovalStore | None = None,
     approval_ttl: float = DEFAULT_TTL_SECONDS,
+    audit: AuditLog | None = None,
 ) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
@@ -320,7 +455,21 @@ def build_server(
             try:
                 decision = enforce_call(policy, principal, params.name, params.arguments or {})
             except ACPError as exc:
+                # Recorded before the refusal is raised, so a denial reaches the
+                # chain even though the caller never gets a result. An audit log
+                # that only contains the calls which succeeded answers the wrong
+                # question — the interesting row is always the one that stopped.
+                _audit_decision(audit, principal, params, allowed=False, rule=None)
                 raise to_mcp_error(exc) from exc
+
+            _audit_decision(
+                audit,
+                principal,
+                params,
+                allowed=decision.allowed,
+                rule=decision.rule,
+                held=decision.requires_approval,
+            )
 
             if decision.requires_approval:
                 # Held for a person (ADR 0048). Returns before budget is
@@ -374,7 +523,16 @@ def build_server(
         try:
             result = await registry.call_tool(params.name, arguments)
         except ACPError as exc:
+            _audit_call(
+                audit, principal, params.name, AuditOutcome.FAILED, reason=type(exc).__name__
+            )
             raise to_mcp_error(exc) from exc
+
+        # A call that reached an upstream and came back. Separate from the
+        # authorization record above on purpose: "alice was allowed to search"
+        # and "the search ran" are different facts, and a cache hit or a held
+        # approval makes the first true while the second never happens.
+        _audit_call(audit, principal, params.name, AuditOutcome.COMPLETED)
 
         # Screened on the miss path only. A cache hit was screened before it was
         # stored, so what is held is by construction what the firewall allowed —
@@ -382,6 +540,7 @@ def build_server(
         # The honest cost, and its two bounds, are in ADR 0038.
         if firewall is not None:
             inspection = firewall.inspect(result, tool=params.name, tools=registry.known_tools)
+            _audit_screening(audit, principal, params.name, inspection)
             if inspection.refused:
                 # Returned unframed, and that is deliberate: the fence marks
                 # text the gateway did *not* write, so fencing the gateway's own
@@ -426,6 +585,7 @@ def build_app(
     firewall: Firewall | None = None,
     approvals: ApprovalStore | None = None,
     approval_ttl: float = DEFAULT_TTL_SECONDS,
+    audit: AuditLog | None = None,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -464,6 +624,7 @@ def build_app(
         firewall=firewall,
         approvals=approvals,
         approval_ttl=approval_ttl,
+        audit=audit,
     ).streamable_http_app(
         stateless_http=True,
         json_response=True,
@@ -503,7 +664,7 @@ def build_app(
     # body is parsed (ADR 0043), and it can only ever subtract: anything it does
     # not refuse still reaches `enforce_call`, which reads the body and remains
     # authoritative.
-    app.add_middleware(PreDispatchAuthorizationMiddleware, policy=policy)
+    app.add_middleware(PreDispatchAuthorizationMiddleware, policy=policy, audit=audit)
     app.add_middleware(AuthenticationMiddleware, validator=validator, resource=resource)
     app.add_middleware(RequestContextMiddleware)
     return app

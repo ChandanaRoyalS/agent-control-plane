@@ -1,8 +1,21 @@
 # Load and latency measurement
 
 Phase 8. `perf/scenarios.py` decides what to ask and how to read the answer;
-`perf/locustfile.py` is the Locust wiring. Task 61 profiles what this finds and
-task 62 measures the gateway's overhead against a direct upstream call.
+`perf/locustfile.py` is the Locust wiring. `perf/overhead.py` and
+`scripts/measure_overhead.py` are task 62's separate measurement — **what the
+gateway costs against a direct upstream call**, which is a different question
+and is measured the opposite way.
+
+Two questions, and it is worth being clear which is which before reading any
+number below:
+
+| | question | concurrency |
+|---|---|---|
+| `make load` | what happens when it is busy | 20 users |
+| `make overhead` | what the gateway itself costs | one request in flight |
+
+A p50 from the first is mostly a statement about a queue. Only the second is
+the gateway's own cost. See ADR 0054.
 
 ## Running it
 
@@ -10,6 +23,11 @@ task 62 measures the gateway's overhead against a direct upstream call.
 make up            # the stack must be up: gateway, mocks, Keycloak
 make load          # 30 seconds, 20 users
 make load-long     # 5 minutes, 100 users
+make load-ab       # six alternating fsync on/off runs, so the numbers have a range
+make overhead      # sequential, against a direct upstream call (task 62)
+make overhead-ab   # the same, across fsync and prober on/off, to attribute it
+make overhead-ablate  # remove one thing at a time, and itemise the total
+make overhead-ablate-repeat   # the same ladder x3, for a tighter floor
 ```
 
 Or drive it yourself, including the web UI:
@@ -211,6 +229,251 @@ nobody had repeated it.
 
 > **A number without a repetition count is a sample wearing a decimal point.**
 
+## Gateway overhead — what it costs against a direct call
+
+    make up
+    make overhead
+
+A different question from everything above, and deliberately measured the
+opposite way: **sequential, one request in flight**. Under load a p50 is
+dominated by queueing, which is a property of the offered load rather than of
+the gateway. Overhead is the work the gateway does that the upstream would not
+have done, and it is only visible when nothing is waiting. See ADR 0054.
+
+### It prints the gateway's switch settings before it prints a number
+
+Most of what the gateway does per request is optional, and most of the switches
+default to off — `firewall_mode` is `OFF`, `rate_limit_enabled` and
+`quota_enabled` are `False`, `cache_file` and `cost_file` are `None`. So "the
+gateway adds N ms" is not a fact about the gateway; it is a fact about **one
+gateway configured one way**.
+
+The driver reads the running container's environment and prints a register:
+
+```
+    [on ] authentication         signature check against the cached JWKS, ...
+    [on ] result cache           a keyed lookup before dispatch, and a store after it
+    [OFF] quota                  a windowed counter per principal
+    ...
+    Not switchable, and in every number below:
+    [on ] the pre-dispatch header check (ADR 0043)
+    [on ] policy evaluation down to the argument
+    [on ] the hash-chained audit write
+```
+
+Read from `docker inspect acp-gateway` rather than from `docker-compose.yml`,
+because the two disagree the moment anybody sets a variable on the command line
+— `make load-nofsync` does exactly that. And if the container cannot be read,
+**no number is printed at all**.
+
+### A row whose premise is off is skipped, not quietly run as something else
+
+The cache-hit row declares `ACP_CACHE_FILE` as a requirement. Run against a
+gateway with no cache configured it would produce a perfectly plausible table
+in which the cache saves nothing — no error, no warning, and the real finding
+(*the cache was never switched on*) nowhere in the output. So it is skipped, with
+the reason printed.
+
+### Two rows, one tool
+
+| row | what it measures |
+|---|---|
+| cache miss | the full path — policy, budget, a lookup that misses, credential exchange, a real upstream call, screening, the audit write |
+| cache hit | the same question asked twice, answered from memory without crossing the network |
+
+Both are `mock-a__search`. Changing the tool between rows would change the
+*upstream's* work as well as the gateway's, and the difference would stop being
+attributable.
+
+The cache-hit row is here because "the gateway makes calls slower" is not a
+complete sentence about a system that also answers some calls without leaving
+the process. **It was predicted to go negative and does not** — see the measured
+section below, which is the more interesting outcome.
+
+### Measured
+
+One machine, `make up` immediately before, 150 samples each side per row.
+
+**The register found something before a number was printed.**
+`ACP_RATE_LIMIT_ENABLED` and `ACP_QUOTA_ENABLED` are not set in
+`docker-compose.yml` and both default to `False` — while `ACP_COST_FILE` *is*
+set. So `config/costs.yaml` is parsed at every start and never consulted, because
+`_charge` returns immediately when there is no limiter and no quota. **A cost
+table loaded to feed a decision nothing makes.** Fixed separately, because
+turning two switches on changes what these numbers describe.
+
+| row | direct p50 | gateway p50 | added p50 | added p95 | added p99 |
+|---|---|---|---|---|---|
+| cache miss | 5.3 ms | 38.1 ms | **+32.8 ms** | +52.6 ms | +113.7 ms |
+| cache hit | 6.8 ms | 22.8 ms | **+16.0 ms** | +41.7 ms | +97.4 ms |
+
+**The cache is worth 15.3 ms** — the difference between the two gateway figures,
+and the only claim either row supports on its own.
+
+#### The prediction that lost
+
+This file and ADR 0054 both said the cache-hit row was where the overhead goes
+negative. **22.8 ms against 6.8 ms.** Not close.
+
+A cache hit removes the upstream round trip and nothing else, and against a mock
+that round trip is about 6 ms. The gateway still authenticates, evaluates policy,
+screens, frames, and waits for an audit record to reach the disk. **Its own fixed
+cost is larger than the entire thing the cache eliminates.**
+
+Wrong here, not wrong in general: against an upstream taking 200 ms, a 16 ms hit
+wins by an order of magnitude. "Here" is what was measured and therefore all
+that may be said.
+
+#### Attributed, and both predictions scored
+
+**Cache-hit gateway p50** — the pure fixed cost, since it touches no network:
+
+| | probing on | probing off |
+|---|---|---|
+| **fsync on** | 19.1 ms | 20.0 ms |
+| **fsync off** | 13.5 ms | 11.2 ms |
+
+**Cache-miss added p95** — where a tail would show:
+
+| | probing on | probing off |
+|---|---|---|
+| **fsync on** | +106.5 ms | +57.5 ms |
+| **fsync off** | +30.2 ms | +20.0 ms |
+
+**The `fsync` prediction was wrong.** It costs 5.6–8.8 ms, about a third of the
+fixed cost — the largest single item, and not most of it.
+
+**The prober prediction was right and larger than expected.** On the median it
+moves +0.9 and −2.3 ms, which straddles zero and sits inside the run-to-run
+noise: the *direct* p50 across these four runs was 6.4, 5.0, 7.1 and 5.0 ms, and
+that path is a constant. **A difference smaller than the variation of a constant
+is not a difference.** On the tail it is unambiguous and consistent under both
+`fsync` settings: **+106.5 → +57.5 ms**.
+
+A periodic background job cannot touch the median of 150 samples and can own a
+p95. That is why `BACKGROUND` is a separate register.
+
+#### One number that fell out for free
+
+Leanest configuration: cache miss 20.9 ms, cache hit 11.2 ms at the gateway. So
+**the upstream leg costs the gateway 9.7 ms**, against 5.2 ms for the host's own
+direct call to the same mock — and the gateway's leg stays inside the Docker
+network while the host's crosses a published-port proxy.
+
+About **4.5 ms of that is the gateway's own client work** — envelope
+construction, retry and breaker wrappers, response parsing, screening the fresh
+body — rather than distance. The "extra hop" is smaller than it looks.
+
+Derived from two rows of one run. An estimate, stated as one.
+
+#### 11 ms unattributed, and the ladder that itemises it
+
+A request that touches no network still costs 16 ms. Task 61 makes the audit
+`fsync` the obvious suspect, and **obvious is not measured** — which is ADR
+0053's own finding, one task old.
+
+With `fsync` and probing both off, a request touching no network still costs
+11.2 ms. `make overhead-ablate` walks `perf.overhead.ABLATION`, removing one
+switch at a time and printing the marginal cost of each:
+
+```
+- audit fsync            the caller waiting for the record to reach the disk
+- health probing         a catalogue refetch from every upstream every 5 seconds
+- injection screening    every detector run over the result body
+- provenance framing     two content blocks fencing the result as retrieved data
+- trace export           a span per request, shipped over OTLP
+```
+
+Cumulative, so the rungs sum and the last row is a **floor** — what remains is
+authentication, policy, the audit write without its `fsync`, the pre-dispatch
+check, the framework and the extra hop. The cost of that choice: an interaction
+between two switches is billed to whichever is removed first.
+
+**One rung was missing from the register entirely.** `OTEL_TRACES_EXPORTER` ships
+a span per request over OTLP, which is per-request work by any reading. It was
+absent because `FEATURES` was assembled by reading `GatewaySettings`, and tracing
+is configured by OpenTelemetry's own variables. **A register built from one
+source of truth misses everything configured by another.**
+
+#### Itemised — and what the ablation could not see
+
+One pass, six configurations. **Cache hit p50**, the fixed cost:
+
+| configuration | gateway | step |
+|---|---|---|
+| everything on | 17.8 ms | — |
+| − audit fsync | 12.0 ms | **+5.8** |
+| − health probing | 10.4 ms | · |
+| − injection screening | 12.1 ms | · |
+| − provenance framing | 11.7 ms | · |
+| − trace export | 10.8 ms | · |
+| *a direct call* | *5.2 ms* | |
+
+**One of five rungs resolved.** The other four moved the number by 1.6, −1.7,
+0.4 and 1.0 ms while **the control wandered by 2.1 ms** — and two of those steps
+were negative, which as a cost is impossible.
+
+So the report doesn't print them. A step at or below the control's own spread
+prints as `·` and is not attributed. `?` marks the third case: negative *and*
+above the floor, which means the floor understated that column's noise.
+
+**The control is on every row for this reason.** The first version printed the
+direct call once, at the bottom, which hid the only honest scale for reading the
+step column against.
+
+##### The 17.8 ms
+
+| | |
+|---|---|
+| the direct call itself — network and the mock | 5.2 ms |
+| **the audit `fsync`** | **5.8 ms** |
+| everything else, individually unresolved | ~6.8 ms |
+
+Authentication, policy, the audit write minus its `fsync`, the pre-dispatch
+check, the framework and the extra hop are all in that last row, and **this
+instrument cannot separate them**: each is smaller than the variation between
+two container restarts, and every rung needs a restart because these are
+start-up settings.
+
+##### The floor caught an error in the floor
+
+One resolution was first computed from the control's p50 and applied to the p95
+column too. That column then reported steps that were negative *and* above the
+floor. **A tail is structurally noisier than a median**, so a floor measured at
+one percentile says nothing about the other. Each table now computes its own.
+
+##### Where this stops
+
+Not with a bigger sample — the residual is ~7 ms across five mechanisms against
+an instrument whose own restart-to-restart variation is 2 ms. That is a
+resolution limit of the method.
+
+What goes further is per-stage timing from inside the process: `py-spy`, or the
+spans the gateway already emits read out of Jaeger. ADR 0053 declared `py-spy` an
+honest cut because an A/B was stronger evidence and had already named the
+function. **That reasoning held there and stops holding here.**
+
+### What is counted as overhead that arguably is not
+
+- **One extra network hop.** The gateway sits in the middle, so its path is two
+  hops and the direct path is one. Loopback inside a Docker network is small and
+  not zero. Separating it needs a null gateway that forwards without deciding,
+  which is not built.
+- **The direct path is unauthenticated**, because the mock has no auth to offer.
+  The gateway is charged for all of authentication. That is correct — it is part
+  of what the gateway adds — and it is stated because comparing this figure with
+  a proxy that authenticates on both sides compares different quantities.
+
+### And the caveat that matters most
+
+**One machine, mock upstreams that answer in microseconds.** This is the least
+favourable setting a gateway can be measured in: its cost is compared against an
+upstream doing almost nothing. Against a real upstream — a network call, a
+database, a model — the same absolute cost sits under a much larger number.
+
+**Quote the added milliseconds, not the multiple.** The multiple is a statement
+about how fast the mock is.
+
 ## Reproducibility checklist
 
 A throughput number without these is not reproducible, so the report prints the
@@ -230,7 +493,9 @@ first two and this file records the rest:
   cache and a cold result cache are real costs but are not steady state, and in
   a 30-second run they land squarely in the p99
 - **the deployment** — `config/policy.compose.yaml`, `config/cache.yaml`,
-  `config/costs.yaml`, and whether `ACP_AUDIT_FSYNC` is on
+  `config/costs.yaml`, and whether `ACP_AUDIT_FSYNC` is on. `make overhead`
+  reads this out of the running container and prints it; `make load` does not
+  yet, and that is the obvious thing to copy across
 - **two principals** — the run alternates alice and bob, because the cache, the
   rate limiter and the quota counter are all keyed per principal and a
   single-identity run reports a hit rate no real deployment would see

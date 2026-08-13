@@ -60,6 +60,30 @@ audit-verify:  ## Walk the composed stack's chain, checked against the anchor
 audit-checkpoint:  ## Anchor the chain at its current head, then COMMIT the result
 	uv run acp audit checkpoint --log-file audit/audit.jsonl
 
+overhead-ablate-repeat:  ## The same ladder three times, for a tighter resolution floor
+	@echo "Eighteen runs, about twenty-five minutes. Do not use the machine."
+	uv run python scripts/ablate_overhead.py --repeat 3
+
+overhead-ablate:  ## Itemise that overhead: remove one thing at a time, and total it
+	@echo "Six configurations, about eight minutes. Do not use the machine."
+	uv run python scripts/ablate_overhead.py
+
+overhead-ab:  ## Attribute that overhead: fsync and the catalogue prober, on and off
+	@echo "Four runs, about five minutes. Do not use the machine."
+	@for sync in true false; do \
+		for probe in true false; do \
+			ACP_AUDIT_FSYNC=$$sync ACP_HEALTH_PROBING_ENABLED=$$probe \
+				docker compose up -d --wait gateway >/dev/null 2>&1; \
+			uv run python scripts/measure_overhead.py --brief; \
+		done; \
+	done
+	@echo "Restoring the defaults (fsync on, probing on) ..."
+	@docker compose up -d --wait gateway >/dev/null 2>&1
+
+overhead:  ## What the gateway adds versus calling the upstream directly (task 62)
+	@echo "Sequential, one request in flight. About a minute. Do not use the machine."
+	uv run python scripts/measure_overhead.py
+
 load-ab:  ## Three alternating fsync on/off runs, so the numbers carry a range
 	@echo "Six 30s runs, alternating. About five minutes. Do not use the machine."
 	@for rep in 1 2 3; do \

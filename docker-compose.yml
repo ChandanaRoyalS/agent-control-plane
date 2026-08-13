@@ -130,7 +130,7 @@ services:
       # because the firewall below is on: with framing enabled an unfenced block
       # is by construction the gateway speaking, which is what lets a refusal
       # notice be told apart from a document impersonating one.
-      ACP_PROVENANCE_FRAMING_ENABLED: "true"
+      ACP_PROVENANCE_FRAMING_ENABLED: "${ACP_PROVENANCE_FRAMING_ENABLED:-true}"
       # `report` screens every result, logs every finding, and changes nothing
       # the caller receives — where ADR 0038 says a deployment starts. It still
       # evaluates the enforcement bar and logs a result it *would* have withheld
@@ -196,7 +196,7 @@ services:
       # with no configuration at all, because 4318 is already the OTLP/HTTP
       # default.
       OTEL_SERVICE_NAME: agent-control-plane
-      OTEL_TRACES_EXPORTER: otlp
+      OTEL_TRACES_EXPORTER: "${OTEL_TRACES_EXPORTER:-otlp}"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     volumes:
       # Read-only, and that is a security property rather than tidiness. The

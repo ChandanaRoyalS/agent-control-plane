@@ -31,18 +31,23 @@ these exact upstreams, so a name in them is a claim that can be checked.
 
 from __future__ import annotations
 
+import enum
+import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
+from acp.config import GatewaySettings
 from acp.gateway.naming import qualify
 from acp.mocks import mock_a, mock_b
 
 pytestmark = pytest.mark.integration
 
-CONFIG = Path(__file__).resolve().parents[2] / "config"
+ROOT = Path(__file__).resolve().parents[2]
+CONFIG = ROOT / "config"
+COMPOSE = ROOT / "docker-compose.yml"
 
 
 def catalogue() -> set[str]:
@@ -141,3 +146,135 @@ def test_every_tool_the_cache_table_names_exists() -> None:
     unknown = named - catalogue()
 
     assert not unknown, f"cache.yaml names tools the mock fleet does not serve: {unknown}"
+
+
+# ---------------------------------------------------------------------------
+# A control nobody runs is a control that does not exist
+# ---------------------------------------------------------------------------
+#
+# THIS SECTION EXISTS BECAUSE THE SAME BUG SHIPPED SIX TIMES.
+#
+# Every one of them had the same shape: a feature built, tested, merged — and
+# switched off in the only deployment anybody runs, because nothing set its
+# environment variable. `scripts/patch_compose_firewall.py` fixed four at once
+# (cost table, result cache, provenance framing, the firewall). Task 62's
+# overhead register then found two more, and the sixth was the most complete:
+# `ACP_COST_FILE` was set while `ACP_RATE_LIMIT_ENABLED` and `ACP_QUOTA_ENABLED`
+# were not, so `config/costs.yaml` was parsed at every start to feed a decision
+# `_charge` never reached.
+#
+# None of those produce an error. The gateway starts, serves, and is quietly a
+# smaller system than the repository describes.
+#
+# So the check is derived from `GatewaySettings` rather than written out by
+# hand: **anything that defaults to off must be either wired into compose or
+# named below with a reason.** A new optional feature fails this test until
+# somebody decides which it is, and that is the point — the decision is the
+# thing that kept getting skipped.
+
+DELIBERATELY_OFF = {
+    "ACP_TENANT_POLICY_DIR": (
+        "the composed demo runs one Keycloak realm, so there are no tenant "
+        "labels and no per-tenant policy files to point at (ADR 0051's stated "
+        "cut). A second realm would turn multi-tenancy from tested into "
+        "demonstrable, and is listed as a gap rather than done."
+    ),
+    "ACP_FIREWALL_CLASSIFIER_ENABLED": (
+        "it calls a model over Ollama, which the compose stack does not run and "
+        "will not download. ADR 0042 makes the classifier optional precisely so "
+        "the firewall's measured numbers come from the deterministic detectors."
+    ),
+    "ACP_AUTH_ISSUERS_FILE": (
+        "the demo uses the single-issuer settings above (ACP_AUTH_ISSUER and "
+        "friends). The issuers file is the multi-issuer path, and configuring "
+        "both would leave two answers to the question of who is trusted."
+    ),
+    "ACP_SECRETS_FILE": (
+        "both mock upstreams take an exchanged token (ADR 0028), so there is no "
+        "static credential for the store to hold. Wiring an empty secrets store "
+        "would demonstrate the loading code and nothing about the control."
+    ),
+    "ACP_SECRET_KEY_FILE": ("no secrets store, so no key to decrypt it with — see above."),
+}
+
+
+def gateway_environment() -> set[str]:
+    """The `ACP_*` names the gateway service's `environment:` block sets.
+
+    Parsed from the file rather than from `docker compose config`, because that
+    command RESOLVES interpolation: `${ACP_QUOTA_ENABLED:-true}` renders as
+    `true` and a variable that is merely defaulted becomes indistinguishable
+    from one that is pinned. Here the question is only whether the file mentions
+    the name at all, which the text answers and the rendering hides.
+    """
+    text = COMPOSE.read_text(encoding="utf-8")
+    block = re.search(r"^  gateway:\n(.*?)(?=^  \w)", text, re.MULTILINE | re.DOTALL)
+    assert block is not None, "docker-compose.yml has no `gateway:` service"
+    return set(re.findall(r"^\s+(ACP_[A-Z0-9_]+):", block.group(1), re.MULTILINE))
+
+
+def off_by_default() -> dict[str, object]:
+    """Every setting whose default leaves a control switched off.
+
+    `False`, `None` and an enum whose value spells "off" — the three shapes an
+    unwired feature takes in `GatewaySettings`. Derived, so a feature added
+    tomorrow is covered without anybody remembering to add it here.
+    """
+    found: dict[str, object] = {}
+    for name, field in GatewaySettings.model_fields.items():
+        default = field.default
+        is_off_enum = isinstance(default, enum.Enum) and str(default.value).lower() == "off"
+        if default is False or default is None or is_off_enum:
+            found[f"ACP_{name.upper()}"] = default
+    return found
+
+
+def test_the_settings_model_still_has_controls_that_default_to_off() -> None:
+    """The premise. If this ever comes back empty the check below is vacuous and
+    passing for the wrong reason — which is exactly the failure mode of a test
+    that guards against absence."""
+    assert len(off_by_default()) >= len(DELIBERATELY_OFF)
+
+
+def test_every_optional_control_is_wired_or_deliberately_not() -> None:
+    """The one that would have caught all six.
+
+    A feature that defaults to off and is neither set in compose nor named in
+    `DELIBERATELY_OFF` is a feature the demo does not run and nobody decided
+    not to run.
+    """
+    wired = gateway_environment()
+    unaccounted = sorted(set(off_by_default()) - wired - set(DELIBERATELY_OFF))
+    assert not unaccounted, (
+        "these controls default to OFF, are not set in docker-compose.yml, and "
+        "are not listed as deliberately off: " + ", ".join(unaccounted) + ". "
+        "Either wire them into the gateway's environment or add them to "
+        "DELIBERATELY_OFF with the reason."
+    )
+
+
+def test_the_budget_controls_are_wired() -> None:
+    """Named individually as well as covered generically, because this is the
+    one that shipped: `ACP_COST_FILE` set, and nothing to spend against it.
+
+    A generic assertion that happens to cover a specific regression is not the
+    same as an assertion about that regression — the generic one can be
+    satisfied by adding a name to `DELIBERATELY_OFF`."""
+    wired = gateway_environment()
+    assert "ACP_RATE_LIMIT_ENABLED" in wired
+    assert "ACP_QUOTA_ENABLED" in wired
+    assert "ACP_COST_FILE" in wired, "a cost table with nothing to charge against"
+
+
+def test_nothing_is_excused_without_a_reason() -> None:
+    """`DELIBERATELY_OFF` is an escape hatch, and an escape hatch that takes an
+    empty string is how this check gets defeated by the person in a hurry."""
+    for name, reason in DELIBERATELY_OFF.items():
+        assert len(reason) > 40, f"{name} is excused without a real reason"
+
+
+def test_the_excuses_are_for_settings_that_exist() -> None:
+    """A name that has been renamed in `GatewaySettings` would sit here forever
+    excusing nothing, and the real setting would go unchecked."""
+    unknown = sorted(set(DELIBERATELY_OFF) - set(off_by_default()))
+    assert not unknown, f"excused but not an off-by-default setting: {unknown}"

@@ -205,7 +205,11 @@ jobs:
       # this is the only place the artifact is produced by a container and
       # checked from outside it.
       - name: Verify the audit chain the composed gateway wrote
-        run: uv run acp audit verify --log-file audit/audit.jsonl
+        # No anchor. A checkpoint is DEPLOYMENT state, not source: it names a
+        # position in one particular chain, and CI starts a fresh one every run.
+        # Comparing a container's first four entries against an anchor taken on
+        # somebody's laptop is not a tamper check, it is a category error.
+        run: uv run acp audit verify --log-file audit/audit.jsonl --checkpoint /nonexistent
 
       - name: Identity smoke test
         # A separate step, so "the stack works" and "the stack authenticates"

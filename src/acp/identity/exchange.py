@@ -237,11 +237,11 @@ class TokenExchanger:
             msg = f"could not reach the token endpoint for {issuer!r}"
             raise CredentialProviderUnavailableError(msg) from exc
 
-        token = self._token_from(response, issuer=issuer, audience=audience)
+        token = await self._token_from(response, issuer=issuer, audience=audience)
         self._verify_scope(token)
         return token
 
-    def _token_from(
+    async def _token_from(
         self, response: httpx.Response, *, issuer: str, audience: str
     ) -> ExchangedToken:
         if response.status_code != httpx.codes.OK:
@@ -286,7 +286,7 @@ class TokenExchanger:
             # authentication middleware bound. Passing it through four
             # signatures to arrive at the same value would be four more
             # places for it to be dropped.
-            self._audit.record(
+            await self._audit.arecord(
                 AuditCategory.CREDENTIAL,
                 "auth.exchanged",
                 subject=acting.subject if acting else None,

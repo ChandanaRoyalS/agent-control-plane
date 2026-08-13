@@ -156,6 +156,61 @@ durable and every other request keeps running.
 **That is task 61**, and this is the measurement that tells it exactly where to
 look — before a profiler was even attached.
 
+## The measurement: three repetitions, alternating
+
+A single 30-second run on a laptop is a sample, not a measurement. Six runs,
+alternating on/off so machine drift hits both configurations equally
+(`make load-ab`):
+
+| | fsync on | fsync off |
+|---|---|---|
+| throughput | **56.7 req/s** [49.7–66.2] | **120.1 req/s** [115.4–126.2] |
+| served p50 | 299.7 ms [261–321] | 97.0 ms [90–105] |
+| served p95 | 611.7 ms [536–691] | 405.5 ms [395–416] |
+| **listed p50** | **15.1 ms** [14.6–15.6] | 83.5 ms [73–93] |
+| **listed p95** | **35.7 ms** [30.4–40.4] | 160.5 ms [149–166] |
+
+**Durability costs 2.14x of throughput** (per-rep: 2.32, 2.18, 1.91). That is
+the number ADR 0050 §8 promised Phase 8 would produce.
+
+### The fix, against the state before it
+
+| | before | after (n=3) | |
+|---|---|---|---|
+| listed p50 | 191.1 ms | **15.1 ms** (sd 0.4) | **13x** |
+| listed p95 | 2819.4 ms | **35.7 ms** (sd 4.1) | **79x** |
+
+Both deltas are two orders of magnitude larger than the run-to-run spread, so
+they are real whatever the noise. The "before" column is a single run and the
+throughput comparison is therefore *not* claimed as a number.
+
+### The row that proves it twice
+
+`listed` p50 is **15.1 ms with `fsync` on and 83.5 ms with it off** — the
+catalogue listing is 5.5x *faster* in the slower configuration.
+
+That is not a mistake. `tools/list` is pure CPU: filter a catalogue, return. Its
+latency now tracks **how contended the event loop is**, which is exactly what it
+should track. With `fsync` on the gateway runs at 57 req/s because audited work
+waits on the disk, so fewer requests compete for CPU and the listing sails
+through; with `fsync` off it runs at 120 req/s and the loop is genuinely busy.
+
+Before the fix it was 191 ms — tracking the disk it never touches.
+
+### What the repetitions found about the method
+
+Throughput **rose monotonically across reps in both configurations** — 49.7,
+54.3, 66.2 and 115.4, 118.6, 126.2. The machine warms over five minutes, so any
+single run understates, and the first run of a session understates most.
+
+That explains the one earlier number that looked like a regression: a run
+measuring 41.9 req/s, taken immediately after a 40-second image build, sits
+*below* the 49.7–66.2 range this code produces when measured three times. It
+was an outlier, not a change — and it would have gone into an ADR as a fact if
+nobody had repeated it.
+
+> **A number without a repetition count is a sample wearing a decimal point.**
+
 ## Reproducibility checklist
 
 A throughput number without these is not reproducible, so the report prints the

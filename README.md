@@ -588,6 +588,66 @@ and [ADR 0049](docs/decisions/0049-the-operator-channel-is-not-the-agents-channe
 `make up` runs it: the composed policy holds `mock-a__create_ticket`, and
 `config/policy.compose.yaml` has the four commands end to end.
 
+### An audit trail somebody can check
+
+Every authorization decision, credential exchange, tool call and firewall finding
+is written to a chain, each entry carrying the hash of the one before it:
+
+```jsonc
+{"seq": 41208, "prev": "9c1f…", "hash": "0b7f…", "record": {
+  "category": "authorization", "event": "policy.decision",
+  "subject": "alice@example.test", "actor": "agent-1", "tenant": "acme",
+  "tool": "crm__delete-record", "rule": "approve-production-deletes",
+  "outcome": "held", "detail": {"argument_names": ["dataset", "id"]}}}
+```
+
+```bash
+make audit-verify      # exit 1 on a break, and it names the entry
+```
+
+**This is not the application log.** The tempting implementation is a logging
+handler filtering on event names — one integration point, no call-site changes.
+It is wrong: the operational log is level-filtered, sampled and rotated, so a
+chain over it breaks whenever somebody raises a log level, and `logging` swallows
+its own errors *by design*, which removes the entire fail-closed guarantee. A
+compliance story that depends on your log level is not one.
+
+**What a hash chain actually proves.** It detects modification, splicing and
+reordering: edit any record and its hash stops matching, repair that and the next
+entry's `prev` stops matching. It does **not** detect truncation of the tail — a
+shorter valid chain is still a valid chain — or a wholesale rewrite by somebody
+who owns the storage. Both are asserted as *passing* tests in this repository,
+because a chain that appeared to detect everything would be one whose claims
+nobody had checked.
+
+So `acp audit checkpoint` writes a `{seq, head}` anchor, and it is committed:
+
+```bash
+make audit-checkpoint  # then commit config/audit-checkpoint.json
+```
+
+The container mounts `./audit` writable and `./config` read-only, so **the
+gateway can write its own chain and cannot write the anchor that proves it has
+not rewritten that chain.** That is the security property, and it is a mount
+option rather than anybody's discipline. *A chain plus an external anchor is
+tamper-evident; a chain alone is tamper-evident to anybody who already knows
+where it should end.*
+
+Two more decisions that matter. **Redaction runs before the hash**, so the digest
+covers exactly the bytes on disk — the other order produces a verifier that
+reports tampering on a log nobody touched. And a call the gateway cannot record
+**does not happen** (`ACP_AUDIT_REQUIRED`, on by default): an audit log that stops
+recording while the gateway keeps serving is worse than none, because the record
+then asserts by omission that nothing happened during the window somebody will
+eventually ask about. The write failure goes to the operational log and to
+`acp_audit_writes_total{outcome="failed"}` — it has to go somewhere else, because
+the sink that would record it is the thing that failed.
+
+Declared limits, argued in [ADR 0050](docs/decisions/0050-an-audit-record-is-not-a-log-line.md):
+clean firewall screenings are not chained (only findings), one process writes one
+file with no global ordering across a fleet, there is no signature because anyone
+who can write the file can write a chain, and rotation is unsolved.
+
 ## Development
 
 ```bash
@@ -622,7 +682,7 @@ naming.
 | 4 · Budgets | **complete** | Quotas, rate limits, cost accounting, per-principal result caching |
 | 5 · Firewall | **complete** | Detectors, framing, refusal, both corpora, a sealed held-out split, an optional classifier, per-family precision/recall with intervals, and a committed-baseline regression gate in CI |
 | 6 · Approvals | **complete** | Human-in-the-loop via multi-round-trip requests: a policy effect that holds a call, an approval bound to the call rather than the token, and an operator channel on a listener the agent cannot reach |
-| 7 · Audit | planned | Tamper-evident log, multi-tenancy, threat model |
+| 7 · Audit | **in progress** | Tamper-evident log, multi-tenancy, threat model |
 | 8 · Performance | planned | Load testing, profiling, published latency |
 | 9 · Demo | planned | Live trace console, scripted attack demo |
 | 10 · Release | planned | v1.0.0, documentation, write-up |

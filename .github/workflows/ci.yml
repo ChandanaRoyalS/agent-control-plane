@@ -199,6 +199,14 @@ jobs:
       - name: Smoke test
         run: python scripts/compose_smoke.py
 
+      # The chain a REAL gateway wrote, verified by the real verifier. Every unit
+      # test in tests/unit/audit would still pass if the gateway never called the
+      # audit log at all, and every integration test drives an in-process app —
+      # this is the only place the artifact is produced by a container and
+      # checked from outside it.
+      - name: Verify the audit chain the composed gateway wrote
+        run: uv run acp audit verify --log-file audit/audit.jsonl
+
       - name: Identity smoke test
         # A separate step, so "the stack works" and "the stack authenticates"
         # fail with different names in the checks list. They are different

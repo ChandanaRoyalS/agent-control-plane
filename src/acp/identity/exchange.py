@@ -57,6 +57,9 @@ from dataclasses import dataclass
 
 import httpx
 
+from acp.audit import AuditLog
+from acp.audit import Category as AuditCategory
+from acp.audit import Outcome as AuditOutcome
 from acp.exceptions import (
     ConfigurationError,
     CredentialExchangeError,
@@ -125,12 +128,14 @@ class TokenExchanger:
         client_secret: str,
         peer_audiences: Iterable[str] = (),
         cache: CredentialCache | None = None,
+        audit: AuditLog | None = None,
         http: httpx.AsyncClient | None = None,
         request_timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         self.issuers = issuers
         self._client_id = client_id
         self._client_secret = client_secret
+        self._audit = audit
         # Every audience this gateway brokers for. Used only to answer one
         # question about a credential that has just been minted: does it also
         # open somebody else's door? Empty is not a failure — it just means the
@@ -267,6 +272,29 @@ class TokenExchanger:
                 "expires_in": expires_in,
             },
         )
+        acting = current_principal()
+        if self._audit is not None:
+            # The credential half of the plan's four categories. Never the token:
+            # the audience and the lifetime are what an auditor needs — *which
+            # door was opened, for how long* — and the token itself is the one
+            # value whose presence in a durable file would be a breach rather
+            # than a record.
+            #
+            # The principal comes from the contextvar rather than being
+            # threaded down, because that is where it already is: the
+            # exchange happens inside the request whose principal the
+            # authentication middleware bound. Passing it through four
+            # signatures to arrive at the same value would be four more
+            # places for it to be dropped.
+            self._audit.record(
+                AuditCategory.CREDENTIAL,
+                "auth.exchanged",
+                subject=acting.subject if acting else None,
+                actor=acting.actor.subject if acting and acting.actor else None,
+                upstream=audience,
+                outcome=AuditOutcome.ALLOWED,
+                detail={"issuer": issuer, "expires_in": expires_in},
+            )
         return ExchangedToken(
             access_token=token, audience=audience, issuer=issuer, expires_at=expires_at
         )

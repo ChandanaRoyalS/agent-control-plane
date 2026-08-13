@@ -49,6 +49,9 @@ from starlette.routing import Route
 
 from acp.approvals.record import ApprovalRequest, State
 from acp.approvals.store import ApprovalStore
+from acp.audit import AuditLog
+from acp.audit import Category as AuditCategory
+from acp.audit import Outcome as AuditOutcome
 
 APPROVALS_PATH: Final = "/approvals"
 APPROVAL_PATH: Final = "/approvals/{token}"
@@ -233,8 +236,15 @@ def _unanswerable(held: ApprovalRequest | None, now: float) -> Response | None:
     return None
 
 
-def build_decide(store: ApprovalStore, credential: str) -> Any:
-    """`POST /approvals/{token}` — a person's answer, recorded once."""
+def build_decide(store: ApprovalStore, credential: str, audit: AuditLog | None = None) -> Any:
+    """`POST /approvals/{token}` — a person's answer, recorded once.
+
+    **The human's decision is chained.** Every other audit record in this project
+    is a thing the gateway decided; this is the one a person did, and it is the
+    row an investigation actually wants — *who approved the delete, and what did
+    they say they had checked*. Leaving it out would mean the chain could show a
+    call being held and then running, with nothing in between explaining why.
+    """
 
     async def decide(request: Request) -> Response:
         if not _authorized(request, credential):
@@ -253,12 +263,32 @@ def build_decide(store: ApprovalStore, credential: str) -> Any:
         decided = store.decide(token, approved=answer.approved, reason=answer.reason)
         if decided is None:  # pragma: no cover — the lookup above already found it
             return JSONResponse({"error": "no such request"}, status_code=404)
+
+        if audit is not None:
+            # The operator's `reason` **is** recorded here, unlike almost
+            # everything else a caller supplies. It is the one free-text field in
+            # the system written by a trusted, authenticated human who knows it
+            # is being kept — "checked with the data team" is exactly what makes
+            # this row worth having, and withholding it would leave an approval
+            # nobody can account for.
+            audit.record(
+                AuditCategory.APPROVAL,
+                "approval.decided",
+                subject=decided.subject,
+                tool=decided.tool,
+                rule=decided.rule,
+                outcome=AuditOutcome.ALLOWED if answer.approved else AuditOutcome.DENIED,
+                reason=answer.reason or None,
+                detail={"fingerprint": decided.fingerprint, "request_state": decided.token},
+            )
         return JSONResponse({**as_view(decided, now), "notice": UNTRUSTED_NOTICE})
 
     return decide
 
 
-def operator_routes(store: ApprovalStore | None, credential: str) -> Sequence[Route]:
+def operator_routes(
+    store: ApprovalStore | None, credential: str, audit: AuditLog | None = None
+) -> Sequence[Route]:
     """The approval routes, or none at all.
 
     Two ways to get an empty list, and they are the same answer to different
@@ -274,7 +304,7 @@ def operator_routes(store: ApprovalStore | None, credential: str) -> Sequence[Ro
     if store is None or not credential:
         return ()
 
-    routes = [Route(APPROVAL_PATH, build_decide(store, credential), methods=["POST"])]
+    routes = [Route(APPROVAL_PATH, build_decide(store, credential, audit), methods=["POST"])]
     reader = store if isinstance(store, ApprovalReader) else None
     if reader is not None:
         routes.insert(0, Route(APPROVALS_PATH, build_pending(reader, credential), methods=["GET"]))

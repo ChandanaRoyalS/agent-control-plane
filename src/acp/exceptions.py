@@ -382,3 +382,29 @@ class QuotaExceededError(ACPError):
 
     code = -32051
     recoverable = True
+
+
+class AuditUnavailableError(ACPError):
+    """This call could not be recorded, so it was not made.
+
+    The fail-closed half of task 56. An audit log that stops recording while the
+    gateway keeps serving is worse than no audit log, because the record then
+    *asserts by omission* that nothing happened during the window somebody will
+    eventually ask about. So an unwritable record refuses the call, unless a
+    deployment has deliberately said otherwise with ``ACP_AUDIT_REQUIRED=false``.
+
+    ``recoverable`` is **true**, and honestly so: a full disk or a transient I/O
+    error is a condition that gets fixed, and the identical call will succeed
+    afterwards. "Wait and retry" is the correct agent behaviour, unlike a policy
+    denial where the correct behaviour is to stop.
+
+    **The wire message names nothing.** A caller told "the audit log is down"
+    has learned which subsystem to attack in order to stop being recorded, and
+    that is a strictly more valuable thing to know than the fact they were
+    refused. The reason goes to the operational log at ERROR and to a metric —
+    which is also the only place it *can* go, since the sink that would normally
+    record it is the thing that just failed.
+    """
+
+    code = -32060
+    recoverable = True

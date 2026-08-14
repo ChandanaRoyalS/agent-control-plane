@@ -310,6 +310,46 @@ turning two switches on changes what these numbers describe.
 **The cache is worth 15.3 ms** — the difference between the two gateway figures,
 and the only claim either row supports on its own.
 
+#### Measured again, with the budget controls on
+
+Bug 81 turned `ACP_RATE_LIMIT_ENABLED` and `ACP_QUOTA_ENABLED` on. The same
+command, on the merged stack, on a later day:
+
+| row | direct p50 | gateway p50 | added p50 | added p95 | added p99 |
+|---|---|---|---|---|---|
+| cache miss | 3.6 ms | 24.4 ms | **+20.7 ms** | +34.7 ms | +42.6 ms |
+| cache hit | 4.3 ms | 13.7 ms | **+9.4 ms** | +20.8 ms | +23.7 ms |
+
+**Two controls were added and every number went down.** That is impossible as a
+statement about the code — a token-bucket draw and a windowed counter cannot
+remove work — and unremarkable as a statement about the machine.
+
+Which makes it a measurement rather than a mystery. The gateway's cache-miss
+median fell 13.7 ms while its workload strictly grew, so between-session
+variation on this harness is **at least 13.7 ms at p50 — 42% of the headline in
+the table above.**
+
+The control says the same thing. The direct call does identical work against the
+same mock in both runs and moved from 5.3 → 3.6 ms and 6.8 → 4.3 ms. A machine
+that is a third faster is a third faster for both paths, so its variation mostly
+**divides out of a ratio and does not divide out of a difference**:
+
+| | first run | second run | disagreement |
+|---|---|---|---|
+| cache miss, added p50 | +32.8 ms | +20.7 ms | **37%** |
+| cache miss, gateway ÷ direct | 7.19x | 6.72x | **6%** |
+| cache hit, added p50 | +16.0 ms | +9.4 ms | **41%** |
+| cache hit, gateway ÷ direct | 3.35x | 3.19x | **5%** |
+
+**Read the multiple; quote the milliseconds with their range.** Three
+alternating rounds bound the variation within a session, which is what this
+harness does and what ADR 0053 taught it to do. Nothing bounded the variation
+*between* sessions until there were two to compare. See ADR 0054's amendment.
+
+The cache is worth 10.7 ms in this run against 15.3 ms in the first — the same
+spread, on a quantity that is a difference of two medians and therefore inherits
+the noise of both.
+
 #### The prediction that lost
 
 This file and ADR 0054 both said the cache-hit row was where the overhead goes

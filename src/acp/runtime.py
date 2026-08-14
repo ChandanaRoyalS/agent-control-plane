@@ -16,6 +16,7 @@ the ASGI app's own lifespan.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,14 +26,18 @@ from starlette.applications import Starlette
 
 from acp.approvals import DEFAULT_TTL_SECONDS, ApprovalStore, InMemoryApprovalStore
 from acp.audit import AuditLog, FileAuditSink
+from acp.audit.chain import Entry
 from acp.budget import CostTable, QuotaCounter, RateLimiter, load_costs
+from acp.budget.account import parties
 from acp.config import GatewaySettings, allowed_hosts_for, load_issuers, load_upstreams
+from acp.console.events import from_entry, observed
+from acp.console.hub import TraceHub
 from acp.exceptions import ConfigurationError
 from acp.firewall import Firewall, OllamaClassifier, firewall_for, ollama_classify
 from acp.firewall.decision import ENFORCEABLE
 from acp.firewall.decision import Mode as FirewallMode
 from acp.gateway import UpstreamRegistry, build_app
-from acp.health import DEFAULT_INTERVAL, HealthMonitor
+from acp.health import DEFAULT_INTERVAL, HealthMonitor, HealthRecord, UpstreamHealth
 from acp.identity import (
     ExchangedCredentials,
     IssuerRegistry,
@@ -108,6 +113,7 @@ async def gateway_from_configs(
     approvals: ApprovalStore | None = None,
     approval_ttl: float = DEFAULT_TTL_SECONDS,
     audit: AuditLog | None = None,
+    console: TraceHub | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -145,11 +151,70 @@ async def gateway_from_configs(
         elif detect_drift:
             logger.warning("schema.drift_detection_inert", extra={"reason": "probing disabled"})
 
+        def _watch_spend(payer: str, tool: str, cost: float) -> None:
+            """A budget was drawn. Task 63's fifth source.
+
+            `observed`, and this one is worth being precise about *why*. The
+            chain records the calls a running total could be computed from, and
+            never the total — a total is a thing you derive, not a fact that
+            happened. Publishing it as `recorded` would put a number on screen
+            that no entry in the chain contains.
+
+            `payer` is the tenant-qualified account, decoded by the module that
+            encodes it (`acp.budget.parties`) rather than split on a comma here
+            — a subject containing one is exactly what its list encoding exists
+            to make harmless.
+            """
+            if console is None:
+                return
+            tenant, subject = parties(payer)
+            console.publish(
+                observed(
+                    "budget",
+                    "budget.charged",
+                    time.time(),
+                    subject=subject,
+                    tenant=tenant,
+                    detail={"tool": tool, "cost": cost},
+                )
+            )
+
+        def _watch_health(record: HealthRecord, previous: UpstreamHealth) -> None:
+            """An upstream's health changed. Task 63.
+
+            `observed`, not recorded: nobody asked for this and no decision was
+            made about a call, so it is not an auditable fact — and the console
+            renders it differently so a viewer can tell (ADR 0056).
+            """
+            if console is None:
+                return
+            console.publish(
+                observed(
+                    "upstream",
+                    "health.changed",
+                    # `time.time()`, and deliberately NOT `record.checked_at`.
+                    # Health's clock defaults to `time.monotonic`, which counts
+                    # from an arbitrary origin — rendering it on the console's
+                    # timeline beside audit's `time.time` would put every health
+                    # event somewhere near 1970. Two clocks, one timeline, and
+                    # only one of them means anything to a browser.
+                    time.time(),
+                    upstream=record.upstream,
+                    detail={
+                        "state": str(record.state),
+                        "previous": str(previous),
+                        "tools": record.tool_count,
+                        "error": record.error,
+                    },
+                )
+            )
+
         monitor = (
             HealthMonitor(
                 clients,
                 interval=probe_interval,
                 on_catalogue=detector.observe if detector else None,
+                on_health=_watch_health,
             )
             if probe_health
             else None
@@ -180,6 +245,7 @@ async def gateway_from_configs(
             approvals=approvals,
             approval_ttl=approval_ttl,
             audit=audit,
+            charged=_watch_spend,
         )
         # Attached rather than yielded, so the signature every existing caller
         # and test depends on is unchanged. The probe loop itself is started by
@@ -194,6 +260,14 @@ async def gateway_from_configs(
         # two are: the signature every existing caller depends on is unchanged.
         app.state.approvals = approvals
         app.state.audit = audit
+        # Task 63. Read by `acp serve` to mount the console on the admin
+        # listener, beside the operator channel and behind the same credential.
+        #
+        # Passed in rather than built here, because the hub has to reach the
+        # `AuditLog` before this function is called — that is what publishes to
+        # it. Not handed to `build_app`: the console is an admin-side concern
+        # and the gateway app has no business knowing one exists.
+        app.state.console = console
         yield app
     finally:
         # Reverse order, and every close attempted even if one raises — a
@@ -208,7 +282,7 @@ async def gateway_from_configs(
         logger.info("gateway.stopped", extra={"upstream_count": len(clients)})
 
 
-def build_audit_log(settings: GatewaySettings) -> AuditLog | None:
+def build_audit_log(settings: GatewaySettings, console: TraceHub | None = None) -> AuditLog | None:
     """Open the audit chain, or return ``None`` when none is configured.
 
     Presence-based on the path, like the secret store: a boolean would let a
@@ -264,7 +338,21 @@ def build_audit_log(settings: GatewaySettings) -> AuditLog | None:
             "fsync": settings.audit_fsync,
         },
     )
-    return AuditLog(sink, required=settings.audit_required)
+    published = None
+    if console is not None:
+        # A closure rather than handing the hub to `AuditLog`, so the audit
+        # module keeps no import of the console. Audit is what everything else
+        # depends on; an import pointing at a demo aid is the dependency
+        # pointing the wrong way, and the first thing to make the audit tests
+        # need a UI.
+        #
+        # `entry.record` and not the AuditRecord: the mapping is the REDACTED
+        # one, and it is what was hashed and written. Rendering the object would
+        # put on screen exactly the fields redaction exists to keep off disk.
+        def published(entry: Entry) -> None:
+            console.publish(from_entry(entry.seq, entry.record))
+
+    return AuditLog(sink, required=settings.audit_required, published=published)
 
 
 def _gated_rule_names(policy: Policy | PolicySet) -> set[str]:
@@ -797,8 +885,14 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     )
     firewall = build_firewall(settings)
     approvals = build_approval_store(settings, policy)
+    # Task 63. Built unconditionally and cheap when nobody is watching — an
+    # empty subscriber list and a 50-event ring. Whether the console is
+    # *reachable* is decided by `console_routes`, which needs the operator
+    # credential; building the hub here regardless keeps that one decision in
+    # one place instead of two that have to agree.
+    console = TraceHub()
     # Before the exchanger, which is handed it.
-    audit = build_audit_log(settings)
+    audit = build_audit_log(settings, console)
     validator = await build_token_validator(settings)
     exchanger = build_token_exchanger(settings, validator, upstreams, audit)
     check_upstream_audiences(upstreams, exchanging=exchanger is not None)
@@ -831,6 +925,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             approvals=approvals,
             approval_ttl=settings.approval_ttl_seconds,
             audit=audit,
+            console=console,
         ) as app:
             yield app
     finally:

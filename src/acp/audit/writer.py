@@ -84,6 +84,10 @@ from acp.observability.log import redact
 
 logger = logging.getLogger(__name__)
 
+PUBLISH_FAILURE_EVENT = "audit.publish_failed"
+"""A watcher's fan-out raised. WARNING, not ERROR: the entry is durable and the
+guarantee held; only the live view missed it."""
+
 FAILURE_EVENT = "audit.write_failed"
 """Emitted to the *operational* log, at ERROR, when the chain cannot be written.
 
@@ -107,11 +111,23 @@ class AuditLog:
         *,
         required: bool = True,
         clock: Callable[[], float] = time.time,
+        published: Callable[[Entry], None] | None = None,
     ) -> None:
         self._sink = sink
         self._required = required
         self._clock = clock
         self._limiter: CapacityLimiter | None = None
+        self._published = published
+        """Called with each entry **after** it is durable. Task 63's console.
+
+        A callback rather than an object, so this module does not know a console
+        exists. Audit is the thing every other subsystem depends on; giving it an
+        import of a demo aid would be the dependency pointing the wrong way, and
+        the first thing to make the audit tests need a UI.
+
+        See `arecord` for *when* it is called, which is the part that is easy to
+        get wrong.
+        """
 
     @property
     def head(self) -> str:
@@ -203,8 +219,46 @@ class AuditLog:
             # limiter acquisition, and task 61's own before/after measured that
             # paying it for a page-cache write costs 29% of throughput. The
             # sink is asked rather than guessed at — see `AuditSink.blocking`.
-            return call()
-        return await to_thread.run_sync(call, limiter=self._serialiser())
+            entry = call()
+        else:
+            entry = await to_thread.run_sync(call, limiter=self._serialiser())
+        self._publish(entry)
+        return entry
+
+    def _publish(self, entry: Entry | None) -> None:
+        """Hand a durable entry to whoever is watching. Task 63.
+
+        **Here, and not inside `record`**, for two reasons that both matter.
+
+        *It has to be on the event loop.* When the sink blocks, `record` runs on
+        a worker thread — and the console hub wakes its subscribers with an
+        `asyncio.Event`, which **is not thread safe**. Setting one from a worker
+        thread does not reliably wake the loop and can leave the event's internal
+        waiter list inconsistent. Publishing after the `await` returns puts it
+        back on the loop, where the primitive is safe. That bug would have been
+        intermittent, load-dependent, and would have looked like the console
+        dropping events.
+
+        *And it has to be after the write.* A watcher must never see a call the
+        chain does not have — the console is a view of the record, and a view
+        that runs ahead of it is a second account (ADR 0056).
+
+        `None` means the write failed and this deployment opted out of
+        fail-closed. Nothing is published, deliberately: an event on screen would
+        assert a chain position that does not exist. The operational log already
+        carries `audit.write_failed` at ERROR, which is where a failure of the
+        recorder belongs.
+        """
+        if entry is None or self._published is None:
+            return
+        try:
+            self._published(entry)
+        except Exception:
+            # A watcher cannot be allowed to fail a request. The entry is
+            # already durable; everything past this point is a demo aid, and a
+            # demo aid raising inside `arecord` would turn a browser into an
+            # outage.
+            logger.warning(PUBLISH_FAILURE_EVENT, exc_info=True)
 
     def record(
         self,

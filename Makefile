@@ -113,6 +113,15 @@ load-long:  ## The same, for 5 minutes at 100 users — for profiling (task 61)
 	uv run locust -f perf/locustfile.py --host http://127.0.0.1:8080 \
 		--headless --users 100 --spawn-rate 20 --run-time 5m
 
+console:  ## Where to watch the live trace, and the token to paste (task 63)
+	@echo "Open      http://127.0.0.1:9090/console"
+	@token=$$(grep -E 'ACP_APPROVAL_OPERATOR_TOKEN' docker-compose.yml | sed 's/.*: *//'); \
+		echo "Paste     $${token:-<ACP_APPROVAL_OPERATOR_TOKEN is not set in docker-compose.yml>}"
+	@echo
+	@echo "The ADMIN listener, not the gateway's: the stream carries every"
+	@echo "principal's activity, so an agent must not be able to address it."
+	@echo "Drive some traffic with 'make smoke' and watch it arrive."
+
 smoke:  ## Assert the composed stack actually works
 	uv run python scripts/compose_smoke.py
 

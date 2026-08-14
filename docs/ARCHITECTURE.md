@@ -1,0 +1,283 @@
+# Architecture
+
+The parts of this gateway that are worth walking through slowly, moved out of
+the README so a stranger can still understand the project in five minutes
+(task 65's bar) and a reader who wants the detail can have all of it.
+
+**These sections were written as the features shipped and are kept verbatim.**
+Each one is a walkthrough with real output in it — the identity chain, the
+per-upstream credentials, the invariant that is proved and then re-proved by a
+mutation harness, and what happens to an upstream that cannot exchange.
+
+The *decisions* live in [`docs/decisions/`](decisions/) — 57 of them. This file
+is how the system behaves; those are why it behaves that way.
+
+---
+
+### Schema drift
+
+An MCP server can change what it exposes at any moment, and the protocol has no
+way to announce it. The catalogue every upstream serves is recorded in
+[`config/schema-baseline.json`](../config/schema-baseline.json) and compared against
+what they actually serve.
+
+```bash
+acp schemas capture   # record the current catalogues as the baseline
+acp schemas check     # compare; exits 1 on drift, so it works as a CI gate
+```
+
+The case worth caring about is not a broken argument schema. A tool description
+is prose that goes verbatim into the agent's prompt — the only field an upstream
+can rewrite without breaking a single client. A server that has behaved perfectly
+for six months and then appends a sentence beginning "Before using any other
+tool…" produces no timeout, no error and no failed call. See
+[ADR 0013](decisions/0013-schema-drift-is-a-security-control.md).
+
+### Identity
+
+Every request resolves to a **principal** — the human the work is for, plus the
+agent doing it, taken from RFC 8693's `act` claim. Both halves matter: what may
+be read is a question about the subject, and which agent may act at all is a
+question about the actor.
+
+```bash
+ACP_AUTH_ISSUER=https://idp.example/realms/acp
+ACP_AUTH_AUDIENCE=https://gw.example/mcp
+ACP_AUTH_RESOURCE=https://gw.example/mcp
+```
+
+There is no `ACP_AUTH_ENABLED`. Authentication is on when a provider is
+configured, because a boolean is a thing somebody forgets to set. Leave these
+blank and the gateway runs unauthenticated, says so at startup, and stamps
+`principal: anonymous` on every request line. See
+[ADR 0015](decisions/0015-two-identities-not-one.md).
+
+The JWKS URL is deliberately absent above: it is discovered from the issuer's
+metadata, and discovery is where the binding between an issuer and its keys gets
+*verified* rather than assumed — RFC 8414 §3.3 requires that document to name the
+same issuer it was fetched for.
+
+Trusting more than one authorization server needs
+[`config/issuers.yaml`](../config/issuers.yaml.example), because each one is an
+indivisible registration: issuer, audience, key set and algorithms configured
+and used together. A token's `iss` selects one registration *before* any rule is
+applied, so a credential from one server can never be judged by another's
+rules — the resource-server form of the authorization-server mix-up attack. See
+[ADR 0016](decisions/0016-bind-every-credential-to-its-issuer.md).
+
+`ACP_AUTH_RESOURCE` turns that outward. A client no longer has to be configured
+with the authorization server: an unauthenticated request gets
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://gw.example/.well-known/oauth-protected-resource/mcp"
+```
+
+and that document names the servers a token can come from. The refusal becomes
+an instruction. The identifier it publishes is also the audience a token must
+carry — the client sends it as RFC 8707's `resource` parameter, the server
+copies it into `aud` — so following the chain from a 401 produces exactly the
+token this gateway demands, with nothing hardcoded on either side. That one
+path is the only unauthenticated route in the gateway, and the exemption is
+derived from the document rather than configured, so there is no allow-list for
+a second entry to appear in. See
+[ADR 0017](decisions/0017-let-the-gateway-tell-clients-where-to-authenticate.md).
+
+None of the above needs a real authorization server to *develop* against, and
+that is the problem: it also means none of it had been tested against one. So
+`docker compose up` now runs one. Keycloak, a committed realm
+([`config/keycloak/`](../config/keycloak/)), two users, and the gateway configured
+against it — so the auth stack is reproducible from a clone rather than from a
+paragraph describing which buttons to press.
+
+```bash
+make up                 # gateway, mocks, Jaeger, Keycloak
+make token              # an access token for alice (USER=bob for the other one)
+make identity-smoke     # sixteen assertions against the real server
+```
+
+That last command is the point of having it. Everything in tasks 22–24 is tested
+against fakes written in this repository, and a mock that agrees with your
+client proves only that you wrote both. `identity_smoke.py` asks the questions
+only a real server can answer — including the one worth more than the rest put
+together: it obtains a genuine, correctly signed token from Keycloak's own
+`master` realm, an authorization server the gateway does not trust, and asserts
+it is refused. That is ADR 0016's entire argument, checked against something
+that did not come from here.
+
+Two things surfaced the moment a real server was on the other end, and both are
+written up in
+[ADR 0018](decisions/0018-one-issuer-string-from-every-vantage-point.md):
+an issuer is an *identity* and not an address, so it has to be one exact string
+from inside the network and outside it; and `http://keycloak:8080` is neither
+TLS nor loopback, which is refused by default and permitted by naming that one
+host in `ACP_AUTH_INSECURE_ISSUER_HOSTS` — an escape hatch built deliberately
+and logged at every start, because the ones people improvise are broader and
+quieter.
+
+Since the same task, `ACP_AUTH_REQUIRED` defaults to true: a gateway that is a
+security control refuses to start without the thing that makes it one. Note the
+polarity — it is not a switch that turns authentication on, it is an assertion
+that a provider is configured, so forgetting it produces a gateway that will not
+start rather than one that will not check.
+
+### Per-upstream credentials
+
+With `ACP_AUTH_CLIENT_ID` set, the gateway stops forwarding anything. For each
+call it presents the caller's token to the authorization server and asks for a
+different one — same subject, audience narrowed to a single upstream, lifetime
+in minutes (RFC 8693). It holds no long-lived upstream credential, because there
+is none to hold.
+
+```bash
+make identity-smoke
+```
+
+```
+  ok   the upstream did NOT receive the caller's token — upstream saw '9f2c…', caller presented 'a71b…'
+  ok   the credential names exactly one upstream — aud=['acp-upstream-mock-a']
+  ok   the credential still names the human it was minted for — sub=alice, actor=acp-gateway
+  ok   each upstream receives its own credential
+  ok   a repeat call reuses the cached credential
+  ok   a second caller is not served the first one's credential
+```
+
+The first of those is the invariant the whole security model rests on, observed
+from outside the gateway process: the mock upstreams report the credential they
+were handed, so the fingerprint can be compared against the caller's own token
+rather than inferred from the code that built the request. The full run, with
+what each line proves, is captured in
+[`docs/demo/identity-smoke.txt`](demo/identity-smoke.txt).
+
+The inbound token has to exist somewhere — RFC 8693 sends it as `subject_token`
+— so it lives in its own context variable with exactly one reader, rather than
+as a field on `Principal`. That makes the invariant a statement about one call
+site instead of about a value passed everywhere. See
+[ADR 0019](decisions/0019-mint-a-credential-per-call-and-hold-none.md).
+
+**The scope is enforced on what came back, not on what was asked for.** RFC 8707
+names an exchange target by URI, and the gateway sends it — but measurement
+rather than assumption showed that Keycloak accepts that parameter and discards
+it, returning a token for the `audience` even when `resource` names something
+else entirely, with no error. An exchange it declines to narrow comes back valid
+at *every* upstream in the estate.
+
+So every minted credential is checked against the request: it must name the
+target, and it must not name another upstream this gateway brokers for. That
+second condition is the confused-deputy rule written out, and it holds against a
+conformant server, a non-conformant one, and a misconfigured one alike, because
+it reads what was granted rather than what was requested. `make probe-resource`
+re-runs the measurement; the results are in
+[ADR 0020](decisions/0020-check-the-scope-you-were-granted.md).
+
+**Credentials are held between calls, and the cache key is the interesting
+line.** Minting one per call means two round trips to the authorization server
+on every request, and an agent turn that fans out across five upstreams becomes
+five token requests — so the gateway becomes a load generator aimed at the one
+component whose failure takes down authentication for everything.
+
+Caching fixes that and introduces the one bug in this phase that is a privilege
+escalation rather than an outage. Key an entry on the upstream — the obvious
+thing, since what is cached is "the credential for mock-a" — and bob's call is
+served the credential minted for alice. It is fast. It returns data. Every
+functional test passes. The only trace is a line in the upstream's audit log
+saying alice read a record bob asked for.
+
+So the key is the *request*, not a model of it: a SHA-256 digest of the subject
+token, plus the audience, plus the resource indicator. An exchange is a pure
+function of what is sent to the token endpoint, so identical input means
+identical output, and the correctness argument is one sentence with nothing left
+to reason about. Keying on claims instead — `sub`, `act`, scopes — requires
+guessing which of them the authorization server used, and being wrong is
+invisible. A digest rather than the token itself, because a cache is a structure
+whose whole purpose is to outlive the request that created it.
+
+The entries expire 30 seconds early, so a credential is never live when the
+gateway checks it and dead when the upstream reads it. Concurrent misses for one
+key collapse into a single exchange, because a burst from one agent turning into
+a burst of token requests is how a rate-limited authorization server takes down
+the whole estate. And the whole thing is bounded, which is a security limit
+before it is a memory one: an authenticated caller with a token mint could
+otherwise drive it in a loop. See
+[ADR 0022](decisions/0022-a-cache-key-that-cannot-be-wrong.md).
+
+### The invariant, proved and then re-proved
+
+The whole model reduces to one sentence: **the inbound token never reaches an
+upstream.** Policy, budgets, the firewall and the audit log all assume the
+upstream is holding a credential the gateway minted rather than the one the
+caller presented. If that fails, a compromised upstream can act as the caller
+everywhere the caller has access, and the gateway has added a hop rather than
+removed a risk.
+
+So it is a suite rather than an assertion. A real signed JWT enters through the
+real authentication middleware, over HTTP. Every wrapper composition, every
+method on the upstream protocol, and every credential shape is driven to a
+recorder that keeps requests verbatim — happy path, retry, cache hit, open
+circuit, refused exchange, static API key, no audience, no principal. Each
+recorded request is then searched *whole*: URL, every header name, every header
+value, body. A token copied into `X-Forwarded-Authorization` or tucked into
+`params._meta` would sail past a check that reads one header and stops.
+
+Two of the tests are static, and they are the ones that outlive this week. Every
+method on the `Upstream` protocol must be classified as either swept or
+incapable of making a request, so adding one fails the build until somebody
+says which. And the set of source files that may call `current_subject_token`
+must be exactly one — that function is the only way to obtain the inbound token,
+so the set of its callers bounds the set of code that could ever leak it.
+
+```bash
+make prove-passthrough
+```
+
+```
+Breaking the no-passthrough invariant on purpose.
+
+  caught   forward the caller's token in a second header
+  caught   log the token alongside the exchange
+  caught   carry the token in the request envelope
+
+all 3 mutations were caught by the assertion meant to catch them
+```
+
+Because a test that has never been observed to fail is a claim about whoever
+wrote it. This project already shipped that once — 297 green tests certifying a
+client no real MCP server would have accepted a request from — so the harness
+breaks the invariant three ways and fails the build unless the suite notices,
+*and the assertion meant to catch it is the one that fires*. It runs on every
+pull request. See [ADR 0023](decisions/0023-prove-the-invariant-and-prove-the-proof.md).
+
+### Upstreams that cannot exchange
+
+Everything above assumes an upstream can take part in RFC 8693. Plenty cannot —
+an API key issued out of band, an appliance that will never learn OAuth — and
+until task 29 those could not be configured at all, because `audience` is
+mandatory once exchange is on.
+
+```bash
+acp secrets init                        # a key and an empty encrypted store
+acp secrets set legacy-crm-api-key      # prompts, or reads stdin; never argv
+acp secrets list                        # names only, never values
+```
+
+```yaml
+- name: legacy-crm
+  url: https://crm.internal/mcp
+  credential_ref: legacy-crm-api-key    # a name, never a value
+  credential_header: X-API-Key
+  credential_scheme: ""
+```
+
+The honest claim for a secret store is narrower than the phrase suggests: it
+turns *many* secrets into *one* key. That defends against a stray copy of a
+config directory, a backup, a support bundle, a repository somebody cloned, and
+a value that would otherwise sit where anything reading `/proc` can see it —
+which is how secrets actually leak, in bulk. It does not defend against root on
+the box, the running process, or anyone who can read the key file, and
+`SECURITY.md` says so.
+
+There is one backend and an interface, because the good answer is a workload
+identity that Vault exchanges for a short lease with nothing durable on disk —
+a deployment this project cannot test here, and a half-working adapter for it
+would look like support. The seam is in the right place; the swap is one class.
+See [ADR 0021](decisions/0021-one-backend-behind-a-seam.md).

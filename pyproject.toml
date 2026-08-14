@@ -1,6 +1,6 @@
 [project]
 name = "agent-control-plane"
-version = "0.1.0"
+version = "1.0.0"
 description = "A policy-enforcing, injection-screening MCP gateway for AI agents."
 readme = "README.md"
 requires-python = ">=3.12"   # the floor, and CI's `compat` job runs the suite on it

@@ -32,6 +32,8 @@ from acp import __version__
 from acp.approvals.operator import operator_routes
 from acp.approvals.store import ApprovalStore
 from acp.audit import AuditLog
+from acp.console.app import console_routes
+from acp.console.hub import TraceHub
 from acp.health import HealthMonitor
 from acp.observability import metrics
 from acp.schema import DriftDetector
@@ -135,6 +137,8 @@ def build_admin_app(
     approvals: ApprovalStore | None = None,
     operator_credential: str = "",
     audit: AuditLog | None = None,
+    *,
+    console: TraceHub | None = None,
 ) -> Starlette:
     """The admin ASGI app. Small on purpose — it must not be able to fail.
 
@@ -147,6 +151,11 @@ def build_admin_app(
     the one part that *writes* — and what it writes is a permission. With no
     credential configured the routes are absent rather than present and closed;
     `operator_routes` argues why.
+
+    `console` is keyword-only, and the `*` is load-bearing rather than stylistic:
+    a sixth positional parameter trips `PLR0917`, and the rule is right. Five
+    interchangeable `X | None` arguments in a row is already a call site where
+    transposing two of them type-checks and silently mounts the wrong thing.
     """
     return Starlette(
         routes=[
@@ -155,5 +164,11 @@ def build_admin_app(
             Route(READY_PATH, build_readyz(health), methods=["GET"]),
             Route(SCHEMAS_PATH, build_schemas(drift), methods=["GET"]),
             *operator_routes(approvals, operator_credential, audit),
+            # Here for the same reason the approval channel is (task 63): this
+            # stream carries every principal's activity, so an agent that could
+            # open it would read what every other caller is doing. It shares the
+            # operator credential because it is the same trust boundary — a
+            # person who may approve a call may certainly watch one.
+            *console_routes(console, operator_credential),
         ]
     )

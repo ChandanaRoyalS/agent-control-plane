@@ -55,6 +55,21 @@ logger = logging.getLogger(__name__)
 DEFAULT_INTERVAL = 15.0
 DEFAULT_JITTER = 0.3
 
+HealthObserver = Callable[["HealthRecord", "UpstreamHealth"], object]
+"""Something that wants to know when an upstream's health changes.
+
+The trace console (task 63) is the first, and the hook exists rather than health
+importing it for the same reason `CatalogueObserver` does: **health has no
+business knowing what a console is.** It is called on transitions only, with the
+new record and the state it came from.
+
+Not the audit chain, and that is the honest part. An upstream's health changing
+is not a decision this gateway made about anybody's call — no principal asked
+for it, nothing was permitted or refused — so it is not an auditable fact. The
+console shows it marked `observed`: true when emitted, gone when this process
+is (ADR 0056).
+"""
+
 CatalogueObserver = Callable[[str, ListToolsResult], object]
 """Something that wants to see each catalogue the prober fetches.
 
@@ -119,6 +134,7 @@ class HealthMonitor:
         clock: Callable[[], float] | None = None,
         uniform: Callable[[float, float], float] | None = None,
         on_catalogue: CatalogueObserver | None = None,
+        on_health: HealthObserver | None = None,
     ) -> None:
         self._upstreams = list(upstreams)
         self._interval = interval
@@ -126,6 +142,7 @@ class HealthMonitor:
         self._clock = clock or time.monotonic
         self._uniform = uniform or random.uniform
         self._on_catalogue = on_catalogue
+        self._on_health = on_health
         self._records: dict[str, HealthRecord] = {
             u.config.name: HealthRecord(u.config.name) for u in self._upstreams
         }
@@ -264,6 +281,23 @@ class HealthMonitor:
                     "tools": tool_count,
                 },
             )
+            self._notify(self._records[name], previous)
+
+    def _notify(self, record: HealthRecord, previous: UpstreamHealth) -> None:
+        """Tell the health observer, if there is one, and survive it if it fails.
+
+        Wrapped for the reason `_offer` gives and one more: this observer is a
+        **demo aid**. An exception from a trace console must not be able to stop
+        health monitoring, which is the thing that withdraws a broken upstream's
+        tools — a debugging convenience taking down a control is the worst
+        possible trade.
+        """
+        if self._on_health is None:
+            return
+        try:
+            self._on_health(record, previous)
+        except Exception:
+            logger.exception("health.observer_failed", extra={"upstream": record.upstream})
 
     # -- the loop ----------------------------------------------------------
 

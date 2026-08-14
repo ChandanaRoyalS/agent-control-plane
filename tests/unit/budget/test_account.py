@@ -7,7 +7,7 @@ about collisions, not about arithmetic.
 
 from __future__ import annotations
 
-from acp.budget import RateLimiter, account, enforce_rate_limit
+from acp.budget import RateLimiter, account, enforce_rate_limit, parties
 
 
 def test_two_tenants_same_subject_are_two_accounts() -> None:
@@ -50,3 +50,42 @@ def test_one_tenants_spend_cannot_drain_anothers_bucket() -> None:
     # acme's alice is now empty; globex's alice is untouched.
     enforce_rate_limit(limiter, account("globex", "alice"), now)
     enforce_rate_limit(limiter, account("globex", "alice"), now)
+
+
+# ---------------------------------------------------------------------------
+# Reading it back — task 63
+# ---------------------------------------------------------------------------
+
+
+def test_an_account_round_trips() -> None:
+    assert parties(account("acme", "alice")) == ("acme", "alice")
+
+
+def test_an_untenanted_account_round_trips_with_no_tenant() -> None:
+    """`None` and a real label are different accounts by construction, and the
+    inverse has to preserve that or the console shows an untenanted principal
+    as belonging to a tenant called `null`."""
+    assert parties(account(None, "alice")) == (None, "alice")
+
+
+def test_a_subject_containing_the_separator_survives() -> None:
+    """THE CASE THE LIST ENCODING EXISTS FOR. Splitting on a comma at the call
+    site would have read this subject as a tenant — and the display would
+    attribute one principal's spend to another's tenant."""
+    payer = account("acme", 'al,ice"]')
+    assert parties(payer) == ("acme", 'al,ice"]')
+
+
+def test_a_subject_with_a_comma_is_not_confusable_with_a_tenant() -> None:
+    """The stronger form: two different principals must not decode alike."""
+    assert parties(account(None, "acme,alice")) != parties(account("acme", "alice"))
+
+
+def test_something_that_is_not_an_account_decodes_to_nothing() -> None:
+    """A display path is not the place to raise. The value came from a
+    dictionary key inside a running gateway, and a console that crashes on an
+    unfamiliar one is worse than a console that renders it blank."""
+    assert parties("not json") == (None, None)
+    assert parties("[1,2,3]") == (None, None)
+    assert parties('{"tenant":"acme"}') == (None, None)
+    assert parties("[1,2]") == (None, None)

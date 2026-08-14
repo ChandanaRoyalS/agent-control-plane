@@ -1,6 +1,6 @@
 # Architecture decisions
 
-Fifty-seven decisions, each about ten minutes to read, each with the
+Fifty-eight decisions, each about ten minutes to read, each with the
 alternatives that were rejected and why.
 
 **Where a decision was made because something was measured, the measurement is
@@ -125,6 +125,12 @@ If you have ten minutes and want the ones that carry the most weight:
 |---|---|
 | [0056](0056-the-console-is-a-view-of-the-record-not-a-second-account.md) | the trace console streams the audit chain itself, because two accounts of one event is a question nobody wants at 3am |
 | [0057](0057-the-demo-reports-what-happened-it-does-not-assert-it.md) | three temptations refused, and the finding that only a demo willing to be surprised could produce |
+
+## The release
+
+| | |
+|---|---|
+| [0058](0058-a-version-is-a-promise-about-a-surface.md) | a version number is a promise about a surface, so the surface is a file and a test fails when it changes |
 
 ---
 

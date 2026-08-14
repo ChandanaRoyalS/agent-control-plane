@@ -1,0 +1,197 @@
+name: Release
+
+# Task 67. A tag is the one event in this repository that produces an artifact
+# somebody else runs, so it is the one place where "the checks passed on some
+# commit" is not good enough. Everything here re-verifies the tagged commit
+# itself, and every assertion runs BEFORE anything is pushed.
+#
+# A separate workflow from `ci.yml` on purpose. CI runs on every push and pull
+# request and must stay fast; this runs a handful of times a year and may take
+# as long as it needs. Merging them would mean adding `if: startsWith(github.ref,
+# 'refs/tags/')` to half the steps of a file everybody reads daily.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # to create the GitHub release
+  packages: write # to push to ghcr.io
+
+env:
+  UV_FROZEN: "1"
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  release:
+    name: verify · publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      # ------------------------------------------------------------------
+      # Refuse before building. A tag is cheap to delete and an image on a
+      # public registry is not.
+      # ------------------------------------------------------------------
+
+      - name: Refuse a tag that disagrees with the code
+        id: version
+        # The failure this prevents: `git tag v1.1.0` on a commit whose
+        # `acp.__version__` still says 1.0.0, producing an image whose
+        # `--version` contradicts the tag it was published under. Nothing else
+        # in the pipeline would notice, and the contradiction would surface in
+        # somebody else's bug report.
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          code="$(uv run python -c 'import acp; print(acp.__version__)')"
+          echo "tag: $tag"
+          echo "code: $code"
+          if [ "$tag" != "$code" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} disagrees with acp.__version__ (${code})"
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+          echo "minor=${tag%.*}" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse a release the changelog does not describe
+        # Exits 1 when CHANGELOG.md has no section for this version, or has one
+        # with an empty body. A release published with empty notes is
+        # indistinguishable from one whose notes were lost.
+        run: |
+          uv run python scripts/release_notes.py \
+            --version "${{ steps.version.outputs.version }}" > /tmp/notes.md
+          echo "--- notes ---"
+          cat /tmp/notes.md
+
+      - name: Refuse a release whose public surface was never accepted
+        # The same check the suite runs, repeated here because this is the
+        # moment the surface stops being a repository's business and becomes a
+        # promise to whoever pulls the image. ADR 0058.
+        run: uv run python scripts/capture_surface.py
+
+      - name: Lint
+        run: uv run ruff check --output-format=github .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Test
+        run: uv run pytest
+
+      - name: Prove the security tests can fail
+        # All four run whatever the others do, so one failure does not hide
+        # three answers (lesson 54). `rc` is what makes the step fail if any of
+        # them did -- `;` alone would report success on the last one.
+        run: |
+          rc=0
+          uv run python scripts/mutate_no_passthrough.py || rc=1
+          uv run python scripts/mutate_result_cache.py   || rc=1
+          uv run python scripts/mutate_refusal.py        || rc=1
+          uv run python scripts/prove_predispatch.py     || rc=1
+          exit $rc
+
+      # ------------------------------------------------------------------
+      # Build, assert, then push. Never the other way round.
+      # ------------------------------------------------------------------
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          # The docker exporter cannot load a manifest list, and buildx attaches
+          # a provenance attestation by default -- which turns the build's
+          # output into one. Off, so `load: true` produces a single image this
+          # job can actually run its assertions against.
+          provenance: false
+          build-args: WITH_MOCKS=false
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+
+      - name: Confirm the published image contains no mock upstreams
+        # `WITH_MOCKS` is a build argument, and a build argument with a typo in
+        # its name is silently ignored — the build succeeds and ships two
+        # servers with deliberately controllable failure modes inside an
+        # artifact whose purpose is to be a security boundary. Checked rather
+        # than trusted, on the exact image about to be pushed.
+        run: |
+          if docker run --rm --entrypoint python \
+               "${IMAGE}:${{ steps.version.outputs.version }}" \
+               -c "import acp.mocks" 2>/dev/null; then
+            echo "::error::acp.mocks is importable in the image about to be published"
+            exit 1
+          fi
+          echo "acp.mocks is absent, as intended"
+
+      - name: Confirm the published image does not run as root
+        run: |
+          uid=$(docker run --rm --entrypoint id \
+                  "${IMAGE}:${{ steps.version.outputs.version }}" -u)
+          echo "container uid: $uid"
+          [ "$uid" = "10001" ]
+
+      - name: Confirm the image reports the version it is tagged with
+        # The tag, the code and the artifact, agreeing. Two of the three were
+        # checked before the build; this is the third.
+        run: |
+          reported=$(docker run --rm --entrypoint python \
+                       "${IMAGE}:${{ steps.version.outputs.version }}" \
+                       -c "import acp; print(acp.__version__)")
+          echo "reported: $reported"
+          case "$reported" in
+            *"${{ steps.version.outputs.version }}"*) ;;
+            *) echo "::error::image reports '$reported'"; exit 1 ;;
+          esac
+
+      - name: Log in to ghcr.io
+        # Deliberately after every assertion. A login before the checks would
+        # mean a failed check leaves a session open to a registry for the rest
+        # of the job.
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        # Three tags: the exact version, the minor line, and `latest`. `latest`
+        # is a convenience and a hazard — it is what somebody gets when they
+        # forget to pin — so the README pins a version everywhere it shows a
+        # `docker run`.
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          docker tag "${IMAGE}:${version}" "${IMAGE}:${{ steps.version.outputs.minor }}"
+          docker tag "${IMAGE}:${version}" "${IMAGE}:latest"
+          docker push "${IMAGE}:${version}"
+          docker push "${IMAGE}:${{ steps.version.outputs.minor }}"
+          docker push "${IMAGE}:latest"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file /tmp/notes.md \
+            --verify-tag

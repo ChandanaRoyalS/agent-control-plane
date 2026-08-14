@@ -132,6 +132,20 @@ attack-demo-enforce:  ## The same demo with the firewall withholding, not just l
 	@echo "Restoring the default (report) ..."
 	@docker compose up -d --wait gateway >/dev/null 2>&1
 
+.PHONY: surface surface-capture release-notes
+
+surface:  ## Check the public surface still matches docs/surface.json (task 67)
+	uv run python scripts/capture_surface.py
+
+surface-capture:  ## Accept the current public surface as the snapshot
+	@echo "Accepting the current surface. Read the diff before committing it:"
+	@echo "a line leaving docs/surface.json is a promise leaving this release."
+	@echo
+	uv run python scripts/capture_surface.py --capture
+
+release-notes:  ## Print this version's section of CHANGELOG.md
+	uv run python scripts/release_notes.py
+
 smoke:  ## Assert the composed stack actually works
 	uv run python scripts/compose_smoke.py
 

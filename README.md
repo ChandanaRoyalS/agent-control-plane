@@ -96,8 +96,8 @@ measured under.
 | attack recall — exfiltration | 100% | ADR 0047 |
 | attack recall — `delayed_multi_step`, `plain_assertion` | **0%** | [THREAT_MODEL](docs/THREAT_MODEL.md) |
 | precision, worst family | 38%, interval **[0–75%]** | ADR 0047 |
-| gateway overhead, cache miss | **+32.8 ms** p50 | [ADR 0054](docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md) |
-| gateway overhead, cache hit | +16.0 ms p50 | ADR 0054 |
+| gateway overhead, cache miss | **6.7-7.2x** a direct call (+21 to +33 ms) p50 | [ADR 0054](docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md) |
+| gateway overhead, cache hit | 3.2-3.4x (+9 to +16 ms) p50 | ADR 0054 |
 | of which the audit `fsync` | 5.8 ms | ADR 0054 |
 | durability costs | **2.14x** throughput | [ADR 0053](docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md) |
 | head-of-line blocking, fixed | p95 2819 ms → 35.7 ms | ADR 0053 |

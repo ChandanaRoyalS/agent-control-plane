@@ -23,6 +23,11 @@ account too broad is shared state between strangers.
 from __future__ import annotations
 
 import json
+from typing import Final
+
+PARTIES: Final = 2
+"""A tenant and a subject. Named so the length check below is a statement
+rather than a magic number."""
 
 
 def account(tenant: str | None, subject: str) -> str:
@@ -34,3 +39,31 @@ def account(tenant: str | None, subject: str) -> str:
     ever share an account with the untenanted pool.
     """
     return json.dumps([tenant, subject], separators=(",", ":"), ensure_ascii=False)
+
+
+def parties(payer: str) -> tuple[str | None, str | None]:
+    """The inverse: which tenant and subject an account string names.
+
+    Here rather than at the call site because **the format has an owner**, and
+    the one place that writes it is the only place that should claim to read it.
+    The trace console (task 63) wants to display who spent, and doing that by
+    splitting on a comma would be string surgery on somebody else's encoding —
+    which works until a subject contains a comma, which is precisely the case
+    the list encoding above exists to make harmless.
+
+    Returns `(None, None)` for anything that is not an account this module
+    wrote. A display path is not the place to raise: the value came from a
+    dictionary key inside a running gateway, and a console that crashes on an
+    unfamiliar one is worse than a console that renders it blank.
+    """
+    try:
+        decoded = json.loads(payer)
+    except (json.JSONDecodeError, TypeError):
+        return (None, None)
+    if not isinstance(decoded, list) or len(decoded) != PARTIES:
+        return (None, None)
+    tenant, subject = decoded
+    return (
+        tenant if isinstance(tenant, str) else None,
+        subject if isinstance(subject, str) else None,
+    )

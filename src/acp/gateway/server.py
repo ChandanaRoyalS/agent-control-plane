@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -134,6 +134,7 @@ def _charge(
     limiter: RateLimiter | None,
     costs: CostTable | None,
     quota: QuotaCounter | None,
+    charged: Callable[[str, str, float], None] | None = None,
 ) -> None:
     """Draw this call against both budgets, or raise the refusal it earns.
 
@@ -163,6 +164,17 @@ def _charge(
             enforce_quota(quota, payer, time.time(), cost)
     except ACPError as exc:
         raise to_mcp_error(exc) from exc
+
+    if charged is not None:
+        # Task 63's spend line, and it is reported **after** both draws
+        # succeeded rather than before them. A refused call is not spend — the
+        # budget was not debited — and a console that counted the attempt would
+        # show a total that disagrees with the limiter the moment anybody is
+        # throttled, which is exactly when somebody is looking at it.
+        #
+        # A callback, so this module keeps no idea that a console exists. See
+        # `AuditLog.published` for the same boundary drawn the same way.
+        charged(payer, tool, cost)
 
 
 def _served_from_cache(results: ResultCache, key: ResultKey, tool: str) -> CallToolResult | None:
@@ -387,6 +399,7 @@ def build_server(
     approvals: ApprovalStore | None = None,
     approval_ttl: float = DEFAULT_TTL_SECONDS,
     audit: AuditLog | None = None,
+    charged: Callable[[str, str, float], None] | None = None,
 ) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
@@ -520,6 +533,7 @@ def build_server(
             limiter=limiter,
             costs=costs,
             quota=quota,
+            charged=charged,
         )
         # The result cache, and its position in this function is the whole
         # security argument (ADR 0035). Everywhere else in this codebase caching
@@ -616,6 +630,7 @@ def build_app(
     approvals: ApprovalStore | None = None,
     approval_ttl: float = DEFAULT_TTL_SECONDS,
     audit: AuditLog | None = None,
+    charged: Callable[[str, str, float], None] | None = None,
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
@@ -655,6 +670,7 @@ def build_app(
         approvals=approvals,
         approval_ttl=approval_ttl,
         audit=audit,
+        charged=charged,
     ).streamable_http_app(
         stateless_http=True,
         json_response=True,

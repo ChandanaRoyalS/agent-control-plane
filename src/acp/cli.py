@@ -572,6 +572,11 @@ def _serve_command(args: argparse.Namespace) -> int:
                     getattr(app.state, "approvals", None),
                     settings.approval_operator_token,
                     getattr(app.state, "audit", None),
+                    # The hub the audit log publishes to. The same object,
+                    # deliberately, and for the same reason as the approval
+                    # store above: a console pointed at a second hub would
+                    # show an empty page while the gateway served traffic.
+                    console=getattr(app.state, "console", None),
                 ),
                 settings.admin_host,
                 settings.admin_port,

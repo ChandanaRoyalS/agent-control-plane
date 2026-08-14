@@ -1,0 +1,439 @@
+{
+  "surface_version": "acp-surface-v1",
+  "settings": [
+    {
+      "variable": "ACP_ADMIN_ENABLED",
+      "type": "bool",
+      "default": "True"
+    },
+    {
+      "variable": "ACP_ADMIN_HOST",
+      "type": "str",
+      "default": "'127.0.0.1'"
+    },
+    {
+      "variable": "ACP_ADMIN_PORT",
+      "type": "int",
+      "default": "9090"
+    },
+    {
+      "variable": "ACP_ALLOWED_HOSTS",
+      "type": "list[str]",
+      "default": "['127.0.0.1', 'localhost']"
+    },
+    {
+      "variable": "ACP_ALLOWED_ORIGINS",
+      "type": "list[str]",
+      "default": "[]"
+    },
+    {
+      "variable": "ACP_APPROVAL_MAX_PENDING",
+      "type": "int",
+      "default": "256"
+    },
+    {
+      "variable": "ACP_APPROVAL_OPERATOR_TOKEN",
+      "type": "str",
+      "default": "''"
+    },
+    {
+      "variable": "ACP_APPROVAL_TTL_SECONDS",
+      "type": "float",
+      "default": "300.0"
+    },
+    {
+      "variable": "ACP_AUDIT_FILE",
+      "type": "Path | None",
+      "default": "None"
+    },
+    {
+      "variable": "ACP_AUDIT_FSYNC",
+      "type": "bool",
+      "default": "True"
+    },
+    {
+      "variable": "ACP_AUDIT_REQUIRED",
+      "type": "bool",
+      "default": "True"
+    },
+    {
+      "variable": "ACP_AUTH_ALGORITHMS",
+      "type": "list[str]",
+      "default": "['RS256', 'RS384', 'RS512', 'ES256', 'ES384', 'PS256']"
+    },
+    {
+      "variable": "ACP_AUTH_AUDIENCE",
+      "type": "str",
+      "default": "''"
+    },
+    {
+      "variable": "ACP_AUTH_CLIENT_ID",
+      "type": "str",
+      "default": "''"
+    },
+    {
+      "variable": "ACP_AUTH_CLIENT_SECRET",
+      "type": "str",
+      "default": "''"
+    },
+    {
+      "variable": "ACP_AUTH_CREDENTIAL_CACHE_MAX_ENTRIES",
+      "type": "int",
+      "default": "1024"
+    },
+    {
+      "variable": "ACP_AUTH_DISCOVERY_TIMEOUT",
+      "type": "float",
+      "default": "5.0"
+    },
+    {
+      "variable": "ACP_AUTH_INSECURE_ISSUER_HOSTS",
+      "type": "list[str]",
+      "default": "[]"
+    },
+    {
+      "variable": "ACP_AUTH_ISSUER",
+      "type": "str",
+      "default": "''"
+    },
+    {
+      "variable": "ACP_AUTH_ISSUERS_FILE",
+      "type": "Path | None",
+      "default": "None"
+    },
+    {
+      "variable": "ACP_AUTH_JWKS_CACHE_TTL",
+      "type": "float",
+      "default": "600.0"
+    },
+    {
+      "variable": "ACP_AUTH_JWKS_MIN_REFRESH_INTERVAL",
+      "type": "float",
+      "default": "30.0"
+    },
+    {
+      "variable": "ACP_AUTH_JWKS_URL",
+      "type": "str",
+      "default": "''"
+    },
+    {
+      "variable": "ACP_AUTH_LEEWAY",
+      "type": "float",
+      "default": "60.0"
+    },
+    {
+      "variable": "ACP_AUTH_REQUIRED",
+      "type": "bool",
+      "default": "True"
+    },
+    {
+      "variable": "ACP_AUTH_RESOURCE",
+      "type": "str",
+      "default": "''"
+    },
+    {
+      "variable": "ACP_AUTH_TOKEN_ENDPOINT",
+      "type": "str",
+      "default": "''"
+    },
+    {
+      "variable": "ACP_CACHE_FILE",
+      "type": "Path | None",
+      "default": "None"
+    },
+    {
+      "variable": "ACP_COST_FILE",
+      "type": "Path | None",
+      "default": "None"
+    },
+    {
+      "variable": "ACP_FIREWALL_ALLOWED_HOSTS",
+      "type": "list[str]",
+      "default": "[]"
+    },
+    {
+      "variable": "ACP_FIREWALL_CLASSIFIER_ENABLED",
+      "type": "bool",
+      "default": "False"
+    },
+    {
+      "variable": "ACP_FIREWALL_CLASSIFIER_ENDPOINT",
+      "type": "str",
+      "default": "'http://127.0.0.1:11434/api/generate'"
+    },
+    {
+      "variable": "ACP_FIREWALL_CLASSIFIER_MODEL",
+      "type": "str",
+      "default": "'llama3.2'"
+    },
+    {
+      "variable": "ACP_FIREWALL_CLASSIFIER_TIMEOUT_SECONDS",
+      "type": "float",
+      "default": "5.0"
+    },
+    {
+      "variable": "ACP_FIREWALL_MODE",
+      "type": "Mode(off|report|enforce)",
+      "default": "off"
+    },
+    {
+      "variable": "ACP_HEALTH_PROBE_INTERVAL",
+      "type": "float",
+      "default": "15.0"
+    },
+    {
+      "variable": "ACP_HEALTH_PROBING_ENABLED",
+      "type": "bool",
+      "default": "True"
+    },
+    {
+      "variable": "ACP_HOST",
+      "type": "str",
+      "default": "'127.0.0.1'"
+    },
+    {
+      "variable": "ACP_LOG_FORMAT",
+      "type": "str",
+      "default": "'auto'"
+    },
+    {
+      "variable": "ACP_LOG_LEVEL",
+      "type": "str",
+      "default": "'INFO'"
+    },
+    {
+      "variable": "ACP_POLICY_FILE",
+      "type": "Path",
+      "default": "config/policy.yaml"
+    },
+    {
+      "variable": "ACP_PORT",
+      "type": "int",
+      "default": "8080"
+    },
+    {
+      "variable": "ACP_PROVENANCE_FRAMING_ENABLED",
+      "type": "bool",
+      "default": "False"
+    },
+    {
+      "variable": "ACP_QUOTA_ENABLED",
+      "type": "bool",
+      "default": "False"
+    },
+    {
+      "variable": "ACP_QUOTA_LIMIT",
+      "type": "float",
+      "default": "10000.0"
+    },
+    {
+      "variable": "ACP_QUOTA_WINDOW_SECONDS",
+      "type": "float",
+      "default": "86400.0"
+    },
+    {
+      "variable": "ACP_RATE_LIMIT_CAPACITY",
+      "type": "float",
+      "default": "60.0"
+    },
+    {
+      "variable": "ACP_RATE_LIMIT_ENABLED",
+      "type": "bool",
+      "default": "False"
+    },
+    {
+      "variable": "ACP_RATE_LIMIT_REFILL_PER_SECOND",
+      "type": "float",
+      "default": "1.0"
+    },
+    {
+      "variable": "ACP_RESULT_CACHE_MAX_ENTRIES",
+      "type": "int",
+      "default": "512"
+    },
+    {
+      "variable": "ACP_SCHEMA_BASELINE_FILE",
+      "type": "Path",
+      "default": "config/schema-baseline.json"
+    },
+    {
+      "variable": "ACP_SCHEMA_DRIFT_DETECTION_ENABLED",
+      "type": "bool",
+      "default": "True"
+    },
+    {
+      "variable": "ACP_SECRETS_FILE",
+      "type": "Path | None",
+      "default": "None"
+    },
+    {
+      "variable": "ACP_SECRET_KEY_FILE",
+      "type": "Path | None",
+      "default": "None"
+    },
+    {
+      "variable": "ACP_TENANT_POLICY_DIR",
+      "type": "Path | None",
+      "default": "None"
+    },
+    {
+      "variable": "ACP_UPSTREAMS_FILE",
+      "type": "Path",
+      "default": "config/upstreams.yaml"
+    }
+  ],
+  "commands": [
+    {
+      "path": "acp",
+      "options": [
+        "--version"
+      ]
+    },
+    {
+      "path": "acp audit",
+      "options": []
+    },
+    {
+      "path": "acp audit checkpoint",
+      "options": [
+        "--checkpoint",
+        "--log-file"
+      ]
+    },
+    {
+      "path": "acp audit verify",
+      "options": [
+        "--checkpoint",
+        "--log-file"
+      ]
+    },
+    {
+      "path": "acp call",
+      "options": [
+        "--args",
+        "--connect-timeout",
+        "--name",
+        "--read-timeout",
+        "--tool",
+        "--url"
+      ]
+    },
+    {
+      "path": "acp policy",
+      "options": []
+    },
+    {
+      "path": "acp policy explain",
+      "options": [
+        "--actor",
+        "--arg",
+        "--policy",
+        "--subject",
+        "--tool"
+      ]
+    },
+    {
+      "path": "acp policy simulate",
+      "options": [
+        "--log",
+        "--policy",
+        "--show"
+      ]
+    },
+    {
+      "path": "acp probe",
+      "options": [
+        "--connect-timeout",
+        "--name",
+        "--read-timeout",
+        "--url"
+      ]
+    },
+    {
+      "path": "acp schemas",
+      "options": []
+    },
+    {
+      "path": "acp schemas capture",
+      "options": [
+        "--allow-partial",
+        "--baseline",
+        "--upstreams-file"
+      ]
+    },
+    {
+      "path": "acp schemas check",
+      "options": [
+        "--baseline",
+        "--upstreams-file"
+      ]
+    },
+    {
+      "path": "acp secrets",
+      "options": []
+    },
+    {
+      "path": "acp secrets init",
+      "options": [
+        "--force",
+        "--key-file",
+        "--secrets-file"
+      ]
+    },
+    {
+      "path": "acp secrets list",
+      "options": [
+        "--key-file",
+        "--secrets-file"
+      ]
+    },
+    {
+      "path": "acp secrets set",
+      "options": [
+        "--key-file",
+        "--secrets-file"
+      ]
+    },
+    {
+      "path": "acp serve",
+      "options": [
+        "--host",
+        "--port",
+        "--upstreams-file"
+      ]
+    }
+  ],
+  "audit": {
+    "version": [
+      "acp-audit-v1"
+    ],
+    "categories": [
+      "approval",
+      "authorization",
+      "credential",
+      "firewall",
+      "tool_call"
+    ],
+    "outcomes": [
+      "allowed",
+      "completed",
+      "denied",
+      "failed",
+      "held"
+    ],
+    "fields": [
+      "category",
+      "event",
+      "at",
+      "subject",
+      "actor",
+      "tenant",
+      "tool",
+      "upstream",
+      "rule",
+      "outcome",
+      "reason",
+      "detail"
+    ]
+  }
+}

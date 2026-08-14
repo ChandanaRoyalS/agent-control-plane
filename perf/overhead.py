@@ -439,6 +439,16 @@ ABLATION: Final = (
         removes="a span per request, shipped over OTLP",
         switch={"OTEL_TRACES_EXPORTER": "none"},
     ),
+    Rung(
+        label="- quota",
+        removes="a windowed counter read and incremented per call",
+        switch={"ACP_QUOTA_ENABLED": "false"},
+    ),
+    Rung(
+        label="- rate limit",
+        removes="a token-bucket draw per call",
+        switch={"ACP_RATE_LIMIT_ENABLED": "false"},
+    ),
 )
 """The itemised cost, one switch removed at a time.
 

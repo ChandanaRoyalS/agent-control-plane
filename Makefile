@@ -122,6 +122,16 @@ console:  ## Where to watch the live trace, and the token to paste (task 63)
 	@echo "principal's activity, so an agent must not be able to address it."
 	@echo "Drive some traffic with 'make smoke' and watch it arrive."
 
+attack-demo:  ## The same agent twice: direct, then through the gateway (task 64)
+	uv run python scripts/attack_demo.py
+
+attack-demo-enforce:  ## The same demo with the firewall withholding, not just logging
+	@echo "Restarting the gateway with ACP_FIREWALL_MODE=enforce ..."
+	@ACP_FIREWALL_MODE=enforce docker compose up -d --wait gateway >/dev/null 2>&1
+	-uv run python scripts/attack_demo.py
+	@echo "Restoring the default (report) ..."
+	@docker compose up -d --wait gateway >/dev/null 2>&1
+
 smoke:  ## Assert the composed stack actually works
 	uv run python scripts/compose_smoke.py
 

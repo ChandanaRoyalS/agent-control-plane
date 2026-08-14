@@ -176,23 +176,46 @@ of how I would attack this system myself.
 
 ## Design notes relevant to security
 
-The decisions with security consequences are written up as ADRs, with the
-alternatives that were rejected and why:
+Every decision with a security consequence is written up as an ADR, with the
+alternatives that were rejected and why. **The full index is
+[`docs/decisions/`](docs/decisions/README.md)** — 57 of them, grouped, one line
+each.
 
-- [0008](docs/decisions/0008-validate-requests-against-the-spec.md) — validate against the specification, not against our own mocks
-- [0010](docs/decisions/0010-metrics-on-a-separate-listener.md) — the metrics endpoint is a reconnaissance report, so it gets its own loopback listener
-- [0013](docs/decisions/0013-schema-drift-is-a-security-control.md) — a changed tool description is an attack, not an ops event
-- [0014](docs/decisions/0014-ship-one-image-and-compose-the-rest.md) — the mock upstreams are stripped from the production image; `config/` is mounted read-only so a compromised gateway cannot silence its own drift alarm
-- [0015](docs/decisions/0015-two-identities-not-one.md) — asymmetric algorithms only, because a JWKS publishes public keys and an attacker can sign HS256 with one
-- [0016](docs/decisions/0016-bind-every-credential-to-its-issuer.md) — issuer, audience and key set are one indivisible registration
-- [0017](docs/decisions/0017-let-the-gateway-tell-clients-where-to-authenticate.md) — the one unauthenticated path is derived from the document served there, not from an allow-list; and why publishing the authorization servers is a reconnaissance cost worth paying where publishing the upstreams is not
-- [0018](docs/decisions/0018-one-issuer-string-from-every-vantage-point.md) — an issuer is an identity and not an address; and why the plain-HTTP escape hatch is narrow, named and logged rather than absent
-- [0019](docs/decisions/0019-mint-a-credential-per-call-and-hold-none.md) — the gateway holds no upstream credential; the inbound token reaches exactly one module, whose only destination is the issuer that minted it
-- [0020](docs/decisions/0020-check-the-scope-you-were-granted.md) — RFC 8707's parameter is a request, not a guarantee; the control is checking the credential that came back names one upstream and no other
-- [0021](docs/decisions/0021-one-backend-behind-a-seam.md) — an encrypted store turns many secrets into one key and says so; references live in config, values never do
-- [0022](docs/decisions/0022-a-cache-key-that-cannot-be-wrong.md) — a credential cache keyed on the request rather than on claims, because keying it on the upstream serves one caller's credential to the next and passes every functional test
-- [0023](docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md) — the no-passthrough invariant swept across every path, two static alarms that fail when a new path appears, and a mutation harness in CI that breaks the invariant on purpose to prove the test can fail
-- [0035](docs/decisions/0035-a-result-cache-key-that-cannot-serve-the-wrong-person.md) — a result cache key that cannot serve the wrong person, and why this one cache sits *inside* the policy check rather than outside it
+Listing a subset here was a maintenance trap: this file carried fifteen entries
+and stopped being extended somewhere around 0035, so a reader looking for the
+audit chain or the tenancy boundary found nothing and could reasonably conclude
+neither had been thought about. **One index, tested for completeness**
+(`tests/unit/docs/test_decision_index.py`), beats two lists of which one is
+quietly stale.
+
+The ones that carry the most weight for security specifically:
+
+- [0019](docs/decisions/0019-mint-a-credential-per-call-and-hold-none.md) — the
+  gateway holds no upstream credential, and the inbound token reaches exactly
+  one module whose only destination is the issuer that minted it
+- [0023](docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md) — the
+  no-passthrough invariant, two static alarms that fire when a new path appears,
+  and a mutation harness that breaks it on purpose to prove the test can fail
+- [0025](docs/decisions/0025-deny-by-default-is-structural.md) — the default is
+  deny and **there is no setting to change it**
+- [0029](docs/decisions/0029-filter-the-catalogue-by-policy.md) — a tool the
+  caller may not call never appears, removing an attack class by construction
+- [0038](docs/decisions/0038-refuse-loudly-and-never-quote-the-payload.md) — a
+  refusal that quotes the payload is a better attack than the original
+- [0039](docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md)
+  — only two detectors may withhold anything, and which two was measured rather
+  than argued
+- [0043](docs/decisions/0043-authorize-on-the-routing-headers.md) — authorize
+  before a body is parsed, and a search proving it refuses nothing legitimate
+- [0049](docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md)
+  — an agent cannot approve its own call because it cannot address the thing
+  that approves calls
+- [0050](docs/decisions/0050-an-audit-record-is-not-a-log-line.md) — a call this
+  gateway cannot record does not happen, and exactly what the chain does *not*
+  detect
+- [0051](docs/decisions/0051-a-tenant-is-an-issuer-not-a-claim.md) — a tenant
+  comes from the registration that verified the token, so lying about it fails
+  verification first
 
 ## Supported versions
 

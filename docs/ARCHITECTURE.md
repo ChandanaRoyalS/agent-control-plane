@@ -1,18 +1,94 @@
 # Architecture
 
-The parts of this gateway that are worth walking through slowly, moved out of
-the README so a stranger can still understand the project in five minutes
-(task 65's bar) and a reader who wants the detail can have all of it.
+How the system behaves. **[`decisions/`](decisions/README.md) is why it behaves
+that way** — 57 of them, indexed and grouped.
 
-**These sections were written as the features shipped and are kept verbatim.**
-Each one is a walkthrough with real output in it — the identity chain, the
-per-upstream credentials, the invariant that is proved and then re-proved by a
-mutation harness, and what happens to an upstream that cannot exchange.
+Start with the request path below. It is nine stages, and two of their positions
+in that order are load-bearing enough that moving them would be a vulnerability
+rather than a refactor.
 
-The *decisions* live in [`docs/decisions/`](decisions/) — 57 of them. This file
-is how the system behaves; those are why it behaves that way.
+The walkthroughs after it were written as each feature shipped and are kept
+verbatim, with the real output they were written against.
 
 ---
+
+## The request path, in order
+
+Every `tools/call` crosses these in this sequence. **The order is the design**,
+and two placements in it are load-bearing enough that moving them would be a
+vulnerability rather than a refactor.
+
+| # | stage | what it decides | why it is *here* |
+|---|---|---|---|
+| 1 | **authenticate** | who this is for, and which agent is acting | the tenant is stamped from the registration that verified the signature, so it cannot be claimed ([0051](decisions/0051-a-tenant-is-an-issuer-not-a-claim.md)) |
+| 2 | **pre-dispatch** | refuse on `Mcp-Method` / `Mcp-Name` | before a body is parsed, so a request that could never be permitted costs nothing to reject ([0043](decisions/0043-authorize-on-the-routing-headers.md)) |
+| 3 | **policy** | allow, deny, or hold — down to the argument | deny by default, structurally ([0025](decisions/0025-deny-by-default-is-structural.md)) |
+| 4 | **approval** | hold for a person, answered elsewhere | a held call has not been permitted *or* refused, and recording it as either makes the flow invisible ([0048](decisions/0048-an-approval-is-for-a-call-not-a-token.md)) |
+| 5 | **budget** | charge a weighted cost | **after** authorization: a denied call must not spend, and charging a call we would refuse is wasted work |
+| 6 | **result cache** | serve a repeat read from memory | 🔴 **inside** the policy check, not outside. Everywhere else caching is outermost because a hit should cost nothing; here that instinct is a vulnerability — a cache consulted before authorization serves a caller what the policy would have refused ([0035](decisions/0035-a-result-cache-key-that-cannot-serve-the-wrong-person.md)) |
+| 7 | **credential exchange** | mint a token for one upstream | the caller's token never travels; the exchange is the only module that touches it ([0019](decisions/0019-mint-a-credential-per-call-and-hold-none.md)) |
+| 8 | **screen and fence** | withhold, or label as retrieved data | on the way *back*, because the threat arrives in the result rather than the request ([0037](decisions/0037-tell-the-model-where-the-text-came-from.md), [0038](decisions/0038-refuse-loudly-and-never-quote-the-payload.md)) |
+| 9 | **audit** | write it down, or refuse the call | fail-closed: a call this gateway cannot record does not happen ([0050](decisions/0050-an-audit-record-is-not-a-log-line.md)) |
+
+## Two listeners, and why that is the control
+
+```
+agent  ──▶  :8080   gateway     tools/list · tools/call
+person ──▶  :9090   admin       approvals · trace console · metrics · health
+```
+
+An agent **cannot approve its own call, and cannot watch anyone's**, because it
+cannot address the thing that does. That is a structural property rather than a
+permission check — there is no rule to misconfigure and no role to escalate into
+([0049](decisions/0049-the-operator-channel-is-not-the-agents-channel.md),
+[0056](decisions/0056-the-console-is-a-view-of-the-record-not-a-second-account.md)).
+
+## Where the code lives
+
+| module | job |
+|---|---|
+| `acp.gateway` | the MCP server the agent talks to; `server.py` is the request path above, in order |
+| `acp.upstream` | the MCP client the gateway talks *with* — retry, breaker and catalogue cache layered as wrappers over one protocol ([0006](decisions/0006-layer-resilience-as-wrappers.md)) |
+| `acp.identity` | validation, discovery, RFC 8693 exchange, and the credential cache keyed on the request rather than on claims ([0022](decisions/0022-a-cache-key-that-cannot-be-wrong.md)) |
+| `acp.policy` | a pure evaluator, the enforcement backstop, catalogue filtering, the pre-dispatch check and the simulator — all calling one `evaluate` ([0030](decisions/0030-one-evaluator-two-paths.md)) |
+| `acp.budget` | token bucket, cost table, quota counter, and the tenant-qualified account they all key on |
+| `acp.results` | the per-principal result cache and its opt-in table |
+| `acp.firewall` | detectors, confidence, the enforcement bar, provenance framing and the refusal notice |
+| `acp.corpus` | the benign and adversarial corpora, the held-out split, and the harness that scores them |
+| `acp.approvals` | the store, the fingerprint that binds an approval to a call, and the operator channel |
+| `acp.audit` | the hash chain, the sink, the writer that fails closed, and the checkpoint |
+| `acp.console` | the trace console, streaming the chain rather than a copy of it |
+| `acp.observability` | structured logging, metrics, tracing and the semantic conventions |
+| `acp.demo` | the credulous agent the attack demo drives |
+
+**Decisions live in a module the sandbox can test; wiring lives in the one it
+cannot.** That split is why `policy/evaluate.py`, `firewall/decision.py`,
+`perf/overhead.py` and `console/hub.py` are pure and heavily tested, while
+`runtime.py` is assembly with no logic worth hiding in it.
+
+## What is proved rather than asserted
+
+Four mutation harnesses run in CI. Each **breaks the system on purpose** and
+fails if the test written to catch that break does not
+([0023](decisions/0023-prove-the-invariant-and-prove-the-proof.md)).
+
+| harness | breakages | what it establishes |
+|---|---|---|
+| `prove-cache` | 4 | dropping tenant, subject, actor or arguments from the result-cache key is caught |
+| `prove-refusal` | 6 | the enforcement bar, the no-quoting rule, and the detector demotions all hold |
+| `prove-passthrough` | 3 | the caller's token cannot reach an upstream by header, log or envelope |
+| `prove-predispatch` | search + 5 | 655,448 re-checks with **zero** false refusals, plus three broken readings the search catches |
+
+A test that cannot fail is a test that proves nothing, and a harness that has
+never been shown to fail is an assertion about a harness.
+
+---
+
+## Walkthroughs
+
+The sections below were written as each feature shipped and are kept verbatim,
+with the real output they were written against. They are the slow version of
+everything above.
 
 ### Schema drift
 

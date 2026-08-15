@@ -4,8 +4,9 @@ A policy-enforcing, injection-screening MCP gateway that sits between AI agents
 and the systems they are allowed to touch.
 
 [![CI](https://github.com/chandanaroyal719-bot/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/chandanaroyal719-bot/agent-control-plane/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/chandanaroyal719-bot/agent-control-plane?label=release)](https://github.com/chandanaroyal719-bot/agent-control-plane/releases/latest)
 
-**1,766 tests · 94% coverage · 57 architecture decisions · 4 mutation harnesses
+**1,893 tests · 94% coverage · 58 architecture decisions · 4 mutation harnesses
 proving 16 deliberate breakages are caught**
 
 ## The problem
@@ -159,6 +160,21 @@ uv run python scripts/compose_smoke.py     # asserts it actually works
   ok   an unauthenticated request is refused
 ```
 
+Compose builds from source. The **released image** is published on every tag,
+and is the one the release workflow verified before it pushed -- built without
+the mock upstreams and asserted to be, running as uid 10001:
+
+```bash
+docker pull ghcr.io/chandanaroyal719-bot/agent-control-plane:1.0.0
+docker run --rm --entrypoint python \
+  ghcr.io/chandanaroyal719-bot/agent-control-plane:1.0.0 \
+  -c "import acp; print(acp.__version__)"
+```
+
+Pinned deliberately. `:latest` is published because refusing to publish it does
+not make anybody pin -- it makes them write a worse `docker run` -- and this
+file never uses it.
+
 Then look at it: the MCP endpoint on `:8080`, metrics, health and schema drift
 on `:9090`, and traces at <http://localhost:16686>.
 
@@ -231,7 +247,7 @@ where the measurement disagreed with the plan:
 | 7 · Audit | **complete** | Hash-chained log with external anchoring, multi-tenancy, threat model |
 | 8 · Performance | **complete** | Load harness, a head-of-line defect found and fixed, published overhead with its switch settings |
 | 9 · Demo | **complete** | Live trace console over SSE, scripted attack demo |
-| 10 · Release | in progress | v1.0.0, architecture docs, write-up |
+| 10 · Release | **v1.0.0 released** | Tagged and published to ghcr; architecture map, an index of all 58 decisions, and a machine-checked release surface |
 
 ## What this does not do
 

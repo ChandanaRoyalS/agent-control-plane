@@ -88,7 +88,7 @@ Stated here rather than left to be discovered:
   silence its own alarm.
 - 58 architecture decision records, indexed in
   [`docs/decisions/README.md`](docs/decisions/README.md).
-- 1839 tests, 94% coverage, `mypy --strict` clean.
+- 1893 tests, 94% coverage, `mypy --strict` clean.
 
 [Unreleased]: https://github.com/chandanaroyal719-bot/agent-control-plane/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/chandanaroyal719-bot/agent-control-plane/releases/tag/v1.0.0

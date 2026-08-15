@@ -146,6 +146,18 @@ surface-capture:  ## Accept the current public surface as the snapshot
 release-notes:  ## Print this version's section of CHANGELOG.md
 	uv run python scripts/release_notes.py
 
+.PHONY: site site-check
+
+site:  ## Generate docs/index.html from the captured demo and the audit chain
+	uv run python scripts/build_site.py
+	@echo
+	@echo "Open it:  file://$$(pwd)/docs/index.html"
+	@echo "Published at https://chandanaroyal719-bot.github.io/agent-control-plane/"
+	@echo "once Pages is set to deploy from main -> /docs."
+
+site-check:  ## Fail if docs/index.html is out of date with its inputs
+	uv run python scripts/build_site.py --check
+
 smoke:  ## Assert the composed stack actually works
 	uv run python scripts/compose_smoke.py
 

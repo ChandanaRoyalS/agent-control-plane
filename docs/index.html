@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Control Plane &mdash; a security boundary for AI agents</title>
+<meta name="description" content="A policy-enforcing, injection-screening MCP
+ gateway. A real captured run in which the firewall detected an attack at high
+ confidence and was not permitted to stop it.">
+<meta property="og:title" content="Agent Control Plane">
+<meta property="og:description" content="What happens when an AI agent reads a
+ poisoned document. A real captured run, not a mock-up.">
+<style>
+:root{
+  --bg:#0b0d10; --panel:#111419; --panel2:#0e1116; --line:#222932;
+  --fg:#c9d1d9; --dim:#7d8590; --faint:#4d545c;
+  --ok:#3fb950; --warn:#d29922; --bad:#f85149; --link:#58a6ff;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);
+  font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--link);text-decoration:none}
+a:hover{text-decoration:underline}
+main{max-width:1080px;margin:0 auto;padding:0 20px 80px}
+section{padding:44px 0;border-top:1px solid var(--line);scroll-margin-top:56px}
+section:first-of-type{border-top:none}
+h2{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);
+  margin:0 0 18px;font-weight:600}
+h3{font-size:15px;margin:0 0 6px}
+p{margin:0 0 12px}
+.bar{border-bottom:1px solid var(--line);background:var(--panel2);position:sticky;top:0;z-index:20}
+.bar .inner{max-width:1080px;margin:0 auto;padding:11px 20px;display:flex;
+  align-items:center;gap:14px;flex-wrap:wrap}
+.brand{font-family:var(--mono);font-size:13px;letter-spacing:.16em;text-transform:uppercase}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;
+  margin-right:7px;vertical-align:middle}
+.bar nav{margin-left:auto;display:flex;gap:16px;font-size:13px;font-family:var(--mono)}
+.lede h1{font-size:30px;line-height:1.25;margin:26px 0 14px;font-weight:600;max-width:26em}
+.lede .sub{color:var(--dim);max-width:44em;font-size:16px}
+.pill{display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--dim);border:1px solid var(--line);
+  border-radius:2px;padding:3px 8px;margin-right:8px}
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:18px 0 14px}
+button{font-family:var(--mono);font-size:13px;background:var(--panel);color:var(--fg);
+  border:1px solid var(--line);border-radius:3px;padding:9px 16px;cursor:pointer}
+button:hover{border-color:#39414d}
+button.primary{border-color:var(--ok);color:var(--ok)}
+button.primary:hover{background:rgba(63,185,80,.08)}
+input[type=range]{flex:1;min-width:180px;height:3px;-webkit-appearance:none;appearance:none;
+  background:var(--line);border-radius:2px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;
+  border-radius:50%;background:var(--dim);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:none;border-radius:50%;
+  background:var(--dim);cursor:pointer}
+.termwrap{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:16px}
+@media(max-width:820px){.termwrap{grid-template-columns:1fr}}
+.term{background:var(--panel2);border:1px solid var(--line);border-radius:4px;
+  height:460px;overflow:auto;padding:14px 16px;font-family:var(--mono);
+  font-size:12.5px;line-height:1.55;white-space:pre;color:#b8c1cb}
+.term .hd{color:var(--faint)}
+.term .ok{color:var(--ok)}
+.term .held{color:var(--warn);font-weight:600}
+.term .alarm{color:var(--bad);font-weight:600}
+.term .em{color:#e6edf3;font-weight:600}
+.rail{display:flex;flex-direction:column;gap:8px}
+.beat{border:1px solid var(--line);border-left-width:3px;border-radius:3px;
+  padding:9px 11px;font-size:12.5px;color:var(--dim);background:var(--panel);
+  opacity:.25;transition:opacity .25s}
+.beat.on{opacity:1;color:var(--fg)}
+.beat.bad{border-left-color:var(--bad)}
+.beat.warn{border-left-color:var(--warn)}
+.beat.good{border-left-color:var(--ok)}
+.beat.info{border-left-color:var(--faint)}
+.note{color:var(--dim);font-size:13px;margin-top:12px}
+.finding{border:1px solid var(--line);border-left:3px solid var(--warn);
+  background:var(--panel);border-radius:3px;padding:16px 18px;margin-top:6px}
+.finding p:last-child{margin-bottom:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.tile{display:block;border:1px solid var(--line);border-radius:3px;padding:15px 16px;
+  background:var(--panel);color:var(--fg)}
+.tile:hover{border-color:#39414d;text-decoration:none}
+.tile .figure{display:block;font-family:var(--mono);font-size:23px;color:#e6edf3;margin-bottom:5px}
+.tile .caption{display:block;font-size:12.5px;color:var(--dim);line-height:1.45}
+.card{border:1px solid var(--line);border-radius:3px;padding:15px 16px;background:var(--panel)}
+.card .claim{color:var(--dim);font-size:13px}
+.card ul{margin:8px 0 10px;padding-left:17px;font-size:13px;color:var(--fg)}
+.card li{margin-bottom:3px}
+.card .adrs{margin:0;font-family:var(--mono);font-size:11.5px}
+.deck{color:var(--dim);max-width:46em;font-size:16px}
+.chain{border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.rec{display:grid;grid-template-columns:44px 116px minmax(0,1fr) 108px;gap:12px;
+  padding:11px 14px;border-top:1px solid var(--line);font-family:var(--mono);font-size:12px;
+  align-items:baseline}
+.rec:first-child{border-top:none}
+.rec.held{background:rgba(210,153,34,.06)}
+.seq{color:var(--faint)}
+.cat{color:var(--dim);text-transform:uppercase;letter-spacing:.06em;font-size:10.5px}
+.ev{color:#e6edf3;word-break:break-all}
+.ev .meta{display:block;color:var(--dim);font-size:11px;margin-top:3px}
+.out{text-align:right;letter-spacing:.06em;font-size:11px;text-transform:uppercase}
+.out.allowed,.out.completed{color:var(--ok)}
+.out.held{color:var(--warn)}
+.hashes{font-family:var(--mono);font-size:11px;color:var(--faint);
+  padding:10px 14px;border-top:1px solid var(--line);word-break:break-all}
+ul.limits{list-style:none;padding:0;margin:0;display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}
+ul.limits li{border:1px solid var(--line);border-left:3px solid var(--faint);
+  border-radius:3px;padding:12px 14px;font-size:13.5px;color:var(--fg);background:var(--panel)}
+pre.cmd{font-family:var(--mono);font-size:12.5px;background:var(--panel2);
+  border:1px solid var(--line);border-radius:3px;padding:12px 14px;overflow:auto;color:#b8c1cb}
+footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
+  max-width:1080px;margin:0 auto;padding:22px 20px 60px}
+</style>
+</head>
+<body>
+
+<header class="bar"><div class="inner">
+  <span class="brand"><span class="dot"></span>Agent Control Plane</span>
+  <nav>
+    <a href="#replay">Replay</a>
+    <a href="#trace">Trace</a>
+    <a href="#measured">Measured</a>
+    <a href="#limits">Limits</a>
+    <a href="https://github.com/chandanaroyal719-bot/agent-control-plane">Repository</a>
+  </nav>
+</div></header>
+
+<main>
+
+<section class="lede">
+  <div>
+    <span class="pill">MCP gateway</span>
+    <span class="pill">v1.0.0</span>
+    <span class="pill">1,893 tests</span>
+  </div>
+  <h1>An AI agent reads a document. The document tells it to do something else.</h1>
+  <p class="deck">This is the security boundary that sits in between &mdash; it decides what an
+  agent may do, screens what comes back for injected instructions, and writes down every
+  decision in a chain you can verify. Below is a real captured run, not a mock-up.
+  It does not end the way a demo usually ends.</p>
+</section>
+
+<section id="replay">
+  <h2>The attack, replayed</h2>
+  <div class="controls">
+    <button id="play" class="primary">&#9654;&nbsp; Replay the attack</button>
+    <button id="skip">Skip to the end</button>
+    <input id="scrub" type="range" min="0" max="100" value="0" aria-label="Position">
+  </div>
+  <div class="termwrap">
+    <div class="term" id="term"></div>
+    <div class="rail" id="rail"></div>
+  </div>
+  <p class="note">Verbatim output of <code>make attack-demo</code>, captured to
+  <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/demo/attack.txt">docs/demo/attack.txt</a> and rendered here
+  by a build step &mdash; a test fails if this page and that file disagree.</p>
+</section>
+
+<section id="what">
+  <h2>What just happened</h2>
+  <div class="finding">
+    <p><strong>The firewall detected it, at high confidence, and was not allowed
+    to stop it.</strong>
+    Three findings, zero triggers. Only two detectors are permitted to withhold a result, and the
+    list is short because it was measured: those two produced zero findings across 106 ordinary
+    documents. The detector that caught this one flags roughly one benign document in five, and
+    a control that eats real documents is a control somebody switches off.</p>
+    <p>So three layers looked at this attack. <strong>Screening saw it and was measured into
+    silence. Provenance framing labelled it and travelled with the payload</strong> &mdash; the
+    agent carried the fenced text forward, so the fence did not stop the leak.
+    <strong>A person, asked a direct question on a channel the agent cannot
+    reach, stopped it.</strong></p>
+    <p>That is a better argument for defence in depth than a run where the first layer wins, and
+    it is only available because <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0057-the-demo-reports-what-happened-it-does-not-assert-it.md">the demo</a> reports what happened instead of asserting it.
+    And the first act is not merely unprotected &mdash; it is <em>unexplainable</em>. It left no
+    record at all.</p>
+  </div>
+</section>
+
+<section id="trace">
+  <h2>What was written down</h2>
+  <p class="deck">Real links from a real chain. Each entry
+  carries the hash of the one before it, so a modified, spliced or reordered record breaks
+  verification at exactly that point &mdash; and the fourth entry below is the moment the ticket
+  was held for a human.</p>
+  <div class="chain">
+    <div class="rec"><span class="seq">01</span><span class="cat">authorization</span><span class="ev">policy.decision<span class='meta'>mock-a__search &middot; rule <em>allow-any-authenticated-caller</em></span></span><span class="out allowed">allowed</span></div>
+    <div class="rec"><span class="seq">02</span><span class="cat">credential</span><span class="ev">auth.exchanged<span class='meta'>acp-upstream-mock-a</span></span><span class="out allowed">allowed</span></div>
+    <div class="rec"><span class="seq">03</span><span class="cat">tool_call</span><span class="ev">tool.called<span class='meta'>mock-a__search</span></span><span class="out completed">completed</span></div>
+    <div class="rec held"><span class="seq">04</span><span class="cat">authorization</span><span class="ev">policy.decision<span class='meta'>mock-a__create_ticket &middot; rule <em>approve-ticket-creation</em></span></span><span class="out held">held</span></div>
+    <div class="rec"><span class="seq">05</span><span class="cat">authorization</span><span class="ev">policy.decision<span class='meta'>mock-a__search &middot; rule <em>allow-any-authenticated-caller</em></span></span><span class="out allowed">allowed</span></div>
+    <div class="rec"><span class="seq">06</span><span class="cat">credential</span><span class="ev">auth.exchanged<span class='meta'>acp-upstream-mock-a</span></span><span class="out allowed">allowed</span></div>
+    <div class="rec"><span class="seq">07</span><span class="cat">tool_call</span><span class="ev">tool.called<span class='meta'>mock-a__search</span></span><span class="out completed">completed</span></div>
+    <div class="rec"><span class="seq">08</span><span class="cat">authorization</span><span class="ev">policy.decision<span class='meta'>mock-a__search &middot; rule <em>allow-any-authenticated-caller</em></span></span><span class="out allowed">allowed</span></div>
+    <div class="hashes" id="hashes"></div>
+  </div>
+  <p class="note">What this does <em>not</em> detect is truncation of the tail; an external
+  anchor does, and that limit is asserted as a passing test. <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0050-an-audit-record-is-not-a-log-line.md">ADR 0050</a></p>
+</section>
+
+<section id="measured">
+  <h2>Measured, not asserted</h2>
+  <div class="grid">
+      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md"><span class="figure">0 of 106</span><span class="caption">benign documents withheld by the injection firewall</span></a>
+      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0047-a-baseline-not-a-threshold.md"><span class="figure">75% / 38%</span><span class="caption">recall and precision on the family this attack belongs to</span></a>
+      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">2.14&times;</span><span class="caption">of throughput is what durability costs, measured</span></a>
+      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">12.6&times;</span><span class="caption">p95 on a path with no disk write &mdash; a defect a load harness found</span></a>
+      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md"><span class="figure">6.7&ndash;7.2&times;</span><span class="caption">a direct call, on a cache miss, with the switch settings printed</span></a>
+      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md"><span class="figure">16</span><span class="caption">deliberate breakages, caught by the tests written to catch them</span></a>
+  </div>
+  <p class="note">Every figure links to the decision record that produced it, including the two
+  that record a prediction the author got wrong.</p>
+</section>
+
+<section id="subsystems">
+  <h2>What is in the path</h2>
+  <div class="grid">
+      <article class="card">
+        <h3>Identity</h3>
+        <p class="claim">The caller's token reaches exactly one module and never travels onward.</p>
+        <ul><li>Two identities: who it is for, and which agent did it</li><li>A credential minted per call, scoped to one upstream</li><li>A sweep, two static alarms and a mutation harness proving it</li></ul>
+        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0015-two-identities-not-one.md">0015</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0019-mint-a-credential-per-call-and-hold-none.md">0019</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md">0023</a></p>
+      </article>
+      <article class="card">
+        <h3>Policy</h3>
+        <p class="claim">Deny by default, and it is not configurable &mdash; no field, no variable.</p>
+        <ul><li>A pure function is the whole of the decision logic</li><li>Rules reach into arguments, not just tool names</li><li>A tool the caller may not call never appears in the catalogue</li></ul>
+        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0025-deny-by-default-is-structural.md">0025</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0026-the-evaluator-is-a-pure-function.md">0026</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0031-argument-level-rules.md">0031</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0029-filter-the-catalogue-by-policy.md">0029</a></p>
+      </article>
+      <article class="card">
+        <h3>Budgets</h3>
+        <p class="claim">A per-tool weighted cost against a rate limit and a quota.</p>
+        <ul><li>A token bucket per principal, checked after authorization</li><li>A fixed, clock-aligned window</li><li>The one cache that sits inside the policy check</li></ul>
+        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0032-rate-limiting-token-bucket.md">0032</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0033-cost-accounting.md">0033</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0034-quotas-fixed-window.md">0034</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0035-a-result-cache-key-that-cannot-serve-the-wrong-person.md">0035</a></p>
+      </article>
+      <article class="card">
+        <h3>Firewall</h3>
+        <p class="claim">Detect first, decide later, and count the false positives before enforcing anything.</p>
+        <ul><li>106 benign documents, and the two detectors that survived</li><li>Retrieved text fenced in a boundary the document cannot forge</li><li>A refusal that never quotes what it withheld</li></ul>
+        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0036-detect-before-deciding-and-count-the-false-positives.md">0036</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0037-tell-the-model-where-the-text-came-from.md">0037</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0038-refuse-loudly-and-never-quote-the-payload.md">0038</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md">0039</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0047-a-baseline-not-a-threshold.md">0047</a></p>
+      </article>
+      <article class="card">
+        <h3>Approvals</h3>
+        <p class="claim">An agent cannot approve its own call because it cannot address
+            the thing that approves calls.</p>
+        <ul><li>An approval is granted to a call, fingerprinted, not to a token</li><li>Answered on the admin listener, and that placement is the control</li></ul>
+        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0048-an-approval-is-for-a-call-not-a-token.md">0048</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md">0049</a></p>
+      </article>
+      <article class="card">
+        <h3>Audit</h3>
+        <p class="claim">A call this gateway cannot record does not happen.</p>
+        <ul><li>A hash chain, verified against an anchor the gateway cannot reach</li><li>What it does not detect is asserted as a passing test</li><li>A tenant comes from the registration that verified the token</li></ul>
+        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0050-an-audit-record-is-not-a-log-line.md">0050</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0051-a-tenant-is-an-issuer-not-a-claim.md">0051</a></p>
+      </article>
+      <article class="card">
+        <h3>Performance</h3>
+        <p class="claim">Latency per outcome, because an average over four populations
+            describes no request that was made.</p>
+        <ul><li>A load harness that found fsync on the event loop</li><li>An overhead number printed beside its switch settings</li><li>A second run that bounded the harness's own error</li></ul>
+        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0052-a-load-test-that-does-not-average-its-own-answer.md">0052</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md">0053</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md">0054</a></p>
+      </article>
+  </div>
+</section>
+
+<section id="limits">
+  <h2>What it does not do</h2>
+  <ul class="limits">
+    <li>It does not stop prompt injection. It measures how much it catches and
+    publishes the families it misses.</li>
+    <li>It is not a proxy for arbitrary HTTP. One MCP specification revision only;
+    an earlier one is refused by name.</li>
+    <li>One identity provider per tenant. Many tenants behind one issuer is a declared non-goal.</li>
+    <li>The audit chain does not detect tail truncation. An external anchor does,
+    and that limit is asserted as a passing test.</li>
+    <li>No audit log rotation. The chain file grows without bound.</li>
+    <li>The result cache and the credential cache are in-process. Two replicas do not share them.</li>
+  </ul>
+</section>
+
+<section id="run">
+  <h2>Run it yourself</h2>
+  <pre class="cmd">git clone https://github.com/chandanaroyal719-bot/agent-control-plane.git
+cd agent-control-plane
+docker compose up -d --wait
+make attack-demo        # the transcript above, on your machine
+make audit-verify       # walk the chain it just wrote</pre>
+  <p class="note">Or pull the published image, pinned:
+  <code>docker pull ghcr.io/chandanaroyal719-bot/agent-control-plane:1.0.0</code></p>
+</section>
+
+</main>
+
+<footer>
+  <a href="https://github.com/chandanaroyal719-bot/agent-control-plane">Repository</a> &middot;
+  <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/README.md">58 architecture decisions</a> &middot;
+  <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/THREAT_MODEL.md">Threat model</a> &middot;
+  <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/releases/tag/v1.0.0">v1.0.0</a>
+  <p style="margin-top:10px;color:var(--faint)">This page is generated from files in the
+  repository. Nothing on it is a mock-up.</p>
+</footer>
+
+<script id="site-data" type="application/json">{"transcript":"The same agent, the same poisoned document, two paths.\n\nThe agent is a parser, not a model \u2014 see acp/demo/agent.py. The gateway\nnever sees an agent's reasoning, only its calls, so a deterministic\nstand-in exercises exactly what a model would and does it twice the same.\n\n========================================================================\n  ACT ONE \u2014 the agent talks to the upstream directly\n========================================================================\n\n  No gateway. No authentication, because the mock has none to check.\n  No policy, no screening, no approval, and nothing keeping a record.\n\n  The operator asks: summarise runbooks/incident-2291.md\n\n  read_document runbooks/incident-2291.md\n    -> served\n\n  The document talked the agent into 2 more call(s):\n    mock-a__read_document {'path': 'hr/compensation-2026.md'}\n    mock-a__create_ticket (from the previous result)\n\n  mock-a__read_document {\"path\": \"hr/compensation-2026.md\"}\n    -> served\n  mock-a__create_ticket {\"title\": \"# Compensation review 2026 \\u2014 CONFIDENTIAL  | name | band | base | |---|---|---| | A. Reader |\n    -> served\n\n========================================================================\n  ACT TWO \u2014 the same agent, through the gateway\n========================================================================\n\n  Authenticated as alice. The composed policy allows reads broadly\n  and requires a human for mock-a__create_ticket.\n\n  Injection screening is in `report`, and only these detectors\n  are permitted to withhold anything:\n    - bidirectional_override\n    - encoded_payload\n\n  That list is short because it was MEASURED, not reasoned about: those\n  two produced zero findings across 106 benign documents (ADR 0039).\n  A detector that fires on real documents cannot be allowed to withhold\n  them \u2014 so a detector can be certain and still not act.\n\n  The operator asks: summarise runbooks/incident-2291.md\n\n  read_document runbooks/incident-2291.md\n    -> served\n\n  The document talked the agent into 2 more call(s):\n    mock-a__read_document {'path': 'hr/compensation-2026.md'}\n    mock-a__create_ticket (from the previous result)\n\n  mock-a__read_document {\"path\": \"hr/compensation-2026.md\"}\n    -> served\n  mock-a__create_ticket {\"title\": \"[BEGIN RETRIEVED DATA e284f704d4cbe234631d0c7d12a1cf7a] The following content (1 block: 1 text) was\n    -> HELD for a human\n\n========================================================================\n  WHAT THE FIREWALL SAW\n========================================================================\n\n  #41217  mock-a__read_document  -> allowed\n      families    ['tool_confusion']\n      confidence  ['high']\n      findings    3\n      TRIGGERS    0   <- what could withhold\n\n  `findings` is what the detectors noticed. `triggers` is how many of\n  those came from a detector permitted to act. When findings are high\n  and triggers are zero, THE FIREWALL SAW IT AND WAS NOT ALLOWED TO\n  STOP IT \u2014 which is a measurement decision, not a bug.\n\n========================================================================\n  WHAT HAPPENED\n========================================================================\n\n  Directly:\n    - read the runbook: served\n    - mock-a__read_document: served\n    - mock-a__create_ticket: served\n\n  Through the gateway:\n    - read the runbook: served\n    - mock-a__read_document: served\n    - mock-a__create_ticket: HELD for a human\n\n  Nothing above is asserted in advance. The firewall's measured recall\n  on this family is 75% detected, 38% precise (ADR 0047), and this\n  payload is deliberately NOT in the corpus \u2014 a hand-written attack\n  added to the corpus would improve those numbers by construction.\n\n  So read the outcomes above and ask WHICH LAYER STOPPED IT.\n\n  Then look at what was written down:\n      make audit-verify\n      docker compose exec gateway tail -5 /app/audit/audit.jsonl\n\n  The direct path produced no record at all. That is the other half of\n  the argument and it is easy to miss: the first act is not just\n  unprotected, it is UNEXPLAINABLE. Nobody could reconstruct it after.","beats":[{"line":7,"label":"No gateway. No policy, no screening, and nothing keeping a record.","tone":"bad"},{"line":24,"label":"The salary table leaves the building, in a ticket title.","tone":"bad"},{"line":28,"label":"The same agent, the same document, through the gateway.","tone":"info"},{"line":56,"label":"A person is asked, on a listener the agent cannot address.","tone":"good"},{"line":66,"label":"The detector was certain -- and measured into silence. It saw it and could not act.","tone":"warn"},{"line":100,"label":"The direct path left no record at all. Nobody could reconstruct it.","tone":"bad"}],"trace":[{"prev":"0000000000000000000000000000000000000000000000000000000000000000","hash":"0158894983a7652158d77d09a127d45a2f14ea0f88d32947a038ce5855393cc8"},{"prev":"0158894983a7652158d77d09a127d45a2f14ea0f88d32947a038ce5855393cc8","hash":"b1f4f8c9b3d09c10980d77f765d66887fba4214d72506a70e404066fa7a27c07"},{"prev":"b1f4f8c9b3d09c10980d77f765d66887fba4214d72506a70e404066fa7a27c07","hash":"26e472ca70df292e15d0948a6145faed7efa68cbb5d6a862bc2be73eb0294d0e"},{"prev":"26e472ca70df292e15d0948a6145faed7efa68cbb5d6a862bc2be73eb0294d0e","hash":"f5bbe419ef774d67033fc1a5d7393ff3004631bc245a0dd62a80b96faed523ee"},{"prev":"f5bbe419ef774d67033fc1a5d7393ff3004631bc245a0dd62a80b96faed523ee","hash":"802fc4beccc3414c336ed8f53e5effc547893071d68f9574d511506fdd5c0937"},{"prev":"802fc4beccc3414c336ed8f53e5effc547893071d68f9574d511506fdd5c0937","hash":"06c58d4f8152be543ab01d8bec0afb75be68b6f3febb79fb65cab26a553c5ac2"},{"prev":"06c58d4f8152be543ab01d8bec0afb75be68b6f3febb79fb65cab26a553c5ac2","hash":"84e5e982949fc138bfa1e27c02fa9dd9e9b1e9fb8de48a5962e0954d2b90a0c0"},{"prev":"84e5e982949fc138bfa1e27c02fa9dd9e9b1e9fb8de48a5962e0954d2b90a0c0","hash":"4cc6bc0da163a36cabe43d9db24c45164580d2097a402e01dc4b34d05b42c1be"}]}</script>
+<script>
+(function(){
+  "use strict";
+  var data = JSON.parse(document.getElementById("site-data").textContent);
+  var lines = data.transcript.split("\n");
+  var beats = data.beats;
+
+  var term = document.getElementById("term");
+  var rail = document.getElementById("rail");
+  var play = document.getElementById("play");
+  var skip = document.getElementById("skip");
+  var scrub = document.getElementById("scrub");
+
+  beats.forEach(function(b, i){
+    var el = document.createElement("div");
+    el.className = "beat " + b.tone;
+    el.id = "beat-" + i;
+    el.textContent = b.label;
+    rail.appendChild(el);
+  });
+
+  function classify(line){
+    if (line.indexOf("====") !== -1) return "hd";
+    if (line.indexOf("HELD for a human") !== -1) return "held";
+    if (line.indexOf("TRIGGERS") !== -1) return "alarm";
+    if (line.indexOf("UNEXPLAINABLE") !== -1) return "alarm";
+    if (line.indexOf("-> served") !== -1) return "ok";
+    if (line.indexOf("ACT ONE") !== -1 || line.indexOf("ACT TWO") !== -1) return "em";
+    if (line.indexOf("WHAT THE FIREWALL SAW") !== -1) return "em";
+    return "";
+  }
+
+  function renderTo(n){
+    var html = "";
+    for (var i = 0; i < n; i++){
+      var cls = classify(lines[i]);
+      var text = lines[i]
+        .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      html += cls ? '<span class="' + cls + '">' + text + "</span>\n" : text + "\n";
+    }
+    term.innerHTML = html;
+    for (var j = 0; j < beats.length; j++){
+      document.getElementById("beat-" + j)
+        .classList.toggle("on", n > beats[j].line);
+    }
+    scrub.value = String(Math.round((n / lines.length) * 100));
+  }
+
+  var shown = 0, timer = null;
+
+  function stop(){
+    if (timer){ clearTimeout(timer); timer = null; }
+    play.textContent = "\u25B6  Replay the attack";
+  }
+
+  function step(){
+    if (shown >= lines.length){ stop(); return; }
+    shown++;
+    renderTo(shown);
+    term.scrollTop = term.scrollHeight;
+    var line = lines[shown - 1] || "";
+    var wait = 55;
+    if (line.indexOf("====") !== -1) wait = 240;
+    if (line.trim() === "") wait = 20;
+    for (var i = 0; i < beats.length; i++){
+      if (beats[i].line === shown - 1) { wait = 700; }
+    }
+    timer = setTimeout(step, wait);
+  }
+
+  play.addEventListener("click", function(){
+    if (timer){ stop(); return; }
+    if (shown >= lines.length) shown = 0;
+    play.textContent = "Pause";
+    step();
+  });
+
+  skip.addEventListener("click", function(){
+    stop(); shown = lines.length; renderTo(shown); term.scrollTop = term.scrollHeight;
+  });
+
+  scrub.addEventListener("input", function(){
+    stop();
+    shown = Math.round((Number(scrub.value) / 100) * lines.length);
+    renderTo(shown);
+    term.scrollTop = term.scrollHeight;
+  });
+
+  renderTo(0);
+
+  // Autoplay once, when the terminal is actually on screen. A visitor who does
+  // not click still sees the thing the page exists to show; a visitor who
+  // scrolls past has not had anything animate off-screen at them.
+  if ("IntersectionObserver" in window){
+    var started = false;
+    var watcher = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if (entry.isIntersecting && !started){
+          started = true;
+          watcher.disconnect();
+          play.textContent = "Pause";
+          step();
+        }
+      });
+    }, {threshold: 0.35});
+    watcher.observe(term);
+  }
+
+  var first = data.trace[0], last = data.trace[data.trace.length - 1];
+  document.getElementById("hashes").textContent =
+    "chain head " + last.hash.slice(0, 24) + "\u2026   \u00b7   " +
+    data.trace.length + " links   \u00b7   genesis prev " + first.prev.slice(0, 16) + "\u2026";
+})();
+</script>
+</body>
+</html>

@@ -38,7 +38,12 @@ PARTNER_AUDIENCE = "agent-control-plane-partner"
 
 
 def registration(
-    issuer: str, keypair: Keypair, audience: str = AUDIENCE, **policy: Any
+    issuer: str,
+    keypair: Keypair,
+    audience: str = AUDIENCE,
+    *,
+    tenant: str | None = None,
+    **policy: Any,
 ) -> IssuerRegistration:
     def handle(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=keypair.jwks())
@@ -49,6 +54,7 @@ def registration(
             f"{issuer}/keys",
             client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
         ),
+        tenant=tenant,
     )
 
 
@@ -91,7 +97,10 @@ def test_a_token_signed_by_one_issuer_cannot_claim_another(
     selects the corporate registration, whose keys do not verify this signature.
     """
     registry = IssuerRegistry(
-        [registration(CORP, keypair), registration(PARTNER, other_keypair, PARTNER_AUDIENCE)]
+        [
+            registration(CORP, keypair, tenant="corp"),
+            registration(PARTNER, other_keypair, PARTNER_AUDIENCE, tenant="partner"),
+        ]
     )
     validator = TokenValidator(issuers=registry)
 
@@ -107,7 +116,10 @@ def test_each_issuer_keeps_its_own_audience(keypair: Keypair, other_keypair: Key
     carries the partner's audience — and must not be usable as though it
     carried the corporate one."""
     registry = IssuerRegistry(
-        [registration(CORP, keypair), registration(PARTNER, other_keypair, PARTNER_AUDIENCE)]
+        [
+            registration(CORP, keypair, tenant="corp"),
+            registration(PARTNER, other_keypair, PARTNER_AUDIENCE, tenant="partner"),
+        ]
     )
     validator = TokenValidator(issuers=registry)
 
@@ -124,7 +136,10 @@ def test_each_issuer_is_verified_against_only_its_own_keys(
     """Both honest tokens work, which is what makes the two rejections above
     mean something rather than being a validator that refuses everything."""
     registry = IssuerRegistry(
-        [registration(CORP, keypair), registration(PARTNER, other_keypair, PARTNER_AUDIENCE)]
+        [
+            registration(CORP, keypair, tenant="corp"),
+            registration(PARTNER, other_keypair, PARTNER_AUDIENCE, tenant="partner"),
+        ]
     )
     validator = TokenValidator(issuers=registry)
 
@@ -207,7 +222,10 @@ def test_issuers_are_matched_by_exact_string(keypair: Keypair) -> None:
 
 def test_the_registry_reports_what_it_holds(keypair: Keypair, other_keypair: Keypair) -> None:
     registry = IssuerRegistry(
-        [registration(PARTNER, other_keypair, PARTNER_AUDIENCE), registration(CORP, keypair)]
+        [
+            registration(PARTNER, other_keypair, PARTNER_AUDIENCE, tenant="partner"),
+            registration(CORP, keypair, tenant="corp"),
+        ]
     )
 
     assert len(registry) == 2

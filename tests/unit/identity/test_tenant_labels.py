@@ -80,9 +80,33 @@ def test_hyphens_underscores_and_digits_are_fine() -> None:
     assert registration.tenant == "acme-eu_2"
 
 
-def test_tenant_labels_collects_only_the_declared_ones() -> None:
-    labels = tenant_labels([_doc(CORP), _doc(ACME, tenant="acme")])
-    assert labels == frozenset({"acme"})
+def test_a_single_issuer_needs_no_label() -> None:
+    """One issuer owns its whole subject namespace, so there is no collision to
+    prevent and `tenant` stays optional."""
+    assert tenant_labels([_doc(CORP)]) == frozenset()
+
+
+def test_several_issuers_must_all_be_labelled() -> None:
+    """**The hole ADR 0051 left open** (ADR 0061).
+
+    Two unlabelled issuers both produce `tenant=None`, and policy, the result
+    cache and budget accounts are all keyed on the subject without the issuer —
+    so the second issuer can mint `sub` values belonging to the first and
+    inherit its grants, its cached results and its budget. Isolation that has to
+    be opted into is isolation the shipped configuration does not have.
+    """
+    with pytest.raises(ConfigurationError, match="tenant"):
+        tenant_labels([_doc(CORP), _doc(ACME)])
+
+    # Half-labelled is the same hole: the unlabelled one still collides with
+    # every other unlabelled deployment-wide principal.
+    with pytest.raises(ConfigurationError, match="tenant"):
+        tenant_labels([_doc(CORP), _doc(ACME, tenant="acme")])
+
+
+def test_tenant_labels_collects_the_declared_ones() -> None:
+    labels = tenant_labels([_doc(CORP, tenant="corp"), _doc(ACME, tenant="acme")])
+    assert labels == frozenset({"corp", "acme"})
 
 
 def test_tenant_labels_applies_the_same_validation() -> None:
@@ -146,7 +170,7 @@ def test_the_principal_is_stamped_by_the_registration_that_verified_it(
         issuers=IssuerRegistry(
             [
                 _registration(ACME, keypair, "acme"),
-                _registration(CORP, other_keypair, None),
+                _registration(CORP, other_keypair, "corp"),
             ]
         )
     )
@@ -158,7 +182,11 @@ def test_the_principal_is_stamped_by_the_registration_that_verified_it(
         )
         assert acme_alice.tenant == "acme"
         assert acme_alice.subject == corp_alice.subject == "alice"
-        assert corp_alice.tenant is None
+        assert corp_alice.tenant == "corp"
+        # One subject name, two principals, and nothing downstream can confuse
+        # them — which is the whole reason ADR 0061 makes the label mandatory
+        # as soon as there is a second issuer to collide with.
+        assert acme_alice != corp_alice
 
     anyio.run(check)
 

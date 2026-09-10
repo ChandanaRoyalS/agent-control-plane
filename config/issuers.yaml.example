@@ -29,6 +29,13 @@ issuers:
   - issuer: https://idp.corp.example/realms/acp
     audience: agent-control-plane
 
+    # Mandatory as soon as a second issuer is registered (ADR 0061). Two
+    # servers can mint the same `sub`, and policy, the result cache and budget
+    # accounts are all keyed on the subject — so an unlabelled second issuer
+    # can act as any principal the first one has. The gateway refuses to start
+    # rather than run with that hole open.
+    tenant: corp
+
   # An explicit `jwks_url` is honoured, for servers that publish no metadata at
   # all. It skips the §3.3 check, so the gateway logs a warning on every start:
   # a check being skipped should be a decision somebody made, not one inherited
@@ -36,6 +43,7 @@ issuers:
   - issuer: https://idp.partner.example/
     audience: agent-control-plane-partner
     jwks_url: https://idp.partner.example/protocol/openid-connect/certs
+    tenant: partner
 
     # Optional, and narrower than the global ACP_AUTH_ALGORITHMS default. A
     # server known to sign only with ES256 should not have RSA accepted on its

@@ -25,20 +25,27 @@ from __future__ import annotations
 import json
 from typing import Final
 
-PARTIES: Final = 2
-"""A tenant and a subject. Named so the length check below is a statement
-rather than a magic number."""
+PARTIES: Final = 3
+"""A tenant, a subject and an issuer. Named so the length check below is a
+statement rather than a magic number."""
 
 
-def account(tenant: str | None, subject: str) -> str:
+def account(tenant: str | None, subject: str, issuer: str = "") -> str:
     """The string a principal's spend is charged against.
 
     ``None`` and a real label produce different accounts by construction —
-    ``[null,"alice"]`` and ``["acme","alice"]`` — so an untenanted deployment
-    keeps its existing per-subject behaviour byte-for-byte, and no tenant can
-    ever share an account with the untenanted pool.
+    ``[null,"alice"]`` and ``["acme","alice"]`` — so no tenant can ever share an
+    account with the untenanted pool.
+
+    **``issuer`` is here because a tenant may have two identity providers**
+    (staff and CI, say), which ADR 0051 permits and which leaves ``alice`` from
+    one indistinguishable from ``alice`` from the other. The tenant label closes
+    the collision *between* tenants; the issuer closes it within one. Defaulted
+    so that a caller which genuinely has no issuer — there is no such caller on
+    the request path — is a visibly different account rather than a silent
+    merge with somebody else's (ADR 0061).
     """
-    return json.dumps([tenant, subject], separators=(",", ":"), ensure_ascii=False)
+    return json.dumps([tenant, subject, issuer], separators=(",", ":"), ensure_ascii=False)
 
 
 def parties(payer: str) -> tuple[str | None, str | None]:
@@ -62,7 +69,7 @@ def parties(payer: str) -> tuple[str | None, str | None]:
         return (None, None)
     if not isinstance(decoded, list) or len(decoded) != PARTIES:
         return (None, None)
-    tenant, subject = decoded
+    tenant, subject, _issuer = decoded
     return (
         tenant if isinstance(tenant, str) else None,
         subject if isinstance(subject, str) else None,

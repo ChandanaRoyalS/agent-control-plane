@@ -137,7 +137,7 @@ def test_the_key_is_versioned() -> None:
     # v2: the tenant joined the key (task 58). This assertion exists so a
     # version change is always a deliberate edit here too — two files agreeing
     # is the point, not a redundancy.
-    assert KEY_VERSION == "acp-result-v2"
+    assert KEY_VERSION == "acp-result-v3"
 
 
 def test_arguments_that_will_not_encode_are_not_cached() -> None:
@@ -373,3 +373,31 @@ def test_untenanted_and_tenanted_get_different_keys() -> None:
     assert untenanted is not None
     assert tenanted is not None
     assert untenanted != tenanted
+
+
+def test_one_tenant_two_directories_do_not_share_a_cache_entry() -> None:
+    """ADR 0051 lets a tenant register two identity providers — staff and CI,
+    say. Within that tenant, `alice` from one and `alice` from the other are two
+    people, and the tenant label cannot tell them apart. Only the issuer can
+    (ADR 0061).
+    """
+    staff = key_for(
+        tenant="acme",
+        subject="alice",
+        issuer="https://staff.acme.example",
+        actor=None,
+        upstream="mock-a",
+        tool="mock-a__read_document",
+        arguments={"doc_id": "salaries"},
+    )
+    ci = key_for(
+        tenant="acme",
+        subject="alice",
+        issuer="https://ci.acme.example",
+        actor=None,
+        upstream="mock-a",
+        tool="mock-a__read_document",
+        arguments={"doc_id": "salaries"},
+    )
+
+    assert staff != ci

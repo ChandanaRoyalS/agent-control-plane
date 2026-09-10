@@ -53,7 +53,7 @@ from acp.upstream.models import CallToolResult
 
 logger = logging.getLogger(__name__)
 
-KEY_VERSION: Final = "acp-result-v2"
+KEY_VERSION: Final = "acp-result-v3"
 """Stamped into every key.
 
 v2 added the tenant (task 58). The bump is the mechanism working as designed:
@@ -103,6 +103,7 @@ def key_for(
     *,
     tenant: str | None,
     subject: str,
+    issuer: str = "",
     actor: str | None,
     upstream: str,
     tool: str,
@@ -121,6 +122,11 @@ def key_for(
     that `{"a": 1, "b": 2}` and `{"b": 2, "a": 1}` are one entry rather than two.
     That is a hit-rate concern, not a safety one: two spellings of the same call
     hashing differently is a miss, never a leak.
+
+    ``issuer`` spans the key alongside ``tenant`` because a tenant is allowed
+    two identity providers (ADR 0051), and within one tenant an ``alice`` from
+    the staff directory and an ``alice`` from CI are two people. The tenant
+    label separates tenants; only the issuer separates those two (ADR 0061).
     """
     try:
         encoded_arguments = json.dumps(
@@ -139,7 +145,7 @@ def key_for(
     # invites a subject containing that separator to forge a different key —
     # the classic canonicalisation bug, and free to avoid here.
     material = json.dumps(
-        [KEY_VERSION, tenant, subject, actor, upstream, tool, encoded_arguments],
+        [KEY_VERSION, tenant, subject, issuer, actor, upstream, tool, encoded_arguments],
         separators=(",", ":"),
         ensure_ascii=False,
     )

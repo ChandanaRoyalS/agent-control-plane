@@ -187,9 +187,11 @@ def test_an_issuers_file_becomes_one_registration_per_server(
 issuers:
   - issuer: {ISSUER}
     audience: {AUDIENCE}
+    tenant: corp
   - issuer: {PARTNER}
     audience: {AUDIENCE}-partner
     jwks_url: {PARTNER}keys
+    tenant: partner
 """,
         encoding="utf-8",
     )
@@ -258,9 +260,11 @@ def test_the_authorization_servers_are_the_registry_not_a_second_list(
 issuers:
   - issuer: {ISSUER}
     audience: {RESOURCE}
+    tenant: corp
   - issuer: {PARTNER}
     audience: {RESOURCE}
     jwks_url: {PARTNER}keys
+    tenant: partner
 """,
         encoding="utf-8",
     )

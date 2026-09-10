@@ -110,6 +110,7 @@ def _result_key(
     return key_for(
         tenant=principal.tenant,
         subject=principal.subject,
+        issuer=principal.issuer,
         actor=principal.actor.subject if principal.actor else None,
         upstream=upstream_of(tool),
         tool=tool,
@@ -528,7 +529,11 @@ def build_server(
         # After authorization: a denied call must not spend budget, and charging
         # a call we would refuse anyway is wasted work.
         _charge(
-            payer=account(principal.tenant, principal.subject) if principal is not None else None,
+            payer=(
+                account(principal.tenant, principal.subject, principal.issuer)
+                if principal is not None
+                else None
+            ),
             tool=params.name,
             limiter=limiter,
             costs=costs,

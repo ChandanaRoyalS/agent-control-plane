@@ -28,14 +28,14 @@ def test_a_subject_cannot_forge_a_tenant_boundary() -> None:
     accounts differ.
     """
     assert account("acme", 'alice","extra') != account('acme","alice', "extra")
-    assert account(None, '["acme","alice"]') != account("acme", "alice")
+    assert account(None, '["acme","alice",""]') != account("acme", "alice")
 
 
 def test_the_account_is_stable() -> None:
     """Buckets persist across calls under the same key, so the encoding must be
     deterministic — no dict ordering, no whitespace drift."""
     assert account("acme", "alice") == account("acme", "alice")
-    assert account("acme", "alice") == '["acme","alice"]'
+    assert account("acme", "alice") == '["acme","alice",""]'
 
 
 def test_one_tenants_spend_cannot_drain_anothers_bucket() -> None:
@@ -89,3 +89,14 @@ def test_something_that_is_not_an_account_decodes_to_nothing() -> None:
     assert parties("[1,2,3]") == (None, None)
     assert parties('{"tenant":"acme"}') == (None, None)
     assert parties("[1,2]") == (None, None)
+    assert parties("[1,2,3]") == (None, None)
+
+
+def test_one_tenant_two_directories_do_not_share_an_account() -> None:
+    """The budget half of the same collision (ADR 0061). Two identity providers
+    inside one tenant each have an `alice`, and without the issuer they drain
+    one bucket — which is interference in the polite direction and
+    reconnaissance in the other."""
+    assert account("acme", "alice", "https://staff.acme.example") != account(
+        "acme", "alice", "https://ci.acme.example"
+    )

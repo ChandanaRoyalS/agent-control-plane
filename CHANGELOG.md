@@ -42,12 +42,26 @@ work here: the suite was measuring the wrong things confidently.
   matches a restrictive rule and fails to match a permissive one, so both
   directions fail closed
   ([ADR 0060](docs/decisions/0060-an-argument-is-a-json-value-not-its-string-form.md)).
+- **Tenant isolation was opt-in, and the example configuration did not opt in.**
+  `config/issuers.yaml.example` registered two identity providers with no
+  `tenant` labels, so both produced `tenant=None` — and policy, the result cache
+  and budget accounts are all keyed on the subject without the issuer. The
+  partner directory could mint `sub: cfo@corp` and inherit the corporate CFO's
+  grants, cached results and budget. A tenant label is now mandatory as soon as
+  a second issuer is registered, and the issuer joins the result-cache key and
+  the budget account so that two directories inside one tenant cannot collide
+  either ([ADR 0061](docs/decisions/0061-a-tenant-label-is-mandatory-once-there-are-two-issuers.md)).
 - **The screening character budget was per content block**, so a result with
   eight blocks bought eight times the allowance and the cost of inspecting a
   result was a number the upstream chose. It is now per result (ADR 0059).
 
 ### Changed — breaking
 
+- Registering more than one issuer without a `tenant` label on every one of
+  them is now a startup failure. One issuer stays unlabelled-by-default.
+- The result-cache key version moves to `acp-result-v3` and budget accounts
+  gain a third field, both to admit the issuer. Caches are cold after deploy;
+  in-memory budget state resets, as it already did on any restart.
 - `args:` constraints are typed. A rule may now match calls it previously
   missed (a list containing the value, a float equal to an integer) and miss
   calls it previously matched (a string spelling a number, `"true"` against a

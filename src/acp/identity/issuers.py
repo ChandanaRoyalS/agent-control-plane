@@ -36,7 +36,7 @@ bag of keys has no opinion about which server a token came from.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -110,6 +110,12 @@ class IssuerRegistry:
                 )
                 raise ConfigurationError(msg)
             self._by_issuer[registration.issuer] = registration
+
+        require_labels_when_multi_issuer(
+            sum(1 for r in self._by_issuer.values() if r.tenant is not None),
+            len(self._by_issuer),
+            [r.issuer for r in self._by_issuer.values() if r.tenant is None],
+        )
 
         if not self._by_issuer:
             msg = "an issuer registry needs at least one authorization server"
@@ -209,6 +215,48 @@ cheaper than defending four downstream encodings forever.
 """
 
 
+MULTI_ISSUER = 2
+"""The number of registered issuers at which a `sub` stops being unique.
+
+One issuer owns its whole subject namespace. Two do not, and nothing downstream
+of the validator looks at which one a principal came from.
+"""
+
+
+def require_labels_when_multi_issuer(labelled: int, total: int, issuers: Sequence[str]) -> None:
+    """Refuse to start with several issuers and no tenant labels (ADR 0061).
+
+    ADR 0051 made a tenant an *issuer registration* rather than a claim, which
+    is the right boundary and is enforced everywhere a label exists. What it did
+    not do is make the label mandatory — and the example configuration shipped
+    two identity providers with no labels at all.
+
+    Both principals then carry ``tenant=None``. Policy matches on ``subject``,
+    the result-cache key spans ``(tenant, subject, actor, ...)`` and the budget
+    account is ``[tenant, subject]``; none of them sees the issuer. So a partner
+    identity provider that mints ``sub: cfo@corp`` receives the corporate CFO's
+    grants, the corporate CFO's cached results and the corporate CFO's budget.
+    ADR 0051 describes exactly this collision — "two identity providers each
+    have an alice" — and closed it only for deployments that opted in.
+
+    Isolation that has to be opted into is isolation the shipped configuration
+    does not have. With one issuer there is no collision to prevent and
+    ``tenant`` stays optional; with more than one, every registration names its
+    tenant or the gateway does not start.
+    """
+    if total < MULTI_ISSUER or labelled == total:
+        return
+    msg = (
+        f"{total} issuers are registered and {total - labelled} of them have no "
+        f"`tenant` label: {', '.join(sorted(issuers))}. Two issuers can mint the "
+        f"same `sub`, and policy, the result cache and budget accounts are all "
+        f"keyed on the subject — so an unlabelled second issuer can act as any "
+        f"principal the first one has. Give every issuer a `tenant` label, or "
+        f"register only one issuer."
+    )
+    raise ConfigurationError(msg)
+
+
 def tenant_labels(documents: Iterable[Mapping[str, object]]) -> frozenset[str]:
     """Every tenant the issuer documents declare, validated.
 
@@ -218,10 +266,17 @@ def tenant_labels(documents: Iterable[Mapping[str, object]]) -> frozenset[str]:
     validation — one rule for what a label is, applied on both paths.
     """
     labels = set()
+    unlabelled: list[str] = []
+    total = 0
     for index, document in enumerate(documents):
-        label = _tenant_label(document.get("tenant"), document.get("issuer") or f"#{index}")
+        total += 1
+        issuer = str(document.get("issuer") or f"#{index}")
+        label = _tenant_label(document.get("tenant"), issuer)
         if label is not None:
             labels.add(label)
+        else:
+            unlabelled.append(issuer)
+    require_labels_when_multi_issuer(total - len(unlabelled), total, unlabelled)
     return frozenset(labels)
 
 

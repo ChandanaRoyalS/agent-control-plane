@@ -143,6 +143,7 @@ denial-of-service path against v1.0.0.
 |---|---|
 | [0059](0059-screen-every-string-the-result-carries.md) | an embedded resource reached the model unscreened, because "text" meant one field rather than every string |
 | [0060](0060-an-argument-is-a-json-value-not-its-string-form.md) | `str()` is not a comparison, and "I cannot compare these" is a third answer that resolves by the rule's effect |
+| [0061](0061-a-tenant-label-is-mandatory-once-there-are-two-issuers.md) | isolation that has to be opted into is isolation the shipped configuration does not have |
 
 ## The format
 

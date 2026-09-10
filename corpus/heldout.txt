@@ -19,15 +19,23 @@
 #     family is represented, so the split can report whether generalisation
 #     holds per family rather than only in aggregate.
 #
-# Format: one attack id (<family>/<slug>) per line. Blank lines and #-comments
-# are ignored.
+#
+# Each id carries the sha256 of its attack, over the payload *and* its
+# expected outcome. That is what makes this a seal rather than a list:
+# "held out" was otherwise a promise that these files were not read while
+# tuning, which nothing checked and which editing one of them quietly
+# broke — including editing `expect: detected` to `expect: undetected`
+# after a disappointing run. `verify_seal` fails the load when one changes.
+#
+# Format: one attack id per line, `<family>/<slug>  sha256:<hex>`.
+# Blank lines and #-comments are ignored.
 
 version: 1
 
-boundary_escape/fake-end-marker
-delayed_multi_step/deferred-trigger
-direct_override/authority-appeal
-exfiltration/data-uri-decoy
-obfuscation/base64-benign-decoy
-plain_assertion/false-provenance
-tool_confusion/chain-two-tools
+boundary_escape/fake-end-marker  sha256:557cc5d89db935b2a5d34070c0a05eca7a4d004e4c1618e6a295ee5d955af60d
+delayed_multi_step/deferred-trigger  sha256:53b10c0045328d941540dcfeac1920dea5110a174b1e77108ffbd4376e3b22bb
+direct_override/authority-appeal  sha256:d53335bbb65e8440125eda5b5df0633868a9c7d77dd719ca85317046a4eb317d
+exfiltration/data-uri-decoy  sha256:9759ded1bcd9248071b937c040a494d826f4813bf7de5953bdfa23e149b10d9c
+obfuscation/base64-benign-decoy  sha256:c56553f4c87225e460ca9ef1ebd5af4df763e2c11b587a1d10a7a351bac765aa
+plain_assertion/false-provenance  sha256:e9f42bba2042dd168861766857fd47e1765302cf9b84e7a70c741023812dec15
+tool_confusion/chain-two-tools  sha256:948adf0cd58564d6b1a0cb8afd01e87270e3f9eb894dfe406d4547d9ae54a75d

@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import random
 
-from acp.corpus.metrics import EMPTY, Interval, bootstrap, measure
+import pytest
+
+from acp.corpus.metrics import EMPTY, bootstrap, measure
 
 SEED = 20260812
 FAST = 400
@@ -37,21 +39,45 @@ def test_no_observations_buys_the_whole_range() -> None:
     assert EMPTY.degenerate
 
 
-def test_a_unanimous_sample_is_marked_uninformative_not_certain() -> None:
-    """**The bootstrap's real limitation, surfaced rather than hidden.**
+def test_a_unanimous_sample_gets_an_exact_bound_not_a_shrug() -> None:
+    """**The bootstrap's limitation, without mistaking it for the data's.**
 
     Every resample of eight identical values is eight identical values, so the
-    percentile interval collapses to a point. That point is not certainty — it
-    is the estimator running out of things to say. A harness that printed
-    `[0%, 0%]` here would be claiming its least-supported row was its most
-    confident one.
+    percentile interval collapses to a point — and this used to be reported as
+    `[uninformative]`. That is true of the *bootstrap* and false of the
+    observation: `0 of 8` bounds the rate, and `0 of 106` bounds it tightly.
+    Reporting the strongest measurement in the corpus as unquantified understated
+    it (ADR 0064).
+
+    Clopper-Pearson is exact here and needs no resampling.
     """
     none_caught = bootstrap([False] * 8, rng=rng(), resamples=FAST)
     all_caught = bootstrap([True] * 8, rng=rng(), resamples=FAST)
 
-    assert none_caught == Interval(low=0.0, high=0.0, degenerate=True)
-    assert all_caught == Interval(low=1.0, high=1.0, degenerate=True)
-    assert none_caught.render() == "[uninformative]"
+    assert none_caught.low == 0.0
+    assert none_caught.high == pytest.approx(1.0 - 0.05 ** (1 / 8))
+    assert not none_caught.degenerate
+    assert none_caught.exact
+    assert none_caught.render().startswith("[\u2264")
+
+    assert all_caught.high == 1.0
+    assert all_caught.low == pytest.approx(0.05 ** (1 / 8))
+    assert all_caught.render().startswith("[\u2265")
+
+
+def test_the_headline_false_positive_claim_has_a_real_bound() -> None:
+    """`0 of 106 benign documents withheld` is the number the README leads with,
+    and it was printed as `[uninformative]`."""
+    interval = bootstrap([False] * 106, rng=rng(), resamples=FAST)
+
+    assert interval.high < 0.03
+    assert interval.render() == "[\u22642.8% exact]"
+
+
+def test_an_empty_sample_is_still_uninformative() -> None:
+    """No observations really does buy you nothing, and that case keeps saying
+    so — the change above is about unanimity, not about absence."""
+    assert bootstrap([], rng=rng(), resamples=FAST).render() == "[uninformative]"
 
 
 def test_one_dissenting_observation_makes_the_interval_informative() -> None:

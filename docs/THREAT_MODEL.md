@@ -213,8 +213,8 @@ documents, 2,000 bootstrap resamples (seed 20260812):
 | attack family | detected | **withheld** |
 |---|---|---|
 | exfiltration | 5/5 | 0 |
-| obfuscation | 6/7 | **4** |
-| direct_override | 5/6 | 0 |
+| obfuscation | 10/11 | **6** |
+| direct_override | 8/10 | 0 |
 | tool_confusion | 3/4 | 0 |
 | boundary_escape | 1/4 | 0 |
 | **delayed_multi_step** | **0/4** | 0 |
@@ -230,10 +230,10 @@ Precision, on the flagged set:
 
 | firewall family | precision | interval |
 |---|---|---|
-| obfuscation | 67% (6/9) | [33%, 89%] |
-| direct_override | 53% (8/15) | [27%, 80%] |
+| obfuscation | 77% (10/13) | [54%, 100%] |
+| direct_override | 63% (12/19) | [42%, 84%] |
 | exfiltration | 42% (5/12) | [17%, 67%] |
-| tool_confusion | 38% (3/8) | **[0%, 75%]** |
+| tool_confusion | 38% (3/8) | **[12%, 75%]** |
 
 **Under half of what this firewall flags is an attack**, and `tool_confusion`'s
 lower bound is *zero*. That is survivable only because of the row that matters

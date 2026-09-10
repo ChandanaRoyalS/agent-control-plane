@@ -16,8 +16,12 @@ documents stay unread until there is a number to report against them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import hashlib
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Final
 
 from acp.corpus.attack import Attack
 from acp.corpus.loader import AttackCorpus, default_root, load_attacks
@@ -32,6 +36,20 @@ class HeldoutManifest:
 
     version: int
     ids: frozenset[str]
+
+    digests: Mapping[str, str] = field(default_factory=dict)
+    """``id -> sha256`` of the document's bytes, for the ids that carry one.
+
+    **What turns a list into a seal.** Without it, "held out" is a promise that
+    the files were not read while tuning — a promise nothing checks and which an
+    edit to one of those files quietly breaks. With it, a held-out document that
+    changed since the split was drawn fails the load, and a measurement citing
+    "held-out v1" names a set whose contents can be shown to be the same set.
+
+    Optional per id so a split can be committed before its documents settle, and
+    absent digests are reported by `verify_seal` rather than assumed to match —
+    an unsealed entry is a weaker claim, not an equivalent one.
+    """
 
     def __len__(self) -> int:
         return len(self.ids)
@@ -52,6 +70,7 @@ def load_heldout_manifest(path: Path) -> HeldoutManifest:
 
     version: int | None = None
     ids: set[str] = set()
+    digests: dict[str, str] = {}
     for lineno, line in enumerate(raw.splitlines(), start=1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -67,8 +86,11 @@ def load_heldout_manifest(path: Path) -> HeldoutManifest:
                 )
                 raise ConfigurationError(msg) from exc
             continue
-        # Anything else is an attack id. It must look like <family>/<slug> — a
-        # bare word here is a typo that would silently hold nothing out.
+        # Anything else is an attack id, optionally followed by the sha256 of
+        # the document it names: `<family>/<slug>  sha256:<hex>`. The digest is
+        # what makes this a *seal* rather than a list — see `verify_seal`.
+        stripped, _, digest = (part.strip() for part in stripped.partition("sha256:"))
+        stripped = stripped.rstrip()
         if "/" not in stripped:
             msg = (
                 f"held-out manifest {str(path)!r} line {lineno}: "
@@ -79,6 +101,8 @@ def load_heldout_manifest(path: Path) -> HeldoutManifest:
             msg = f"held-out manifest {str(path)!r} line {lineno}: duplicate id {stripped!r}"
             raise ConfigurationError(msg)
         ids.add(stripped)
+        if digest:
+            digests[stripped] = digest
 
     if version is None:
         msg = f"held-out manifest {str(path)!r} has no `version:` line"
@@ -90,7 +114,7 @@ def load_heldout_manifest(path: Path) -> HeldoutManifest:
         )
         raise ConfigurationError(msg)
 
-    return HeldoutManifest(version=version, ids=frozenset(ids))
+    return HeldoutManifest(version=version, ids=frozenset(ids), digests=digests)
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +124,10 @@ class Split:
     development: AttackCorpus
     heldout: AttackCorpus
     version: int
+
+    manifest: HeldoutManifest | None = None
+    """The manifest this split came from, carried so a caller can check the
+    seal without loading it a second time and risking a different file."""
 
 
 def split_attacks(corpus: AttackCorpus, manifest: HeldoutManifest) -> Split:
@@ -128,6 +156,7 @@ def split_attacks(corpus: AttackCorpus, manifest: HeldoutManifest) -> Split:
         development=AttackCorpus(attacks=tuple(development)),
         heldout=AttackCorpus(attacks=tuple(heldout)),
         version=manifest.version,
+        manifest=manifest,
     )
 
 
@@ -150,3 +179,52 @@ def load_development_attacks(root: Path | None = None) -> AttackCorpus:
     someone deliberately reaching past this function to do it.
     """
     return load_split(root).development
+
+
+def digest_of(attack: Attack) -> str:
+    """The seal for one held-out attack.
+
+    Over the payload **and its expectation**, not the payload alone. Editing
+    `expect: detected` to `expect: undetected` after a disappointing run is the
+    tampering worth detecting, and a digest that covered only the text would not
+    notice it. Whitespace-only formatting of the front matter is not covered,
+    which is the deliberate trade: a reformat should not break a seal, and a
+    changed claim should.
+    """
+    material = json.dumps(
+        [SEAL_VERSION, attack.id, str(attack.expect), str(attack.source), attack.text],
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+SEAL_VERSION: Final = "acp-heldout-seal-v1"
+"""Domain separation, so a digest computed under a future scheme cannot be
+mistaken for one computed under this one."""
+
+
+def verify_seal(corpus: AttackCorpus, manifest: HeldoutManifest | None) -> tuple[str, ...]:
+    """Ids whose document no longer matches the digest the manifest recorded.
+
+    Returns them rather than raising, because the caller decides what a broken
+    seal means: the evaluation harness refuses to report a held-out number, and
+    a test asserts the tuple is empty. Ids with no recorded digest are not
+    reported here — `unsealed_ids` answers that question separately, so
+    "changed" and "never sealed" cannot be confused.
+    """
+    if manifest is None:
+        return ()
+    broken: list[str] = []
+    for attack in corpus.attacks:
+        expected = manifest.digests.get(attack.id)
+        if expected is not None and digest_of(attack) != expected:
+            broken.append(attack.id)
+    return tuple(sorted(broken))
+
+
+def unsealed_ids(manifest: HeldoutManifest | None) -> tuple[str, ...]:
+    """Held-out ids carrying no digest. A weaker claim, named rather than hidden."""
+    if manifest is None:
+        return ()
+    return tuple(sorted(manifest.ids - set(manifest.digests)))

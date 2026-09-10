@@ -49,19 +49,32 @@ class Interval:
     high: float
 
     degenerate: bool = False
-    """True when the interval carries no information.
+    """True when the interval carries no information — an empty sample.
 
-    Either the sample was empty, or every observation in it agreed. In the second
-    case the percentile bootstrap returns a single point — not because the
-    estimate is certain, but because resampling identical values can only produce
-    identical values. Reported rather than smoothed over: an interval that is
-    narrow because the data is unanimous and an interval that is narrow because
-    the data is plentiful are different claims, and only one of them is strong.
+    It used to also cover the unanimous case, where the percentile bootstrap
+    returns a single point because resampling identical values can only produce
+    identical values. That is a true statement about the *bootstrap* and a false
+    one about the data: `0 of 106` is a real observation with a real bound. Those
+    now get an exact interval instead — see `exact` and `_exact_one_sided`.
+    """
+
+    exact: bool = False
+    """True when this is a Clopper-Pearson interval rather than a bootstrap one.
+
+    Marked because the two answer slightly different questions and a reader
+    comparing a column of them is entitled to know which is which. An interval
+    that is narrow because the data is unanimous and one that is narrow because
+    the data is plentiful are still different claims; the `≤` in the rendering
+    is what says so.
     """
 
     def render(self) -> str:
         if self.degenerate:
             return "[uninformative]"
+        if self.exact and self.low == 0.0:
+            return f"[≤{self.high:.1%} exact]"
+        if self.exact and self.high == 1.0:
+            return f"[≥{self.low:.1%} exact]"
         return f"[{self.low:.0%}, {self.high:.0%}]"
 
 
@@ -85,6 +98,26 @@ class Proportion:
         return f"{self.rate:>6.1%}  {self.successes:>3}/{self.total:<3}  {self.interval.render()}"
 
 
+def _exact_one_sided(*, successes: int, total: int, confidence: float) -> tuple[float, float]:
+    """A Clopper-Pearson interval for a sample where every observation agreed.
+
+    Exact rather than asymptotic, which matters at these sample sizes, and
+    closed-form for the two boundary cases so no distribution library is needed:
+
+    - zero successes in *n*: the upper bound is ``1 - alpha**(1/n)``
+    - *n* successes in *n*: the lower bound is ``alpha**(1/n)``
+
+    Both fall straight out of the binomial likelihood — the largest rate under
+    which observing zero successes *n* times still has probability at least
+    alpha. For 0 of 106 at 95%, that is 2.8%: small, bounded, and a far more
+    useful sentence than "uninformative".
+    """
+    alpha = 1.0 - confidence
+    if successes == 0:
+        return (0.0, 1.0 - alpha ** (1.0 / total))
+    return (alpha ** (1.0 / total), 1.0)
+
+
 def bootstrap(
     outcomes: Sequence[bool],
     *,
@@ -105,10 +138,23 @@ def bootstrap(
 
     first = outcomes[0]
     if all(outcome is first for outcome in outcomes):
-        # Every resample would be identical, so the percentile interval is a
-        # point. Reported as uninformative rather than as certainty.
-        rate = 1.0 if first else 0.0
-        return Interval(low=rate, high=rate, degenerate=True)
+        # **The bootstrap has nothing to resample here, but the data is not
+        # uninformative — the method is.**
+        #
+        # Every resample of an all-identical sample is identical, so the
+        # percentile interval collapses to a point and this used to report
+        # `[uninformative]`. That is the correct thing to say about the
+        # bootstrap and the wrong thing to say about the observation: `0/106`
+        # is a real result with a real bound, and it is the number the README
+        # leads with. Reporting it as unquantified understated the strongest
+        # measurement in the corpus.
+        #
+        # Clopper-Pearson is exact for this case and needs no resampling. See
+        # `_exact_one_sided`.
+        low, high = _exact_one_sided(
+            successes=total if first else 0, total=total, confidence=confidence
+        )
+        return Interval(low=low, high=high, degenerate=False, exact=True)
 
     rates = sorted(
         sum(sample) / total for sample in (rng.choices(outcomes, k=total) for _ in range(resamples))

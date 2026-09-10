@@ -92,6 +92,34 @@ work here: the suite was measuring the wrong things confidently.
   enforceable detector is what withholds a result, and the sixty-fifth does not
   withhold it further.
 
+- **The injection corpus was written by the author of the detectors, one day
+  after them**, and all 43 attacks were synthetic — so the measured recall was
+  partly a measurement of one person's memory of their own regexes. An external
+  review wrote fifteen evasions and thirteen worked, including `Ignore *the*
+  previous instructions` (one article), `<system role="admin">`, chat-template
+  turn markers, `Don't` as a contraction, Hangul fillers, the Unicode TAG block,
+  base64 with one character in front, and base64 wrapped at 76 columns as
+  encoders emit it. The patterns are broadened, the eight surviving evasions are
+  in the corpus under a new `source: external_review`, and the benign
+  false-positive rate is **unchanged at 19.8% with 0 of 106 still withheld**
+  ([ADR 0064](docs/decisions/0064-the-corpus-could-not-see-what-it-was-not-shown.md)).
+- **The model classifier could not report the two families it exists for.**
+  ADR 0042 adds it to reach `plain_assertion` and `delayed_multi_step`; its
+  prompt asks the model to name them; `Family` did not define them, so every
+  such finding was dropped. Two tests asserted that behaviour. Both families are
+  now in the enum, and a test requires the corpus and detector taxonomies to
+  agree.
+- **The held-out split was a list of ids that bound nothing**, and the routine
+  test suite scored it on every run — a set measured on every commit is
+  development data with a ceremony attached. Each id now carries a sha256 over
+  its payload *and* its expectation, verified on load; the suite scores the
+  development split only, and `evaluate.py --unseal` scores the sealed one.
+- **`0 of 106 benign documents withheld` was printed as `[uninformative]`.**
+  True of the percentile bootstrap, which collapses on a unanimous sample, and
+  false of the observation. Those rows now get an exact Clopper-Pearson bound:
+  the headline becomes `[≤2.8%]`, and — pointing the other way — 5-of-5
+  exfiltration recall becomes `[≥54.9%]` rather than a bare 100%.
+
 ### Changed — breaking
 
 - Operator credentials must be at least 32 characters. The shipped

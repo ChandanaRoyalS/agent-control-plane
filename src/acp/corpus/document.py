@@ -70,6 +70,22 @@ class Source(StrEnum):
     limit: whoever wrote it knew what the detectors match, so a clean result on
     synthetic text is weaker evidence than a clean result on found text."""
 
+    EXTERNAL_REVIEW = "external_review"
+    """Constructed by somebody who was **trying to get past** these detectors,
+    without having written them.
+
+    The strongest adversarial provenance this corpus has, and it exists because
+    the corpus did not have it. 43 of 43 attacks were `synthetic`, authored the
+    day after the detectors they exercise — so the measured recall was partly a
+    measurement of one person's memory of their own patterns. An external review
+    of v1.0.0 wrote fifteen evasions in a few minutes and thirteen of them
+    passed; the eight that survive as documents are here (ADR 0064).
+
+    A `synthetic` attack tests whether the detector does what its author
+    intended. One of these tests whether the detector does what its author
+    *claimed*, which is a different question and the one that matters.
+    """
+
 
 @dataclass(frozen=True, slots=True)
 class Document:

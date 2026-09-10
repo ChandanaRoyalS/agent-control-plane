@@ -20,8 +20,8 @@
       "withheld": 0
     },
     "direct_override": {
-      "detected": 5,
-      "total": 6,
+      "detected": 8,
+      "total": 10,
       "withheld": 0
     },
     "exfiltration": {
@@ -30,9 +30,9 @@
       "withheld": 0
     },
     "obfuscation": {
-      "detected": 6,
-      "total": 7,
-      "withheld": 4
+      "detected": 10,
+      "total": 11,
+      "withheld": 6
     },
     "plain_assertion": {
       "detected": 0,
@@ -47,7 +47,7 @@
   },
   "reported": {
     "direct_override": {
-      "attack_hits": 8,
+      "attack_hits": 12,
       "benign_hits": 7
     },
     "exfiltration": {
@@ -55,7 +55,7 @@
       "benign_hits": 7
     },
     "obfuscation": {
-      "attack_hits": 6,
+      "attack_hits": 10,
       "benign_hits": 3
     },
     "tool_confusion": {

@@ -148,15 +148,21 @@ def test_a_small_family_is_flagged_as_too_small_to_quote(report: Report) -> None
     assert any("read the interval" in warning for warning in report.warnings)
 
 
-def test_a_family_nothing_catches_gets_an_uninformative_interval(report: Report) -> None:
+def test_a_family_nothing_catches_gets_an_exact_upper_bound(report: Report) -> None:
     """`plain_assertion` is 0 for 6 — a unanimous sample, where the percentile
-    bootstrap can only return a point. Marked uninformative rather than printed
-    as a tight interval around zero."""
+    bootstrap can only return a point.
+
+    It used to print `[uninformative]`, which said the estimator had run out of
+    things to say and let a reader hear that the data had. Clopper-Pearson
+    bounds it exactly: nothing was caught, and on six documents that is
+    consistent with a true rate up to about 39%. A weak claim, stated.
+    """
     row = next(row for row in report.recall if row.family.value == "plain_assertion")
 
     assert row.detected.successes == 0
-    assert row.detected.interval.degenerate
-    assert row.detected.interval.render() == "[uninformative]"
+    assert row.detected.interval.exact
+    assert not row.detected.interval.degenerate
+    assert 0.3 < row.detected.interval.high < 0.5
 
 
 def test_the_report_states_its_own_configuration(report: Report) -> None:

@@ -8,6 +8,8 @@ path. Those are the properties tested here.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from acp.firewall.classifier import (
@@ -18,6 +20,7 @@ from acp.firewall.classifier import (
     parse_verdict,
 )
 from acp.firewall.findings import Confidence, Family
+from acp.firewall.ollama import _SYSTEM
 
 # -- parse_verdict, defensively ---------------------------------------------
 
@@ -56,8 +59,41 @@ def test_any_other_shape_is_an_abstention(raw: str) -> None:
 
 
 def test_an_unknown_family_drops_to_none_but_keeps_the_flag() -> None:
+    """A family this repository does not define is not a family. The flag
+    survives because the model still said "attack"; the label does not, because
+    an unrecognised one would be an unbounded string in a metric label."""
     verdict = parse_verdict('{"attack": true, "family": "martian"}')
     assert verdict == Verdict(is_attack=True, family=None)
+
+
+def test_the_classifier_can_report_the_families_it_exists_for() -> None:
+    """**The bug the enum was hiding** (ADR 0064).
+
+    ADR 0042 adds the classifier to reach `plain_assertion` and
+    `delayed_multi_step` — the two families at 0% recall, the two the patterns
+    cannot see. Its prompt asks the model to name them. `Family` did not define
+    them, so the answer mapped to `None` and `classify` dropped the finding: the
+    one detector added to catch them could not report them.
+    """
+    for family in ("plain_assertion", "delayed_multi_step"):
+        verdict = parse_verdict(f'{{"attack": true, "family": "{family}"}}')
+
+        assert verdict.is_attack
+        assert verdict.family is not None, f"the classifier cannot report {family}"
+        assert verdict.family.value == family
+
+
+def test_every_family_the_prompt_offers_is_one_the_parser_accepts() -> None:
+    """The two lists are written in different files and drifted for four tasks.
+
+    The prompt is prose in `ollama.py`; the parser maps onto `Family`. Nothing
+    compared them, so a family the model was invited to name and could not be
+    understood as looked exactly like a model that never named it.
+    """
+    offered = set(re.findall(r"\b([a-z]+_[a-z_]+)\b", _SYSTEM))
+    known = {family.value for family in Family}
+
+    assert offered <= known, f"the prompt offers families the parser drops: {offered - known}"
 
 
 # -- OllamaClassifier --------------------------------------------------------

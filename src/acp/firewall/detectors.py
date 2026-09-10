@@ -40,19 +40,46 @@ from acp.firewall.findings import Confidence, Family, Finding, describe
 # Instruction-shaped language
 # ---------------------------------------------------------------------------
 
+_DETERMINER: Final = r"(?:the\s+|all\s+(?:the\s+)?|any\s+|your\s+|these\s+|those\s+|my\s+)?"
+"""An optional determiner before the object of an override.
+
+Written once because leaving it out was the single most productive evasion in
+the whole set: `ignore previous instructions` fired and `Ignore the previous
+instructions` did not (ADR 0064).
+"""
+
+_TARGET: Final = r"(?:previous|prior|earlier|above|preceding|foregoing|initial|original)"
+_OBJECT: Final = r"(?:instructions?|directions?|directives?|prompts?|rules?|guidance|guidelines?)"
+
 _OVERRIDE_PATTERNS: Final[tuple[tuple[str, Confidence], ...]] = (
     (
-        r"ignore\s+(?:all\s+|any\s+)?(?:previous|prior|earlier|above)\s+instructions?",
+        rf"(?:ignore|disregard|discard|override|bypass|skip|set\s+aside)\s+"
+        rf"{_DETERMINER}{_TARGET}\s+{_OBJECT}",
         Confidence.LOW,
     ),
-    (r"disregard\s+(?:all\s+|any\s+)?(?:previous|prior|earlier|above)\s+\w+", Confidence.LOW),
-    (r"forget\s+(?:everything|all)\s+(?:you|above|before)", Confidence.LOW),
+    (
+        rf"(?:ignore|disregard|discard|override|bypass)\s+{_DETERMINER}{_OBJECT}\s+"
+        rf"(?:above|before|you\s+(?:were\s+)?(?:given|received))",
+        Confidence.LOW,
+    ),
+    (r"forget\s+(?:everything|all|what)\s+(?:you|above|before|that)", Confidence.LOW),
     (r"you\s+are\s+now\s+(?:a|an|the)\s+\w+", Confidence.LOW),
-    (r"new\s+(?:system\s+)?instructions?\s*:", Confidence.MEDIUM),
-    (r"</?(?:system|assistant|user)>", Confidence.MEDIUM),
+    (r"new\s+(?:system\s+)?(?:instructions?|prompt|rules?)\s*:", Confidence.MEDIUM),
+    # `<system>`, and `<system role="x">` — the attribute form was not matched,
+    # which is a closing bracket's worth of difference to a model reading it.
+    (r"</?(?:system|assistant|user|human)(?:\s[^<>]{0,200})?>", Confidence.MEDIUM),
+    # Chat-template turn markers. A tool result containing one is claiming to be
+    # a conversation rather than a document, whichever family's syntax it uses.
+    (r"<\|(?:im_start|im_end|system|assistant|user|endoftext)\|>", Confidence.MEDIUM),
+    (r"\[/?INST\]|<</?SYS>>", Confidence.MEDIUM),
+    (r"(?:^|\n)\s*(?:Human|Assistant|System)\s*:", Confidence.LOW),
     (r"\bBEGIN\s+SYSTEM\s+PROMPT\b", Confidence.MEDIUM),
     (
-        r"do\s+not\s+(?:tell|inform|mention\s+(?:this\s+)?to)\s+the\s+(?:user|human|operator)",
+        # `do not`, `don't`, `dont`, and the curly apostrophe a word processor
+        # produces — four spellings of one sentence.
+        r"(?:do\s*n[o']?t|don[\u2019']t|never)\s+"
+        r"(?:tell|inform|reveal|disclose|mention|report|show|say)\s+"
+        r"(?:this\s+|that\s+|it\s+|anything\s+)?(?:to\s+)?the\s+(?:user|human|operator)",
         Confidence.MEDIUM,
     ),
 )
@@ -92,7 +119,15 @@ def instruction_override(text: str) -> Iterator[Finding]:
 # Characters that are not meant to be seen
 # ---------------------------------------------------------------------------
 
-INVISIBLE: Final = frozenset("\u200b\u200c\u200d\u2060\ufeff\u00ad\u180e")
+INVISIBLE: Final = frozenset(
+    "\u200b\u200c\u200d\u2060\ufeff\u00ad\u180e"
+    # Hangul fillers. Render as nothing, are not whitespace, and split a word
+    # past every pattern above exactly as a zero-width space does.
+    "\u115f\u1160\u3164\uffa0" + "".join(chr(code) for code in range(0xE0000, 0xE0080))
+    # The Unicode TAG block (U+E0000-U+E007F) mirrors ASCII invisibly and is
+    # the canonical carrier for a hidden instruction — a whole English
+    # sentence can be written in it and rendered as nothing at all.
+)
 """Zero-width and soft-hyphen characters.
 
 Two separate problems. A human reviewing the document does not see them, so an
@@ -228,8 +263,15 @@ def disallowed_url(text: str, allowed_hosts: AbstractSet[str] = frozenset()) -> 
 # Encoded payloads
 # ---------------------------------------------------------------------------
 
-_BASE64_RUN: Final = re.compile(r"[A-Za-z0-9+/]{24,4000}={0,2}")
+_BASE64_RUN: Final = re.compile(r"[A-Za-z0-9+/][A-Za-z0-9+/\r\n]{22,4000}[A-Za-z0-9+/]={0,2}")
 """Twenty-four characters is the length floor, and it is the *only* one.
+
+**Line breaks are inside the run, spaces are not.** A base64 encoder emits at 76
+columns by default, so a MIME-wrapped payload is not one run to a pattern that
+stops at a newline — which made line-wrapping an evasion costing an attacker one
+call to `textwrap`. Newlines are admitted; spaces are not, because
+`[A-Za-z0-9+/ ]` matches most English prose and would turn this into a scan of
+every sentence in the document.
 
 An earlier draft also carried a `MIN_DECODED = 12` guard on the decoded bytes.
 It could never fire — twenty-four base64 characters decode to eighteen bytes —
@@ -258,15 +300,8 @@ def encoded_payload(text: str) -> Iterator[Finding]:
     the naive version useless.
     """
     for match in _BASE64_RUN.finditer(text):
-        candidate = match.group(0)
-        try:
-            raw = base64.b64decode(candidate, validate=True)
-        except (binascii.Error, ValueError):
-            continue
-        try:
-            decoded = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            # Binary. An image, a digest, a key — not this detector's business.
+        decoded = _decode_any_alignment(match.group(0))
+        if decoded is None:
             continue
         if not any(pattern.search(decoded) for pattern, _ in _OVERRIDE):
             continue
@@ -277,6 +312,50 @@ def encoded_payload(text: str) -> Iterator[Finding]:
             evidence=decoded,
             offset=match.start(),
         )
+
+
+_MIN_DECODED_RUN: Final = 24
+"""Shortest base64 run worth trying at a shifted alignment.
+
+The same floor the run pattern uses. Below it a shifted decode is mostly noise
+that happens to be valid UTF-8.
+"""
+
+
+def _decode_any_alignment(candidate: str) -> str | None:
+    """The candidate's text, tolerating a prefix character or line wrapping.
+
+    Two evasions, one fix. `b64decode(validate=True)` refuses a run whose length
+    is not a multiple of four, so **prepending a single character** to the
+    payload made the whole run undecodable and the detector skipped it silently.
+    And a MIME-wrapped blob — base64 as an encoder actually emits it, at 76
+    columns — is not one run at all.
+
+    So whitespace comes out first, and then up to four leading characters are
+    dropped in turn until one alignment decodes. Four, because base64 has a
+    period of four; a fifth would be the same alignment as the first.
+
+    Returns the decoded text, or ``None`` for anything that is not readable
+    text — an image, a digest, a key. Those are not this detector's business,
+    and saying so is what keeps it from being a length check.
+    """
+    packed = "".join(candidate.split())
+    for offset in range(4):
+        chunk = packed[offset:]
+        chunk = chunk[: len(chunk) - len(chunk) % 4]
+        if len(chunk) < _MIN_DECODED_RUN:
+            continue
+        try:
+            raw = base64.b64decode(chunk, validate=True)
+        except (binascii.Error, ValueError):
+            continue
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            # Binary at this alignment. A later one is unlikely to be text, but
+            # trying costs nothing and the loop is bounded at four.
+            continue
+    return None
 
 
 # ---------------------------------------------------------------------------

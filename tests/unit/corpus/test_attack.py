@@ -42,13 +42,24 @@ def test_every_detector_family_is_an_attack_family() -> None:
     assert detector_families <= attack_families
 
 
-def test_the_extra_families_are_the_uncatchable_ones() -> None:
-    """And they are named, not smuggled in. The two attack families with no
-    detector are the point of ADR 0040 — a taxonomy that only contains what you
-    can catch is one that flatters you."""
-    extra = {family.value for family in AttackFamily} - {family.value for family in Family}
+def test_the_corpus_taxonomy_and_the_detector_taxonomy_agree() -> None:
+    """Every family the corpus slices by must be one a detector can *report*.
 
-    assert extra == {"plain_assertion", "delayed_multi_step"}
+    This assertion used to run the other way: it required
+    `plain_assertion` and `delayed_multi_step` to be **missing** from
+    `Family`, on the reasoning that no detector catches them. That was true of
+    the pattern detectors and false of the model classifier, which was added
+    specifically to reach those two (ADR 0042) and which mapped its answer into
+    `Family`, found nothing, and dropped the finding. So the one detector that
+    could report them could not, and this test held the door shut (ADR 0064).
+
+    A family a detector cannot name is a per-family recall of zero that is an
+    artefact of the enum rather than a measurement.
+    """
+    corpus = {family.value for family in AttackFamily}
+    reportable = {family.value for family in Family}
+
+    assert corpus == reportable
 
 
 def test_an_attack_parses_into_family_expectation_and_text(tmp_path: Path) -> None:

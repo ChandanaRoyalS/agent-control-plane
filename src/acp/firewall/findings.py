@@ -77,6 +77,23 @@ class Family(StrEnum):
     delimiters, fake end-of-document markers. Aimed at whatever wraps the
     content, which from task 46 is this gateway's own provenance envelope."""
 
+    PLAIN_ASSERTION = "plain_assertion"
+    """A paragraph that simply asserts something false. Nothing is misspelled,
+    encoded or hidden, so no **pattern** detector can report this — and for four
+    tasks that was taken to mean no detector could, so the family was left out
+    of this enum entirely.
+
+    The optional model classifier (ADR 0042) exists precisely to reach the two
+    families the patterns cannot, and its prompt asks the model to name them. It
+    then mapped the answer into this enum, found nothing, and dropped the
+    finding — so the one detector added to catch `plain_assertion` could not
+    report `plain_assertion`. A test asserted that behaviour. See ADR 0064."""
+
+    DELAYED_MULTI_STEP = "delayed_multi_step"
+    """A payload that becomes an instruction only in combination with a second
+    retrieval or a later turn. Reportable by the classifier and by nothing else,
+    for the same reason as `plain_assertion` above."""
+
 
 class Confidence(StrEnum):
     """How sure the detector is that this is an attack.

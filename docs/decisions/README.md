@@ -146,6 +146,7 @@ denial-of-service path against v1.0.0.
 | [0061](0061-a-tenant-label-is-mandatory-once-there-are-two-issuers.md) | isolation that has to be opted into is isolation the shipped configuration does not have |
 | [0062](0062-an-approval-names-the-person-who-gave-it.md) | the row said somebody with the credential approved it, wrote the live token into the log, and committed before it recorded |
 | [0063](0063-durability-and-the-bounds-nobody-enforced.md) | four limits this repository had written down and had not made true |
+| [0064](0064-the-corpus-could-not-see-what-it-was-not-shown.md) | the corpus was written by the person who wrote the detectors, one day after them |
 
 ## The format
 

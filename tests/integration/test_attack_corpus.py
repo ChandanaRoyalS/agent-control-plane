@@ -19,9 +19,16 @@ import logging
 
 import pytest
 
-from acp.corpus import AttackCorpus, Expectation, load_attacks
+from acp.corpus import AttackCorpus, Expectation
 from acp.corpus.attack import AttackFamily
 from acp.corpus.evaluate import evaluate, outcome_of
+from acp.corpus.heldout import (
+    Split,
+    load_development_attacks,
+    load_split,
+    unsealed_ids,
+    verify_seal,
+)
 from acp.firewall import Firewall
 from acp.firewall.findings import Family
 
@@ -49,7 +56,24 @@ that detector can fire. The fair test, not the flattering one."""
 
 @pytest.fixture(scope="module")
 def attacks() -> AttackCorpus:
-    return load_attacks()
+    """**The development split only** — the held-out set is not scored here.
+
+    This fixture used to be `load_attacks()`, so every CI run scored all seven
+    held-out documents against their recorded expectations. A set that is
+    measured on every commit is not held out; it is development data with a
+    ceremony attached, and the generalisation number it produces is the number
+    it was tuned to produce (ADR 0064).
+
+    `load_development_attacks` is the loader `heldout.py` wrote for exactly this
+    and which nothing called. Scoring the sealed split is `evaluate.py
+    --unseal`, deliberately explicit and deliberately rare.
+    """
+    return load_development_attacks()
+
+
+@pytest.fixture(scope="module")
+def split() -> Split:
+    return load_split()
 
 
 @pytest.fixture(scope="module")
@@ -189,3 +213,36 @@ def test_the_scoreboard_reports_per_family_not_an_aggregate(
     assert not hasattr(board, "catch_rate")
     assert {row.family for row in board.rows} == set(attacks.families)
     assert all(0.0 <= row.catch_rate <= 1.0 for row in board.rows)
+
+
+# ---------------------------------------------------------------------------
+# The seal
+# ---------------------------------------------------------------------------
+
+
+def test_every_held_out_document_still_matches_its_seal(split: Split) -> None:
+    """**What turns a list of ids into a held-out set.**
+
+    Without a digest, "held out" is a promise that these files were not read
+    while tuning — a promise nothing checks, and one that editing a file
+    quietly breaks. The seal covers the payload *and* its expectation, because
+    changing `expect: detected` to `expect: undetected` after a disappointing
+    run is the tampering worth catching.
+    """
+    assert verify_seal(split.heldout, split.manifest) == ()
+
+
+def test_every_held_out_document_is_sealed(split: Split) -> None:
+    """An unsealed entry is a weaker claim, not an equivalent one, so it is
+    named rather than allowed to pass as sealed."""
+    assert unsealed_ids(split.manifest) == ()
+
+
+def test_the_held_out_split_is_not_scored_by_the_routine_suite(split: Split) -> None:
+    """The property the `attacks` fixture change protects, asserted rather than
+    left to a reader noticing which loader was called."""
+    development = {attack.id for attack in load_development_attacks().attacks}
+    held_out = {attack.id for attack in split.heldout.attacks}
+
+    assert held_out
+    assert development.isdisjoint(held_out)

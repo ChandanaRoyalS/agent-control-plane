@@ -179,7 +179,7 @@ repeatable in CI". The first two are true. **The third is false for latency**:
 a shared GitHub runner's timings vary by more than any regression worth
 catching, so a latency gate would fail for reasons unrelated to the code and
 then get disabled — precisely the failure ADR 0047 rejects thresholds for, and
-lesson 15's *a false positive is how a control gets switched off*.
+*a false positive is how a control gets switched off*.
 
 Recorded as a deviation from the plan rather than quietly skipped, because an
 undeclared deviation is indistinguishable from an oversight.

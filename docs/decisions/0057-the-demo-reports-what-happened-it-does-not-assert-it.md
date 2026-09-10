@@ -159,7 +159,7 @@ difference because there was nothing enforceable to enforce.
 It would have been easy to read this as a failure and fix it by promoting the
 detector. That change would withhold this attack and, on the measured error
 rate, withhold roughly one benign document in five — which is how a security
-control gets switched off entirely (lesson 15), and then catches nothing at all.
+control gets switched off entirely, and then catches nothing at all.
 
 **The demo now shows this rather than concealing it.** It prints the mode, the
 enforceable list and the screening record, and it names the distinction that

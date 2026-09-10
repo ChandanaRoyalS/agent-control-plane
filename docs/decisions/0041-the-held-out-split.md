@@ -52,7 +52,8 @@ corpus, and a development loader that excludes them by construction.**
 
 The property — nothing tuned against is held out — is asserted directly:
 `load_development_attacks()` is disjoint from the manifest. But a seal test alone
-has the failure mode lesson 21 names: it passes if the split holds nothing out.
+has the failure mode a corpus assertion always has: it passes if the split
+holds nothing out.
 So three anti-filler assertions guard it — the held-out set is non-empty, every
 family is represented, and development plus held-out lose no document between
 them. Emptying the manifest, or dropping a family from it, turns one of these
@@ -89,5 +90,5 @@ generalisation for it. Per-family coverage is what makes the number readable.
 
 - ADR 0039 — the benign corpus (measure before defending a threshold)
 - ADR 0040 — the adversarial corpus, sliced by family (no aggregate rate)
-- Lesson 21 — a corpus needs an anti-filler assertion or it rots into proof of
+- A corpus needs an anti-filler assertion or it rots into proof of
   its own tidiness

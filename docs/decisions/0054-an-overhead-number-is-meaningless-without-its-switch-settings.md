@@ -127,208 +127,51 @@ Alternating spreads it. The discarded warm-up covers a cold connection pool, a
 cold JWKS cache, an unexchanged credential and a cold result cache — all real
 costs, and none of them the steady-state figure this reports.
 
-## Measured — and the register earned its place on the first run
+## Measured
 
-One machine, `make up` immediately before, 150 samples each side per row.
+Full tables, both runs and the ablation ladder: [`perf/README.md`](../../perf/README.md).
+Repeated here only where the ADR's own reasoning depends on it.
 
-### What the register found before any number was printed
-
-```
-[on ] authentication      [on ] result cache          [on ] injection screening
-[on ] credential exchange [on ] cost-weighted budget  [on ] provenance framing
-[OFF] rate limit          [OFF] quota                 [on ] audit fsync
-```
-
-**`ACP_RATE_LIMIT_ENABLED` and `ACP_QUOTA_ENABLED` are not set in
-`docker-compose.yml`, and both default to `False`.** `ACP_COST_FILE` *is* set,
-so `config/costs.yaml` is parsed at every start — and
-`gateway/server.py:_charge` opens with
-
-```python
-if payer is None or (limiter is None and quota is None):
-    return
-```
-
-**A cost table is loaded and never consulted.** This is the wiring bug that
-`scripts/patch_compose_firewall.py` was written for, in its sixth instance and
-its most complete form: not a feature that does nothing, but a *file that is
-read* to feed a decision nothing makes. It is fixed separately from this task,
-because turning two switches on changes what the numbers below describe, and a
-measurement that moves under its own conclusions is not a measurement.
-
-The number below is therefore honest about a gateway with no budget enforcement.
-The register says so, which is the entire argument of this ADR arriving on its
-first run.
-
-### The numbers
-
-> **Amended 2026-08-14.** These figures were measured with rate limiting and
-> quotas **off** — the defect the register found, three paragraphs above. Bug 81
-> turned them on, and the run was repeated before v1.0.0 published anything. The
-> second run is at the bottom of this ADR, along with what the pair of them says
-> about this harness. The short version: **the multiple is portable and the
-> milliseconds are not.**
-
-
-| row | direct p50 | gateway p50 | added p50 | added p95 | added p99 |
+| row | | direct p50 | gateway p50 | added p50 | multiple |
 |---|---|---|---|---|---|
-| cache miss | 5.3 ms | 38.1 ms | **+32.8 ms** | +52.6 ms | +113.7 ms |
-| cache hit | 6.8 ms | 22.8 ms | **+16.0 ms** | +41.7 ms | +97.4 ms |
+| cache miss | budgets **off** | 5.3 ms | 38.1 ms | +32.8 ms | 7.19x |
+| | budgets **on** | 3.6 ms | 24.4 ms | **+20.7 ms** | 6.72x |
+| cache hit | budgets **off** | 6.8 ms | 22.8 ms | +16.0 ms | 3.35x |
+| | budgets **on** | 4.3 ms | 13.7 ms | **+9.4 ms** | 3.19x |
 
-**The cache is worth 15.3 ms**, which is the difference between the two gateway
-figures and is the only claim either row supports on its own.
+**The register earned its place on the first execution.** It reported
+`ACP_RATE_LIMIT_ENABLED` and `ACP_QUOTA_ENABLED` unset on a stack that was
+supposed to have them — the sixth instance of one failure (ADR 0055), and a
+defect that would otherwise have been published as a fact about the system. The
+run was repeated on the fixed stack before v1.0.0 quoted anything.
 
-### The prediction this ADR made, and lost
+**Two controls were added and every number went down.** Not because a token
+bucket makes a gateway faster: between the two runs the machine was quieter, and
+that difference is larger than the controls being measured. Which is the finding:
+**the multiple is portable and the milliseconds are not.** Between-session
+variation is at least 13.7 ms — 42% of the first run's headline — so any
+absolute figure from this harness is a fact about one laptop on one afternoon.
+The multiples moved by 0.07x and 0.16x.
 
-Decision 4 said the cache-hit row was *"where the overhead goes negative"* — that
-a call answered from memory would beat one crossing the network.
+### Two predictions, both scored, both lost
 
-**It does not, and it is not close.** 22.8 ms against 6.8 ms.
-
-The arithmetic that should have been done before writing the claim: a cache hit
-removes **the upstream round trip and nothing else**. Against a mock, that round
-trip is about 6 ms. The gateway still authenticates, still evaluates policy,
-still screens and frames the result, and still waits for an audit record to
-reach the disk. **Its own fixed cost is larger than the entire thing the cache
-eliminates**, so a hit is faster than a miss and slower than going direct.
-
-Recorded here rather than quietly edited out, on the practice ADR 0053
-established. The row is kept, with a smaller and true claim attached: *the
-difference between the rows is what the cache is worth.*
+**Decision 4 predicted the cache-hit row would show *negative* overhead.** It
+does not, and it is not close: 22.8 ms against 6.8 ms. A cache hit removes the
+upstream round trip and nothing else — about 6 ms against a mock. The gateway
+still authenticates, evaluates policy, screens, frames, and waits for an audit
+record to reach the disk. **Its own fixed cost is larger than the entire thing
+the cache eliminates.** The row stays with the smaller true claim attached: the
+*difference* between the rows is what the cache is worth, 15.3 ms.
 
 The prediction is not wrong in general — against an upstream that takes 200 ms,
-a 16 ms hit wins by an order of magnitude. It is wrong **here**, and "here" is
-what was measured and therefore all that may be said.
+a 16 ms hit wins by an order of magnitude. It is wrong *here*, and here is what
+was measured and therefore all that may be said.
 
-### Attributed — `make overhead-ab`, and both predictions scored
+**The ablation predicted `fsync=off` would drop the fixed cost into single
+digits.** It drops it by 5.6–8.8 ms, roughly a third. The audit `fsync` is the
+single largest attributable component and it is not most of the cost.
 
-Four runs, 2x2 across `ACP_AUDIT_FSYNC` and `ACP_HEALTH_PROBING_ENABLED`.
-**Cache-hit gateway p50** is the pure fixed cost, since it touches no network:
-
-| | probing on | probing off |
-|---|---|---|
-| **fsync on** | 19.1 ms | 20.0 ms |
-| **fsync off** | 13.5 ms | 11.2 ms |
-
-And the cache-miss row's **added p95**, which is where a tail would show:
-
-| | probing on | probing off |
-|---|---|---|
-| **fsync on** | +106.5 ms | +57.5 ms |
-| **fsync off** | +30.2 ms | +20.0 ms |
-
-**Prediction 1 — "`fsync=off` drops the fixed cost into single digits" — wrong.**
-It drops it by 5.6–8.8 ms, roughly a third. The audit `fsync` is the single
-largest item and it is **not most of the cost**. Task 61 made it the obvious
-suspect, and obvious carried about a third of the answer.
-
-**Prediction 2 — "probing barely moves the p50 and visibly improves the tail" —
-right, and by more than expected.** On the median it moves +0.9 and −2.3 ms,
-which straddles zero and sits inside the run-to-run noise: the *direct* p50
-across these four runs was 6.4, 5.0, 7.1 and 5.0 ms, and that path is a constant.
-**A difference smaller than the variation of a constant is not a difference.**
-
-On the tail it is unambiguous, in the same direction under both `fsync` settings
-and large: **+106.5 → +57.5 ms**. A catalogue refetch from every upstream every
-five seconds, on the same event loop, cannot touch the median of 150 samples and
-can own a p95. That is the shape a periodic background job has, and it is why
-`BACKGROUND` is a separate register from `FEATURES`.
-
-### And one number that fell out for free
-
-In the leanest configuration, cache miss 20.9 ms and cache hit 11.2 ms at the
-gateway. **The upstream leg costs the gateway 9.7 ms**, against 5.2 ms for the
-host's own direct call to the same mock — even though the gateway's leg stays
-inside the Docker network and the host's crosses a published-port proxy.
-
-So about **4.5 ms of the gateway's upstream call is the gateway's own client
-work** — envelope construction, the retry and breaker wrappers, response parsing
-and screening the fresh body — rather than the network. The extra hop that this
-ADR declared as counted-but-not-the-gateway's-job is therefore *smaller* than it
-looks, and most of the miss/hit gap is work rather than distance.
-
-Derived rather than measured, from two rows of one run. Stated as an estimate.
-
-### 11 ms unattributed, and the ladder that itemises it
-
-With `fsync` and probing both off, a request that touches no network still costs
-**11.2 ms**. Unexplained is the weakest thing a performance number can be, so
-the remaining candidates get the same treatment: `make overhead-ablate` walks
-`perf.overhead.ABLATION`, removing one switch at a time and printing the
-marginal cost of each.
-
-Cumulative rather than leave-one-out, so the rungs sum and the last row is a
-floor. The cost of that choice — an interaction between two switches is billed
-to whichever is removed first — is stated in the ladder rather than hidden.
-
-**One rung was missing from the register entirely.** `OTEL_TRACES_EXPORTER` ships
-a span per request over OTLP to Jaeger, which is per-request work by any reading.
-It was absent because `FEATURES` was assembled by reading `GatewaySettings`, and
-tracing is configured by OpenTelemetry's standard variables instead. **A register
-built from one source of truth misses everything configured by another** — which
-is the same failure as the compose wiring bug above, arriving from the other
-direction.
-
-### The number this leaves open, and how it gets closed
-
-*Written before the run above, and kept because scoring it is the point.*
-
-16.0 ms of fixed cost, for a request that touches no network. Task 61 makes the
-audit `fsync` the obvious suspect, and **obvious is not measured** — which is
-ADR 0053's own methodological finding, one task old.
-
-So `make overhead-ab` runs the same measurement across the two switches that
-could plausibly own it: `ACP_AUDIT_FSYNC` (the caller waiting on the disk, per
-audited call) and `ACP_HEALTH_PROBING_ENABLED` (the catalogue prober, which is
-not on the request path but shares the loop with it every five seconds, and is
-therefore a candidate for the **p99 rather than the p50**).
-
-Four runs, each printing its own switch line, so the attribution and the
-configuration it was measured under cannot be separated.
-
-**The prober is why `BACKGROUND` is a second register rather than a tenth
-`FEATURES` entry.** `FEATURES` says *this request did this work*; `BACKGROUND`
-says *something else was running while it did*. Folding them together would
-invite a reader to charge the prober to a call's cost, which is a different
-claim and a false one.
-
-## Itemised — and the ablation's main finding is about the ablation
-
-One pass, six configurations. **Cache hit p50** is the fixed cost, since it
-touches no network:
-
-| configuration | gateway | step | control (direct) |
-|---|---|---|---|
-| everything on | 17.8 ms | — | |
-| − audit fsync | 12.0 ms | **+5.8** | |
-| − health probing | 10.4 ms | · | |
-| − injection screening | 12.1 ms | · | |
-| − provenance framing | 11.7 ms | · | |
-| − trace export | 10.8 ms | · | 5.2 ms |
-
-**One of five rungs resolved.** The other four moved the number by 1.6, −1.7,
-0.4 and 1.0 ms — and the control, which is the same request to the same mock
-doing identical work in every configuration, wandered by **2.1 ms** across the
-six runs. Two of the four steps were *negative*: removing work appeared to make
-the system slower.
-
-Printing those as small costs would have been fabrication. So the report doesn't:
-a step at or below the control's own spread prints as `·` and is **not
-attributed**.
-
-### The four predictions
-
-| written before the run | verdict |
-|---|---|
-| screening is the largest remaining item, 2–4 ms | **wrong** — its step is −1.7 ms, below the floor and the wrong sign |
-| trace export is near-invisible at the median | right — 1.0 ms, below the floor |
-| framing is under 1 ms | right — 0.4 ms, below the floor |
-| the floor lands at 5–7 ms | right — 10.8 gateway against 5.2 direct, **5.6 ms added** |
-
-Two of four, and the two right ones are right in the weak sense that *"too small
-to see"* was the prediction and *"too small to see"* is what came back.
-
-### So the 17.8 ms breaks down as
+### What the 17.8 ms is made of
 
 | | |
 |---|---|
@@ -337,182 +180,17 @@ to see"* was the prediction and *"too small to see"* is what came back.
 | everything else, individually unresolved | ~6.8 ms |
 
 Authentication, policy evaluation, the audit write minus its `fsync`, the
-pre-dispatch check, the framework and the extra hop are in that last row and
+pre-dispatch check, the framework and the extra hop are all in that last row and
 **this instrument cannot separate them.** Each is smaller than the variation
 between two container restarts, and each rung *requires* a restart because these
 are start-up settings. More samples inside a run does not help; only repeating
 the whole ladder does, which is what `--repeat` is for.
 
-### The floor caught an error in the floor
-
-The first version computed one resolution from the control's **p50** and applied
-it to the **p95** column as well. That column then reported two steps that were
-negative *and* above the floor — impossible as costs, since removing work cannot
-make a system faster.
-
-Which is the report saying the floor was wrong for that column, and it was. **A
-tail is structurally noisier than a median**: a p95 is one of the slowest few
-samples and moves with whatever the machine was doing, while a p50 sits where the
-distribution is densest. Each table now computes its floor from the control at
-its own percentile.
-
-That also forced a third outcome — `Step.RESOLVED`, `BELOW_FLOOR`, `IMPOSSIBLE` —
-because a two-state answer had to call an impossible value one or the other and
-both were wrong. Lesson 32, arriving for the third time in this project.
-
-### Where this stops, and what would go further
-
-**Not with a bigger sample.** The residual is six or seven milliseconds spread
-across five or six mechanisms, against an instrument whose own restart-to-restart
-variation is two. That is a resolution limit of the *method*, not of the run
-length.
-
-What would go further is per-stage timing from inside the process: `py-spy`
-against the container, or the spans the gateway already emits, read out of Jaeger
-rather than looked at. ADR 0053 declared `py-spy` an honest cut on the grounds
-that an A/B was stronger evidence and had already named the function. **That
-reasoning held there and stops holding here** — the A/B has named everything it
-can name, and what is left is exactly the question a profiler answers.
-
-Declared as the next step rather than done, and it is a task, not a paragraph.
-
-## Amendment, 2026-08-14 — the same measurement, a second time
-
-Everything above was measured against a gateway with `ACP_RATE_LIMIT_ENABLED`
-and `ACP_QUOTA_ENABLED` unset. That is the defect this ADR's register found on
-its first execution, and ADR 0055 fixed it. So the measurement was repeated on
-the merged stack, with both controls on and the register confirming it.
-
-**Two controls were added and every number went down.**
-
-| row | | direct p50 | gateway p50 | added p50 | multiple |
-|---|---|---|---|---|---|
-| cache miss | first run, budgets **off** | 5.3 ms | 38.1 ms | +32.8 ms | 7.19x |
-| | second run, budgets **on** | 3.6 ms | 24.4 ms | **+20.7 ms** | 6.72x |
-| cache hit | first run, budgets **off** | 6.8 ms | 22.8 ms | +16.0 ms | 3.35x |
-| | second run, budgets **on** | 4.3 ms | 13.7 ms | **+9.4 ms** | 3.19x |
-
-The second run's multiples are printed by the harness; the first run's are
-derived from its published medians, because the harness did not print them yet.
-
-### What that means, and what it does not
-
-It does not mean a token bucket makes a gateway faster. Adding a per-call draw
-against a bucket and a read of a windowed counter cannot remove work from the
-request path. **A negative result that should be impossible is the instrument
-talking about itself** (lesson 61, third outing).
-
-So the difference is the machine — and it can be *bounded* rather than waved at.
-The gateway's cache-miss median fell by **13.7 ms** while its workload strictly
-grew. Since the growth cannot be negative, between-session variation on this
-harness is **at least 13.7 ms at p50 — 42% of the headline figure this ADR
-published.**
-
-That bound is the finding, and it is a finding about the method rather than the
-gateway.
-
-### The discipline that was inherited and did not reach far enough
-
-ADR 0053 learned that one run is a sample wearing a decimal point (lesson 56)
-and answered it with three alternating rounds. This ADR inherited that, and §6
-says so: three rounds, ten warm-up calls discarded.
-
-Three rounds bound the variation **between rounds of one session**. Nothing here
-bounded the variation between sessions — different day, different image build,
-a container fleet rebuilt from scratch, and whatever else was running on one
-laptop. The ablation's own noise floor came out at 2.1 ms, measured across
-restarts *within* a session, and was reported as the limit of the method. **It
-is the limit of the method within an afternoon.** Across afternoons the floor is
-at least six times higher, and no run printed anything that would have said so.
-
-### The multiple is portable; the milliseconds are not
-
-The two runs disagree about the absolute cost by roughly 40%. They agree about
-the ratio to within 6%.
-
-| | first run | second run | disagreement |
-|---|---|---|---|
-| cache miss, added p50 | +32.8 ms | +20.7 ms | **37%** |
-| cache miss, gateway ÷ direct | 7.19x | 6.72x | **6%** |
-| cache hit, added p50 | +16.0 ms | +9.4 ms | **41%** |
-| cache hit, gateway ÷ direct | 3.35x | 3.19x | **5%** |
-
-The direct call is the control (lesson 59), doing identical work against the
-same mock in both runs, and **it moved too**: 5.3 → 3.6 ms and 6.8 → 4.3 ms. A
-machine that is a third faster today is a third faster for both paths, so
-whatever it varies by largely **divides out of a ratio and does not divide out
-of a difference.**
-
-The published headline therefore changes shape. This gateway costs about
-**6.7-7.2x a direct call on a cache miss and 3.2-3.4x on a hit**; the
-millisecond figures are true of one laptop on two afternoons and are quoted with
-their range rather than as a point. `README.md` and `perf/README.md` both say so
-now.
-
-This is not an argument that milliseconds are useless — a capacity plan needs
-them and a ratio will not do. It is an argument that **the number which survives
-leaving this machine is the one whose denominator was measured beside it.**
-
-### A correction to the register's own claim
-
-§1 argues that a performance number is inseparable from the switch settings that
-produced it, and prints them so the two cannot be separated by forgetting. That
-held: the first run states its premise on the face of the output, which is why it
-is amended rather than retracted.
-
-But a reader with both tables in front of them would reasonably conclude that
-turning on rate limiting and quotas *saved 12 ms*, and the register does nothing
-to stop them. **A register that prevents one wrong conclusion while enabling
-another has done half a job.** What is missing is an identity for the run — a
-timestamp and a machine — beside the configuration, so that two honest runs
-cannot be silently subtracted from each other.
-
-Not fixed here, and named rather than left implicit: it is a change to the
-harness's output, this ADR is being amended rather than rewritten, and the
-correct place to spend that is the next time the harness is touched.
-
-### And the ladder gained the two rungs it never had
-
-The ablation below has no rung for either budget control, for a reason that was
-correct when it was written: **you cannot ablate something that is already off.**
-A rung switching off an unset variable measures nothing and reports it as a
-step, which is worse than an absence.
-
-Both are now present, appended at the bottom — the right place on the stated
-largest-expected-first ordering, and the only placement that leaves every
-existing rung's cumulative environment unchanged and therefore every number
-already published from this ladder still true of the configuration it names.
-
-The count in "one of five rungs resolved" describes the run it was written
-about; the ladder now has seven rungs.
-
-**Both new rungs are predicted to land below the noise floor and print as `·`.**
-A token bucket is a clock read and a subtraction; a fixed-window quota is a
-dictionary lookup and a comparison. Neither touches the network or the disk, and
-the floor is 2.1 ms.
-
-That prediction is written down *before* the run because the interesting outcome
-is the one that falsifies it. **A budget control resolving above the floor would
-mean it is doing IO, taking a lock, or otherwise serialising the request path** —
-none of which its design calls for, and all of which are invisible to every
-functional test that exists for it. A prediction of "nothing" is only worth
-making when its failure is a diagnosis.
-
-## What is counted as overhead that arguably is not
-
-Declared rather than netted out, because both adjustments would flatter the
-number and neither can be measured with what is built.
-
-**One extra network hop.** The direct call is one hop; the gateway path is two,
-because the gateway sits between. Loopback inside one Docker network is small
-and not zero. Separating it needs a null gateway that forwards without deciding
-— a fair thing to want, and not built.
-
-**The direct path is unauthenticated.** The mock has no auth to offer, so the
-comparison charges the gateway for the whole cost of authentication. That is
-correct: authentication is part of what the gateway adds. It is stated because a
-reader comparing this figure with a proxy that *does* authenticate on both sides
-is comparing different quantities.
+The ladder also caught an error in itself: the first version computed one
+resolution from the control's p50 and applied it to the p95 column, producing
+steps that were negative *and* above the floor — impossible as costs, since
+removing work cannot make a thing slower. A floor that cannot be violated is
+worth more than a floor that is usually right.
 
 ## Consequences
 

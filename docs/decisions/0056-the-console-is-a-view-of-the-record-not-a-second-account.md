@@ -123,7 +123,7 @@ closed** (ADR 0049's argument): a route that exists and always refuses still
 tells an unauthenticated caller what this deployment runs.
 
 That boundary is asserted **statically**, by parsing imports: `console_routes`
-may be imported by `admin.py` and nothing else. Lesson 10 — bounding which code
+may be imported by `admin.py` and nothing else. Bounding which code
 can reach a thing beats any number of tests on what that code does with it. A
 behavioural test passes for the app it happened to build; this one fails the
 moment anybody wires the console anywhere else.

@@ -37,7 +37,7 @@ The default is in the list on purpose and is the least obvious entry.
 `ACP_AUDIT_FSYNC` silently changing from `true` to `false` breaks nothing that
 any test can see: every suite passes, every request succeeds, and the durability
 guarantee the audit chain rests on is gone. **This project's most repeated bug
-is valid input, no error, silently different behaviour** (lesson 46, six
+is valid input, no error, silently different behaviour** (six
 instances). A default is where that bug lives.
 
 ### 2. What is deliberately outside it
@@ -92,7 +92,7 @@ that rewrites the source and runs pytest.
 `ACP_AUDIT_FSYNC`'s default, renames a command, empties a command's options and
 deletes an audit field — and asserts the comparison names each. Plus the one
 that matters most for a snapshot of any kind: **an empty snapshot must not
-compare clean** (lesson 65).
+compare clean**.
 
 ### 5. The version lives in two files, and a test makes them agree
 

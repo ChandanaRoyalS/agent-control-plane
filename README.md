@@ -6,7 +6,7 @@ and the systems they are allowed to touch.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**1,980 tests · 94% coverage · 63 architecture decisions · 4 mutation harnesses
+**2,007 tests · 94% coverage · 64 architecture decisions · 4 mutation harnesses
 proving 18 deliberate breakages are caught**
 
 ## How this was built
@@ -237,9 +237,18 @@ solo work. `make check` passing locally means CI passes.
 
 ## Architecture decisions
 
-Sixty-three decisions that required thought are recorded in
+Sixty-four decisions that required thought are recorded in
 [`docs/decisions/`](docs/decisions/). The ones worth reading first are the ones
-where the measurement disagreed with the plan:
+where the measurement disagreed with the plan — or where somebody else showed
+the plan was wrong:
+
+- [0060](docs/decisions/0060-an-argument-is-a-json-value-not-its-string-form.md)
+  — `str()` is not a comparison between a policy value and a JSON one, and "I
+  cannot compare these" is a third answer that resolves by the rule's effect
+- [0064](docs/decisions/0064-the-corpus-could-not-see-what-it-was-not-shown.md)
+  — the injection corpus agreed with the detectors because the same person wrote
+  both, a day apart; adding an outsider's evasions changed the baseline by
+  nothing until the detectors were fixed
 
 - [0047](docs/decisions/0047-a-baseline-not-a-threshold.md) — a baseline, not a
   threshold, and the false-positive rate that demoted two detectors

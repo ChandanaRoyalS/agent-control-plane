@@ -5,8 +5,8 @@
 
 ## Context
 
-Task 67: *"v1.0.0 with a real changelog, semantic versioning, and a published
-container image."*
+A first release: a real changelog, semantic versioning, a published container
+image.
 
 Semantic versioning is a rule about breaking changes, and "breaking change" is
 undefined until somebody says **breaking for whom**. The specification's own

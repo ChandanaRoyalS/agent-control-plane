@@ -159,6 +159,16 @@ work here: the suite was measuring the wrong things confidently.
   each other's tokens, which is a different cut and stays in the threat model
   ([ADR 0063](docs/decisions/0063-durability-and-the-bounds-nobody-enforced.md)).
 
+### Documentation
+
+- The decisions index opens with the six ADRs written after the review, and
+  says why they are the useful ones: a decision made under a plan and a decision
+  made after being shown you were wrong are different kinds of evidence.
+- Five ADRs opened by quoting a numbered task brief. They now open with the
+  problem. The remaining `Task N` references are explained in the index rather
+  than left as a puzzle — the README's *How this was built* says what the plan
+  was.
+
 ### Removed
 
 - The 40 `scripts/patch_*.py` files. They were the delivery mechanism of a

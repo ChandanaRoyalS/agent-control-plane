@@ -5,10 +5,10 @@
 
 ## Context
 
-Task 58: "isolated policy, budgets and credentials per tenant." The plan allows
-shipping this as a documented design; the decision was to implement it.
+Isolated policy, budgets and credentials per tenant, implemented rather than
+documented as a design.
 
-The task turned out not to be a feature bolted on top. It is the repair of an
+It turned out not to be a feature bolted on top. It is the repair of an
 identity key that was too narrow: the gateway has trusted multiple issuers
 since task 24, and everything downstream keyed on **`principal.subject`
 alone** — the rate-limit bucket, the quota counter, and the result-cache key.

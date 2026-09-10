@@ -5,9 +5,9 @@
 
 ## Context
 
-Task 63: *"Server-sent events streaming tool calls, denials, firewall findings,
-breaker state and spend. Minimal styling, no framework ceremony — it exists to
-be watched for thirty seconds."*
+A live view of what the gateway is doing: tool calls, denials, firewall
+findings, breaker state and spend, over server-sent events. Minimal styling and
+no framework ceremony — it exists to be watched for thirty seconds.
 
 The obvious build is an event bus. Every interesting call site publishes to it —
 `policy.denied` here, a firewall finding there — each carrying whatever shape was

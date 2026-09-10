@@ -5,12 +5,10 @@
 
 ## Context
 
-Task 64: *"Same agent twice: direct, it reads a poisoned document and
-exfiltrates; through the gateway, it is stripped, denied and logged. The single
-most valuable artifact in the project — everything else is why it works."*
-
-The plan is right that it is the most valuable artifact, which is exactly why it
-is the easiest one to make worthless. A demo of a security control is a
+The same agent, run twice against the same poisoned document: directly, and
+through the gateway. It is the most valuable artifact in the project —
+everything else is why it works — which is exactly why it is the easiest one to
+make worthless. A demo of a security control is a
 performance whose author chose the script, the actor and the ending. Three
 temptations, all of them ordinary, each fatal:
 

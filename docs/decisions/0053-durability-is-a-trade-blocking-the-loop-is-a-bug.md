@@ -5,12 +5,11 @@
 
 ## Context
 
-Task 61: *"`py-spy` to find sync work on the event loop, pool sizing and
-serialization costs. Publish the before and after; the delta is a better story
-than the final number."*
+The plan was to attach `py-spy`, find sync work on the event loop, and publish
+the before and after.
 
-Task 60's harness found the sync work before a profiler was attached, and found
-it more conclusively than a profiler could have.
+The load harness found it first, and found it more conclusively than a profiler
+could have.
 
 Two runs, identical in every respect but one environment variable:
 

@@ -1,7 +1,16 @@
 # Architecture decisions
 
-Fifty-eight decisions, each about ten minutes to read, each with the
-alternatives that were rejected and why.
+Sixty-four decisions, each with the alternatives that were rejected and why.
+
+**Start with the six at the bottom.** 0059 to 0064 were written after an
+external review of v1.0.0 reproduced two bypasses and a denial-of-service that
+all 1,898 tests had passed. They are the most useful ones here, because a
+decision made under a plan and a decision made after being shown you were wrong
+are different kinds of evidence.
+
+Numbered `Task N` references in the older ADRs point at the build plan described
+in the README's *How this was built*. They are internal chronology, kept because
+several decisions only make sense in the order they happened.
 
 **Where a decision was made because something was measured, the measurement is
 in it.** Where it was a judgement call, the ADR says so and names what would
@@ -13,6 +22,8 @@ If you have ten minutes and want the ones that carry the most weight:
 
 | | |
 |---|---|
+| [0060](0060-an-argument-is-a-json-value-not-its-string-form.md) | `str()` is not a comparison, and the third answer that resolves by the rule's effect |
+| [0064](0064-the-corpus-could-not-see-what-it-was-not-shown.md) | the corpus agreed with the detectors because the same person wrote both |
 | [0025](0025-deny-by-default-is-structural.md) | deny by default, and why it is not configurable |
 | [0019](0019-mint-a-credential-per-call-and-hold-none.md) | the gateway holds no upstream credential |
 | [0023](0023-prove-the-invariant-and-prove-the-proof.md) | prove the invariant, then prove the test could fail |

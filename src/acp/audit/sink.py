@@ -204,9 +204,22 @@ class FileAuditSink:
     def __init__(self, path: Path, *, fsync: bool = True) -> None:
         head, seq = recover(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Line buffered, so a crash loses at most the entry being written rather
-        # than everything since the last block filled.
-        self._handle = path.open("a", encoding="utf-8", buffering=1)
+        # **Unbuffered, and that is a correctness requirement rather than a
+        # tuning choice.**
+        #
+        # `append` rewinds the chain when a write fails, so the sequence number
+        # is reused rather than skipped — a gap is indistinguishable from a
+        # deletion to anybody reading later. That reasoning is right and a
+        # buffered writer silently defeats it: CPython keeps the bytes it could
+        # not flush, so the *next* successful flush emits the failed line first
+        # and then the retried one. Two entries with the same `seq`, a `prev`
+        # that matches neither, and `acp audit verify` reporting tampering on a
+        # file nobody touched. One transient ENOSPC is enough.
+        #
+        # Raw binary has no such buffer: a write reaches the descriptor or it
+        # does not, and `append` can tell which by counting bytes.
+        self._handle = path.open("ab", buffering=0)
+        self._torn = False
         self._path = path
         # Taken **after** the handle is open and **before** the chain head is
         # trusted, so no second writer can be recovering the same tail
@@ -266,16 +279,50 @@ class FileAuditSink:
         was rather than skipping a sequence number that nothing will ever fill.
         A gap is indistinguishable from a deletion to anybody reading later.
         """
+        if self._torn:
+            # A previous append left a partial line on disk. Appending after it
+            # would write a valid entry behind a torn one and bury the damage in
+            # the middle of a file that still looks mostly fine.
+            msg = (
+                f"audit chain {str(self._path)!r} has a partially written entry and "
+                f"this process will not write past it. The file needs a human: the "
+                f"tail is not a record, and every entry after it would be chained "
+                f"onto something that is not there."
+            )
+            raise OSError(msg)
+
         entry = self._chain.append(record)
+        line = (json.dumps(entry.as_dict(), separators=(",", ":")) + "\n").encode("utf-8")
+        # The file's own length, not a counter. A raw write can raise *after*
+        # putting bytes on the descriptor, and then its return value never
+        # arrives — so counting what `write` reports would miss exactly the case
+        # this needs to catch. In append mode every write lands at the end, so
+        # the size before and after is the honest measure of what reached disk.
+        before = os.fstat(self._handle.fileno()).st_size
+        written = 0
         try:
-            self._handle.write(json.dumps(entry.as_dict(), separators=(",", ":")) + "\n")
-            self._handle.flush()
+            while written < len(line):
+                # A raw write may be short. Unhandled, that silently truncates an
+                # entry and the truncation is the last thing in the file, which is
+                # exactly where nobody looks.
+                sent = self._handle.write(line[written:])
+                if not sent:
+                    msg = f"audit chain {str(self._path)!r}: the descriptor accepted no bytes"
+                    raise OSError(msg)
+                written += sent
             if self._fsync:
                 os.fsync(self._handle.fileno())
         except OSError:
-            # Rewind, so the next attempt reuses this sequence number. The caller
-            # decides whether an unwritable record stops the call (it does, by
-            # default) — see `acp.audit.writer`.
+            landed = os.fstat(self._handle.fileno()).st_size - before
+            if landed:
+                # Bytes reached the file. Rewinding now would reuse the sequence
+                # number and write a second copy *after* the torn one, so the
+                # chain would carry the damage rather than stop at it.
+                self._torn = True
+                raise
+            # Nothing was written, so the entry does not exist and the sequence
+            # number is free again. The caller decides whether an unwritable
+            # record stops the call (it does, by default) — see `acp.audit.writer`.
             self._chain = Chain(head=entry.prev, seq=entry.seq - 1)
             raise
         return entry
@@ -299,4 +346,6 @@ class FileAuditSink:
             fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
         except (OSError, ValueError):  # pragma: no cover — already closed
             pass
+        # No flush: the handle is unbuffered, so there is nothing held back —
+        # which is the property this sink depends on. See `__init__`.
         self._handle.close()

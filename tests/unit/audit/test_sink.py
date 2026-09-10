@@ -171,6 +171,37 @@ def test_json_that_is_not_an_entry_also_refuses(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def fail_once_after(sink: FileAuditSink, prefix_bytes: int) -> None:
+    """Make the next write fail at the **raw descriptor**, after ``prefix_bytes``.
+
+    The layer matters more than anything else in this helper, and getting it
+    wrong is how the bug these tests exist for survived. A full disk fails when
+    the kernel is asked to take bytes — under any buffer the sink happens to
+    have. Patching the *top* of a buffered writer instead means the bytes never
+    enter the buffer, so nothing is ever left there to replay, and a test
+    written that way passes against the broken implementation and the fixed one
+    alike.
+
+    So this reaches through to whatever is actually talking to the descriptor:
+    a `BufferedWriter`'s `raw` when there is one, and the handle itself when the
+    sink is unbuffered. Both take bytes, so the test reads the same either way.
+    """
+    buffer = getattr(sink._handle, "buffer", None)  # noqa: SLF001
+    raw = getattr(buffer, "raw", None) or sink._handle  # noqa: SLF001
+    real = raw.write
+    armed = {"yes": True}
+
+    def flaky(data: bytes) -> int:
+        if armed["yes"]:
+            armed["yes"] = False
+            if prefix_bytes:
+                real(data[:prefix_bytes])
+            raise OSError(28, "No space left on device")
+        return int(real(data))
+
+    raw.write = flaky  # type: ignore[method-assign]
+
+
 def test_a_failed_write_leaves_no_gap(tmp_path: Path) -> None:
     """The sequence number is reused on the next attempt.
 
@@ -182,24 +213,74 @@ def test_a_failed_write_leaves_no_gap(tmp_path: Path) -> None:
     sink = sink_at(path)
     sink.append(record(0))
 
-    class Broken:
-        def write(self, _text: str) -> int:
-            raise OSError("no space left on device")
-
-        def flush(self) -> None:  # pragma: no cover — never reached
-            pass
-
-    working = sink._handle
-    sink._handle = Broken()  # type: ignore[assignment]
-    with pytest.raises(OSError, match="no space"):
+    fail_once_after(sink, prefix_bytes=0)
+    with pytest.raises(OSError, match="No space"):
         sink.append(record(1))
 
-    sink._handle = working
     entry = sink.append(record(1))
     sink.close()
 
     assert entry.seq == 2
     assert verify(path.read_text().splitlines()).intact
+
+
+def test_a_failed_write_does_not_replay_itself_on_the_next_flush(tmp_path: Path) -> None:
+    """**The bug this test's neighbour was written to catch and could not.**
+
+    `append` rewinds the chain so the sequence number is reused, which is right.
+    A *buffered* writer silently defeats it: CPython keeps the bytes it could
+    not flush, so the next successful flush emits the failed line first and then
+    the retried one — two entries with the same `seq`, a `prev` matching
+    neither, and `acp audit verify` reporting tampering on a file nobody
+    touched. One transient ENOSPC was enough.
+
+    The original test passed against that bug because it swapped the handle for
+    a double with no buffer, so the property in its name was never exercised.
+    This one fails the real thing on a real descriptor.
+    """
+    path = tmp_path / "audit.jsonl"
+    sink = sink_at(path)
+    sink.append(record(0))
+
+    fail_once_after(sink, prefix_bytes=0)
+    with pytest.raises(OSError):
+        sink.append(record(1))
+
+    sink.append(record(1))
+    sink.append(record(2))
+    sink.close()
+
+    lines = [line for line in path.read_text().splitlines() if line.strip()]
+    seqs = [json.loads(line)["seq"] for line in lines]
+
+    assert seqs == [1, 2, 3], f"the failed entry was replayed: {seqs}"
+    assert len(seqs) == len(set(seqs))
+    assert verify(lines).intact
+
+
+def test_a_torn_write_stops_the_sink_rather_than_being_buried(tmp_path: Path) -> None:
+    """A write that puts *some* bytes down and then fails cannot be rewound.
+
+    Reusing the sequence number would append a valid entry behind a truncated
+    one, so the chain would carry the damage into the middle of a file that
+    still looks mostly fine. Refusing means the tail is the last thing in the
+    file, which is where somebody will actually find it.
+    """
+    path = tmp_path / "audit.jsonl"
+    sink = sink_at(path)
+    sink.append(record(0))
+
+    fail_once_after(sink, prefix_bytes=20)
+    with pytest.raises(OSError, match="No space"):
+        sink.append(record(1))
+
+    with pytest.raises(OSError, match="partially written"):
+        sink.append(record(2))
+
+    # Closed explicitly: `filterwarnings = ["error"]` turns a leaked handle into
+    # a ResourceWarning that surfaces inside whichever *later* test happens to
+    # trigger the collection, which is a debugging afternoon nobody needs.
+    sink.close()
 
 
 # ---------------------------------------------------------------------------

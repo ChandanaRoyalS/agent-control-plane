@@ -134,6 +134,19 @@ work here: the suite was measuring the wrong things confidently.
   90%. Japanese, Korean, Arabic and Hindi still match nothing, with a test
   asserting it so the gap stays visible.
 
+- **One transient disk error made the audit chain report tampering on itself.**
+  `append` rewinds the chain on `OSError` so the sequence number is reused, which
+  is right — and a buffered writer defeats it, because CPython keeps the bytes it
+  could not flush and the next successful flush emits the failed line first.
+  Result: `seqs [1, 2, 2, 3]`, a `prev` matching neither, and `acp audit verify`
+  reporting tampering permanently on a file nobody touched. The sink now writes
+  raw and unbuffered, measures what landed by the file's own size rather than by
+  what `write` returned, and refuses to write past a torn line instead of burying
+  it. **The existing test passed against this bug** because it substituted a
+  handle with no buffer; the helper now patches the raw descriptor, and all three
+  failure tests fail against the previous implementation
+  ([ADR 0066](docs/decisions/0066-a-buffer-defeats-the-rewind-that-protects-the-chain.md)).
+
 ### Changed — breaking
 
 - **`ACP_APPROVAL_OPERATOR_TOKEN` no longer starts a gateway.** A single shared

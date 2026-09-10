@@ -30,6 +30,7 @@ from enum import StrEnum
 from typing import Final
 
 from acp.firewall.classifier import OllamaClassifier
+from acp.firewall.content import screenable_strings
 from acp.firewall.findings import Confidence, Finding
 from acp.firewall.screen import MAX_SCREENED_CHARS, Screener, Screening, ScreenPolicy
 from acp.observability import metrics
@@ -259,13 +260,12 @@ class Firewall:
             ),
             classifier=self._classifier,
         )
-        # Text blocks only. An image is bytes and this layer has no opinion
-        # about bytes; a resource link is a URI the *client* may fetch, which is
-        # a real exfiltration channel and a gap named in ADR 0037 rather than
-        # closed here by guessing at a field name that varies by content type.
-        screening = screener.screen_all(
-            [block.text for block in result.content if block.text is not None]
-        )
+        # Every string the result carries, not just `block.text`. Screening only
+        # the modelled text field left an embedded resource — a standard MCP
+        # content type whose text reaches the model exactly like a text block's
+        # — inspected for zero characters. See `acp.firewall.content`.
+        strings, complete = screenable_strings(result)
+        screening = screener.screen_all(strings, complete=complete)
         triggers = triggers_for(screening)
 
         if not (triggers and self._enforce):

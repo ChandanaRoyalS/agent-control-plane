@@ -134,6 +134,15 @@ If you have ten minutes and want the ones that carry the most weight:
 
 ---
 
+## The corrections
+
+Decisions made after an external review reproduced two bypasses and a
+denial-of-service path against v1.0.0.
+
+| | |
+|---|---|
+| [0059](0059-screen-every-string-the-result-carries.md) | an embedded resource reached the model unscreened, because "text" meant one field rather than every string |
+
 ## The format
 
 [`0000-template.md`](0000-template.md). Context, Decision, Consequences,

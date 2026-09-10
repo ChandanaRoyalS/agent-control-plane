@@ -153,7 +153,10 @@ call cannot spend, and **before** the result cache so repetition is not free.
 Three layers, each with a stated limit (§6.1 has the limits):
 
 1. **Deterministic detectors** — seven patterns, no model, no network
-   (ADR 0036).
+   (ADR 0036), run over **every string the result carries** — embedded
+   resources, `structuredContent`, annotations and unmodelled content types
+   included, with base64 image payloads the only exclusion (ADR 0059).
+   Screening only the modelled `text` field was a bypass until 2026-09-10.
 2. **Provenance framing** — every result fenced in a per-result nonce boundary
    the document cannot forge (ADR 0037).
 3. **Structured refusal** — withholds on a deliberately narrow bar, and

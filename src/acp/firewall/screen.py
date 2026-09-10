@@ -133,11 +133,20 @@ class Screener:
 
     def screen(self, text: str) -> Screening:
         """Every finding in ``text``, and whether all of it was examined."""
-        if not text:
-            return Screening()
+        return self._screen(text, self._policy.max_chars)
 
-        truncated = len(text) > self._policy.max_chars
-        window = text[: self._policy.max_chars]
+    def _screen(self, text: str, budget: int) -> Screening:
+        """``screen``, against a caller-supplied character budget.
+
+        Private because the budget is the *result's*, not the text's: a caller
+        screening several blocks spends one allowance across all of them, so
+        that splitting a payload into more blocks buys an attacker nothing.
+        """
+        if not text or budget <= 0:
+            return Screening(truncated=bool(text))
+
+        truncated = len(text) > budget
+        window = text[:budget]
 
         # Obfuscation first, over the *raw* window, because these detectors are
         # the only ones whose evidence the next step destroys.
@@ -179,20 +188,39 @@ class Screener:
 
         return Screening(findings=tuple(found), truncated=truncated, scanned_chars=len(window))
 
-    def screen_all(self, texts: Sequence[str]) -> Screening:
-        """One screening over several blocks — a tool result's content list.
+    def screen_all(self, texts: Sequence[str], *, complete: bool = True) -> Screening:
+        """One screening over several strings — everything a tool result carries.
 
         Merged rather than returned per block, because a decision is made about
         a *result*, and a payload split across two content blocks is one attack.
         Offsets become per-block and therefore only comparable within a block,
         which is the honest cost of merging and is why they are not renumbered
         to look global.
+
+        **The character budget is the result's, not each string's.** It used to
+        be per block, which meant a result with eight blocks bought eight times
+        the allowance and the cost of screening was a number the upstream chose.
+        One budget, spent in order, and a result that exhausts it is reported as
+        truncated.
+
+        ``complete`` is ``False`` when the caller's own extraction hit a bound
+        before it reached the end of the result — see
+        ``acp.firewall.content.screenable_strings``. It is carried into
+        ``truncated`` for the same reason the character budget is: the caller
+        must not be able to tell "clean" from "clean as far as I looked".
         """
         findings: list[Finding] = []
-        truncated = False
+        truncated = not complete
         scanned = 0
         for text in texts:
-            screening = self.screen(text)
+            remaining = self._policy.max_chars - scanned
+            if remaining <= 0:
+                # The allowance is spent and there is more result behind it.
+                # Reported, never silent: an unexamined remainder is a bypass
+                # with a known address.
+                truncated = True
+                break
+            screening = self._screen(text, remaining)
             findings.extend(screening.findings)
             truncated = truncated or screening.truncated
             scanned += screening.scanned_chars

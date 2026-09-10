@@ -513,4 +513,5 @@ async def test_screening_runs_off_the_event_loop() -> None:
     with patch.object(Firewall, "inspect", record):
         await firewall.ainspect(result, tool="mock-a__read")
 
-    assert seen and seen[0] != caller
+    assert seen
+    assert seen[0] != caller

@@ -74,7 +74,7 @@ fails if the test written to catch that break does not
 
 | harness | breakages | what it establishes |
 |---|---|---|
-| `prove-cache` | 4 | dropping tenant, subject, actor or arguments from the result-cache key is caught |
+| `prove-cache` | 4 | dropping issuer, subject, actor or arguments from the result-cache key is caught |
 | `prove-refusal` | 6 | the enforcement bar, the no-quoting rule, and the detector demotions all hold |
 | `prove-passthrough` | 3 | the caller's token cannot reach an upstream by header, log or envelope |
 | `prove-predispatch` | search + 5 | 655,448 re-checks with **zero** false refusals, plus three broken readings the search catches |

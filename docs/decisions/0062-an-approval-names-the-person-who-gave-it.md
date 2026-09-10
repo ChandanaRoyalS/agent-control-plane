@@ -11,9 +11,13 @@ answer the second half:
 
 ```python
 audit.record(
-    AuditCategory.APPROVAL, "approval.decided",
-    subject=decided.subject, tool=decided.tool, rule=decided.rule,
-    outcome=..., reason=answer.reason or None,
+    AuditCategory.APPROVAL,
+    "approval.decided",
+    subject=decided.subject,
+    tool=decided.tool,
+    rule=decided.rule,
+    outcome=...,
+    reason=answer.reason or None,
     detail={"fingerprint": decided.fingerprint, "request_state": decided.token},
 )
 ```

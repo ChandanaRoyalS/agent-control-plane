@@ -41,13 +41,16 @@ from mutate_no_passthrough import Mutation, apply, failing_tests, working_tree_i
 
 CACHE = "src/acp/results/cache.py"
 SUITE = "tests/integration/test_result_caching.py"
+CACHE_UNIT_SUITE = "tests/unit/results/test_cache.py"
 
 ISOLATION = "test_a_second_caller_never_receives_the_first_ones_result"
 ACTOR = "test_two_agents_acting_for_one_person_do_not_share_an_entry"
 TENANT = "test_two_tenants_with_the_same_subject_do_not_share_an_entry"
 
+ISSUER = "test_one_tenant_two_directories_do_not_share_a_cache_entry"
+
 ANCHOR = """    material = json.dumps(
-        [KEY_VERSION, tenant, subject, actor, upstream, tool, encoded_arguments],"""
+        [KEY_VERSION, tenant, subject, issuer, actor, upstream, tool, encoded_arguments],"""
 
 
 def dropping(field: str) -> str:
@@ -58,6 +61,7 @@ def dropping(field: str) -> str:
             "KEY_VERSION",
             "tenant",
             "subject",
+            "issuer",
             "actor",
             "upstream",
             "tool",
@@ -70,19 +74,34 @@ def dropping(field: str) -> str:
 
 MUTATIONS: tuple[Mutation, ...] = (
     Mutation(
-        name="drop the tenant from the key",
+        name="drop the issuer from the key",
         path=CACHE,
         anchor=ANCHOR,
-        replacement=dropping("tenant"),
-        # Task 58's boundary. Dropping it leaves the key exactly as it was
-        # before tenancy existed — which is the point: this mutation restores
-        # the bug, and the assertion that must notice is the one written for
-        # it. The subject-isolation test does NOT catch this (both callers are
-        # "alice", so it is satisfied either way), which is precisely why the
-        # tenant needed its own test rather than a wider existing one.
-        caught_by=frozenset({TENANT}),
-        suite=SUITE,
+        replacement=dropping("issuer"),
+        # ADR 0061's boundary, and the one the tenant label cannot cover. Two
+        # identity providers may share a tenant (staff and CI), and inside that
+        # tenant an `alice` from each is two people. Dropping the issuer leaves
+        # both the subject test and the tenant test satisfied — both callers are
+        # "alice", both are in "acme" — which is exactly why this needed its own
+        # assertion rather than a wider existing one.
+        caught_by=frozenset({ISSUER}),
+        suite=CACHE_UNIT_SUITE,
     ),
+    # NOT a mutation any more: "drop the tenant from the key".
+    #
+    # It survived once the issuer joined the key (ADR 0061), and the reason is
+    # a design fact rather than a test gap. A tenant label is a property of an
+    # *issuer registration*, so one issuer determines one tenant: no two
+    # principals can share an issuer and differ by tenant. Dropping `tenant`
+    # therefore cannot break isolation, and no assertion can be written that
+    # catches it — the isolation it used to protect is now protected by the
+    # field beside it.
+    #
+    # `tenant` stays in the key because it costs nothing and makes a key
+    # self-describing when somebody is reading one at 3am. But a harness whose
+    # contract is "a surviving mutation means the field is not tested" must not
+    # carry a case that survives for a good reason, because then a reader
+    # cannot tell the two apart. Recorded here rather than deleted silently.
     Mutation(
         name="drop the subject from the key",
         path=CACHE,

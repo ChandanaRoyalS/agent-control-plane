@@ -15,6 +15,7 @@ from typing import Any
 import anyio
 
 from acp.identity.principal import Actor, Principal, bind_principal
+from acp.policy.arguments import ArgConstraint
 from acp.policy.evaluate import evaluate
 from acp.policy.predispatch import (
     PreDispatchAuthorizationMiddleware,
@@ -70,7 +71,7 @@ def test_an_allow_constrained_by_arguments_still_counts() -> None:
                 name="public-only",
                 effect=Effect.ALLOW,
                 tools=(TOOL,),
-                args={"doc_id": ("public",)},
+                args={"doc_id": ArgConstraint(equals=("public",))},
             ),
         )
     )
@@ -102,7 +103,7 @@ def test_a_deny_constrained_by_arguments_does_not_settle_it() -> None:
                 name="not-secret",
                 effect=Effect.DENY,
                 tools=(TOOL,),
-                args={"doc_id": ("secret",)},
+                args={"doc_id": ArgConstraint(equals=("secret",))},
             ),
             Rule(name="otherwise", effect=Effect.ALLOW, tools=(TOOL,)),
         )
@@ -134,8 +135,18 @@ def test_it_never_refuses_what_the_evaluator_would_allow() -> None:
     """
     policy = Policy(
         rules=(
-            Rule(name="d1", effect=Effect.DENY, tools=(TOOL,), args={"doc_id": ("secret",)}),
-            Rule(name="a1", effect=Effect.ALLOW, tools=(TOOL,), args={"doc_id": ("public",)}),
+            Rule(
+                name="d1",
+                effect=Effect.DENY,
+                tools=(TOOL,),
+                args={"doc_id": ArgConstraint(equals=("secret",))},
+            ),
+            Rule(
+                name="a1",
+                effect=Effect.ALLOW,
+                tools=(TOOL,),
+                args={"doc_id": ArgConstraint(equals=("public",))},
+            ),
         )
     )
     mappings: list[dict[str, object]] = [

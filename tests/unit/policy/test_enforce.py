@@ -17,6 +17,7 @@ import pytest
 from acp.exceptions import PolicyDeniedError
 from acp.identity.principal import Actor, Principal
 from acp.policy import Policy, Rule, enforce_call
+from acp.policy.arguments import ArgConstraint
 from acp.policy.schema import Effect
 
 ISSUER = "https://idp.test"
@@ -103,7 +104,7 @@ def test_enforce_denies_when_an_argument_is_not_allowed() -> None:
                 name="public-only",
                 effect=Effect.ALLOW,
                 tools=("mock-a__read_document",),
-                args={"doc_id": ("public",)},
+                args={"doc_id": ArgConstraint(equals=("public",))},
             ),
         )
     )
@@ -118,7 +119,7 @@ def test_enforce_allows_when_the_argument_matches() -> None:
                 name="public-only",
                 effect=Effect.ALLOW,
                 tools=("mock-a__read_document",),
-                args={"doc_id": ("public",)},
+                args={"doc_id": ArgConstraint(equals=("public",))},
             ),
         )
     )

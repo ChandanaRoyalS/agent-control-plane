@@ -22,6 +22,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from acp.policy.arguments import ArgConstraint
+
 # A rule name is a label for humans and for the audit log (a later task): which rule
 # allowed this call. Constrained to the same shape as an upstream name so it is
 # safe to put in a log field, a metric label, or a span attribute without
@@ -115,7 +117,7 @@ class Rule(BaseModel):
     """Which qualified tool names (`upstream__tool`, ADR 0003) this rule
     matches. Empty means any tool."""
 
-    args: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    args: dict[str, ArgConstraint] = Field(default_factory=dict)
     """Argument constraints, by argument name. Each entry maps an argument to the
     values it may take: the rule matches only when the call supplies that
     argument and its value is one of the listed ones. An unset ``args`` (the
@@ -123,12 +125,22 @@ class Rule(BaseModel):
     way it did before this field existed — the same "unset means anything"
     semantics as `subjects` and `tools`, one level deeper.
 
-    This is exact-value matching only, deliberately: it extends the membership
-    model already in use rather than introducing operators, globs, or ranges,
-    which would be a richer matcher and a later task. It is checked at *call*
-    time, where the arguments exist; `tools/list` has no arguments, so a rule
-    with `args` still makes its tool *visible*, and the argument check happens
-    when the call is actually made (see `visible_tools` and `enforce_call`)."""
+    **Values are compared as JSON, not as strings** (ADR 0060). `1000` matches
+    `1000.0` because they are one number; `true` does not match `1` because they
+    are not one value; `["production"]` matches a constraint written
+    `[production]` because a list is addressed elementwise. A value this
+    constraint cannot address at all — a mapping where a scalar was expected —
+    is *undecidable*, and an undecidable constraint matches a restrictive rule
+    and fails to match a permissive one, so both fail closed. See
+    `acp.policy.arguments`.
+
+    The shorthand `[a, b]` means `{equals: [a, b]}`; `gt`, `gte`, `lt`, `lte`,
+    `matches`, `not_equals` and `present` are also available, one family per
+    argument.
+
+    Checked at *call* time, where the arguments exist. `tools/list` has no
+    arguments, so a rule with `args` still makes its tool **visible** — see
+    `visible_tools`, which evaluates visibility without them."""
 
     @field_validator("name")
     @classmethod

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from acp.identity.principal import Actor, Principal
 from acp.policy import Effect, Policy, Rule, visible_tools
+from acp.policy.arguments import ArgConstraint
+from acp.policy.predispatch import could_ever_allow
 from acp.upstream.models import ToolDefinition
 
 ISSUER = "https://idp.test"
@@ -84,3 +86,56 @@ def test_visibility_is_per_principal() -> None:
 def test_empty_catalogue_stays_empty() -> None:
     policy = Policy(rules=(Rule(name="allow-all", effect=Effect.ALLOW),))
     assert visible_tools(policy, _principal(), []) == []
+
+
+def test_an_argument_scoped_rule_keeps_its_tool_visible() -> None:
+    """ADR 0031 said so; the implementation did the opposite for four tasks.
+
+    `visible_tools` evaluated with an empty argument mapping, an argument
+    constraint cannot hold for a call with no arguments, so every such rule fell
+    through to the deny default and **hid** the tool — while `could_ever_allow`
+    on the pre-dispatch path said the same tool was reachable. Nothing tested
+    it, so the two disagreed quietly.
+
+    Hiding it is the worse answer on its own terms: an agent that never sees the
+    tool never names it, never triggers the approval, and the human is never
+    asked.
+    """
+    policy = Policy(
+        rules=(
+            Rule(
+                name="hold-production",
+                effect=Effect.REQUIRE_APPROVAL,
+                tools=("mock-b__delete_record",),
+                args={"dataset": ArgConstraint(equals=("production",))},
+            ),
+            Rule(name="allow-delete", effect=Effect.ALLOW, tools=("mock-b__delete_record",)),
+        )
+    )
+    catalogue = [ToolDefinition(name="mock-b__delete_record")]
+
+    visible = visible_tools(policy, _principal(), catalogue)
+
+    assert [tool.name for tool in visible] == ["mock-b__delete_record"]
+
+
+def test_visibility_agrees_with_the_pre_dispatch_check() -> None:
+    """The invariant the disagreement above violated: a tool the pre-dispatch
+    check would let through to the body is a tool the catalogue shows."""
+    policy = Policy(
+        rules=(
+            Rule(
+                name="allow-public",
+                effect=Effect.ALLOW,
+                tools=("mock-a__read_document",),
+                args={"doc_id": ArgConstraint(equals=("public",))},
+            ),
+        )
+    )
+    catalogue = [ToolDefinition(name="mock-a__read_document")]
+    principal = _principal()
+
+    visible = {tool.name for tool in visible_tools(policy, principal, catalogue)}
+
+    for tool in catalogue:
+        assert (tool.name in visible) is could_ever_allow(policy, principal, tool.name)

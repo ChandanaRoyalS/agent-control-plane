@@ -20,6 +20,7 @@ import pytest
 from pydantic import ValidationError
 
 from acp.policy import Effect, Policy, Rule
+from acp.policy.arguments import ArgConstraint
 
 
 def test_effect_has_no_default_so_omitting_it_is_an_error() -> None:
@@ -137,14 +138,25 @@ def test_args_defaults_to_empty() -> None:
     assert rule.args == {}
 
 
+def test_a_bare_list_is_shorthand_for_equals() -> None:
+    """What every existing policy file says, and what it now means.
+
+    The YAML spelling did not change. Its semantics did — from `str()` rendering
+    to typed comparison — which is why 2.0.0 is a major bump (ADR 0060).
+    """
+    rule = Rule(name="r", effect=Effect.ALLOW, args={"doc_id": ["public", "faq"]})  # type: ignore[dict-item]
+
+    assert rule.args["doc_id"] == ArgConstraint(equals=("public", "faq"))
+
+
 def test_args_accepts_a_mapping_of_name_to_values() -> None:
     rule = Rule(
         name="r",
         effect=Effect.ALLOW,
         tools=("mock-a__read_document",),
-        args={"doc_id": ("public-handbook", "public-faq")},
+        args={"doc_id": ArgConstraint(equals=("public-handbook", "public-faq"))},
     )
-    assert rule.args["doc_id"] == ("public-handbook", "public-faq")
+    assert rule.args["doc_id"] == ArgConstraint(equals=("public-handbook", "public-faq"))
 
 
 def test_unknown_rule_field_is_still_forbidden_with_args_present() -> None:

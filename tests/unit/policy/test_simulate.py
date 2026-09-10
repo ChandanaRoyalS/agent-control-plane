@@ -19,6 +19,7 @@ import itertools
 from collections.abc import Iterator
 
 from acp.identity.principal import Principal
+from acp.policy.arguments import ArgConstraint
 from acp.policy.evaluate import evaluate
 from acp.policy.record import RecordedDecision, Traffic
 from acp.policy.schema import Effect, Policy, Rule
@@ -98,7 +99,10 @@ def test_a_rule_constraining_an_argument_the_call_sent_is_only_a_possibility() -
     policy = Policy(
         rules=(
             Rule(
-                name="deny-secret", effect=Effect.DENY, tools=(TOOL,), args={"doc_id": ("secret",)}
+                name="deny-secret",
+                effect=Effect.DENY,
+                tools=(TOOL,),
+                args={"doc_id": ArgConstraint(equals=("secret",))},
             ),
             ALLOW_SEARCH,
         )
@@ -120,7 +124,10 @@ def test_a_rule_constraining_an_argument_the_call_never_sent_cannot_have_fired()
     policy = Policy(
         rules=(
             Rule(
-                name="deny-secret", effect=Effect.DENY, tools=(TOOL,), args={"doc_id": ("secret",)}
+                name="deny-secret",
+                effect=Effect.DENY,
+                tools=(TOOL,),
+                args={"doc_id": ArgConstraint(equals=("secret",))},
             ),
             ALLOW_SEARCH,
         )
@@ -139,7 +146,10 @@ def test_an_unknown_argument_set_cannot_rule_anything_out() -> None:
     policy = Policy(
         rules=(
             Rule(
-                name="deny-secret", effect=Effect.DENY, tools=(TOOL,), args={"doc_id": ("secret",)}
+                name="deny-secret",
+                effect=Effect.DENY,
+                tools=(TOOL,),
+                args={"doc_id": ArgConstraint(equals=("secret",))},
             ),
             ALLOW_SEARCH,
         )
@@ -206,7 +216,10 @@ def test_possibilities_that_disagree_are_indeterminate() -> None:
     policy = Policy(
         rules=(
             Rule(
-                name="deny-secret", effect=Effect.DENY, tools=(TOOL,), args={"doc_id": ("secret",)}
+                name="deny-secret",
+                effect=Effect.DENY,
+                tools=(TOOL,),
+                args={"doc_id": ArgConstraint(equals=("secret",))},
             ),
             ALLOW_SEARCH,
         )
@@ -229,7 +242,10 @@ def test_possibilities_that_agree_on_the_verdict_are_not_indeterminate() -> None
     policy = Policy(
         rules=(
             Rule(
-                name="deny-secret", effect=Effect.DENY, tools=(TOOL,), args={"doc_id": ("secret",)}
+                name="deny-secret",
+                effect=Effect.DENY,
+                tools=(TOOL,),
+                args={"doc_id": ArgConstraint(equals=("secret",))},
             ),
             DENY_SEARCH,
         )
@@ -271,7 +287,10 @@ def test_indeterminate_counts_as_not_proven_safe() -> None:
     policy = Policy(
         rules=(
             Rule(
-                name="deny-secret", effect=Effect.DENY, tools=(TOOL,), args={"doc_id": ("secret",)}
+                name="deny-secret",
+                effect=Effect.DENY,
+                tools=(TOOL,),
+                args={"doc_id": ArgConstraint(equals=("secret",))},
             ),
             ALLOW_SEARCH,
         )
@@ -341,7 +360,10 @@ def test_an_indeterminate_change_names_both_possibilities() -> None:
     policy = Policy(
         rules=(
             Rule(
-                name="deny-secret", effect=Effect.DENY, tools=(TOOL,), args={"doc_id": ("secret",)}
+                name="deny-secret",
+                effect=Effect.DENY,
+                tools=(TOOL,),
+                args={"doc_id": ArgConstraint(equals=("secret",))},
             ),
             ALLOW_SEARCH,
         )
@@ -370,10 +392,10 @@ def test_the_deny_default_is_written_as_words_not_as_none() -> None:
 def _rule_pool() -> list[Rule]:
     """Every shape a rule can take over a two-tool, one-argument world."""
     tool_sets: list[tuple[str, ...]] = [(), (TOOL,), ("t2",), (TOOL, "t2")]
-    arg_shapes: list[dict[str, tuple[str, ...]]] = [
+    arg_shapes: list[dict[str, ArgConstraint]] = [
         {},
-        {"doc_id": ("public",)},
-        {"doc_id": ("public", "secret")},
+        {"doc_id": ArgConstraint(equals=("public",))},
+        {"doc_id": ArgConstraint(equals=("public", "secret"))},
     ]
     return [
         Rule(name="placeholder", effect=effect, tools=tools, args=args)

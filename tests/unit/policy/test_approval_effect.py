@@ -20,6 +20,7 @@ import pytest
 
 from acp.exceptions import PolicyDeniedError
 from acp.identity.principal import Actor, Principal
+from acp.policy.arguments import ArgConstraint
 from acp.policy.enforce import APPROVAL_EVENT, enforce_call
 from acp.policy.evaluate import Verdict, evaluate
 from acp.policy.filtering import visible_tools
@@ -98,7 +99,7 @@ def test_first_match_wins_still_holds_with_three_effects() -> None:
                 name="approve-hard-deletes",
                 effect=Effect.REQUIRE_APPROVAL,
                 tools=(TOOL,),
-                args={"hard": ("true",)},
+                args={"hard": ArgConstraint(equals=("true",))},
             ),
             Rule(name="allow-crm", effect=Effect.ALLOW, tools=(TOOL,)),
         )
@@ -185,7 +186,7 @@ def test_an_argument_scoped_approval_does_not_let_the_fast_path_refuse() -> None
                 name="approve-hard",
                 effect=Effect.REQUIRE_APPROVAL,
                 tools=(TOOL,),
-                args={"hard": ("true",)},
+                args={"hard": ArgConstraint(equals=("true",))},
             ),
         )
     )

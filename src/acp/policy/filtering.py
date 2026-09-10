@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from acp.identity.principal import Principal
-from acp.policy.evaluate import Verdict, evaluate
+from acp.policy.evaluate import Verdict, evaluate_visibility
 from acp.policy.schema import Policy
 from acp.upstream.models import ToolDefinition
 
@@ -29,8 +29,8 @@ def visible_tools(
 ) -> list[ToolDefinition]:
     """Return only the tools ``principal`` is allowed to call under ``policy``.
 
-    A tool survives iff ``evaluate`` does not *deny* the principal calling it by
-    its qualified name (``<upstream>__<tool>``, ADR 0003) — the same name the
+    A tool survives iff ``evaluate_visibility`` does not *deny* the principal
+    calling it by its qualified name (``<upstream>__<tool>``, ADR 0003) — the same name the
     merged catalogue already carries and the same the enforcer matches, so
     visibility and callability cannot drift apart. Order is preserved: the
     catalogue's ordering is a prompt-cache decision (see ``on_list_tools``), and
@@ -46,5 +46,7 @@ def visible_tools(
     needed restating as "visible iff not forbidden".
     """
     return [
-        tool for tool in tools if evaluate(policy, principal, tool.name).verdict is not Verdict.DENY
+        tool
+        for tool in tools
+        if evaluate_visibility(policy, principal, tool.name).verdict is not Verdict.DENY
     ]

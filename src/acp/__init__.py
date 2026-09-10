@@ -9,7 +9,7 @@ Targets the 2026-07-28 MCP specification (stateless request/response) only.
 See docs/decisions/0001-target-2026-07-28-spec-only.md.
 """
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 """The one place a human edits the version.
 
 `pyproject.toml` carries the same string because packaging needs it there, and

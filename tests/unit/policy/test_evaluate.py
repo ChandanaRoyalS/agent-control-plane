@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from acp.identity.principal import Actor, Principal
 from acp.policy import Decision, Effect, Policy, Rule, evaluate
+from acp.policy.arguments import ArgConstraint
+from acp.policy.evaluate import Verdict
 
 ISSUER = "https://idp.test"
 
@@ -152,7 +154,7 @@ def _arg_policy() -> Policy:
                 name="public-docs-only",
                 effect=Effect.ALLOW,
                 tools=("mock-a__read_document",),
-                args={"doc_id": ("public-handbook", "public-faq")},
+                args={"doc_id": ArgConstraint(equals=("public-handbook", "public-faq"))},
             ),
         )
     )
@@ -191,21 +193,80 @@ def test_unset_args_matches_any_call() -> None:
     assert evaluate(policy, _principal(), "mock-a__search").allowed
 
 
-def test_argument_values_compare_by_string_form() -> None:
-    """Policy values are strings; a numeric or boolean argument matches by its
-    string form, keeping the exact-match model predictable across JSON types."""
+def test_argument_values_compare_as_json_not_as_strings() -> None:
+    """A tool argument is a JSON value and a constraint is compared to it as one.
+
+    This test used to assert the opposite — that `10` matched a constraint
+    written `"10"` because `str(10)` did. That rendering is what let
+    `limit: 1000.0` walk past a rule denying `limit: 1000`, so the behaviour it
+    locked in was the bypass. See ADR 0060.
+    """
     policy = Policy(
         rules=(
             Rule(
                 name="limit-ten",
                 effect=Effect.ALLOW,
                 tools=("mock-a__search",),
-                args={"limit": ("10",)},
+                args={"limit": ArgConstraint(equals=(10,))},
             ),
         )
     )
-    assert evaluate(policy, _principal(), "mock-a__search", {"limit": 10}).allowed
-    assert not evaluate(policy, _principal(), "mock-a__search", {"limit": 20}).allowed
+
+    def allowed(args: dict[str, object]) -> bool:
+        return evaluate(policy, _principal(), "mock-a__search", args).allowed
+
+    assert allowed({"limit": 10})
+    assert allowed({"limit": 10.0}), "10 and 10.0 are one number in JSON"
+    assert not allowed({"limit": 20})
+    assert not allowed({"limit": "10"}), "a string is not the number it spells"
+    assert not allowed({"limit": True}), "True == 1 in Python, and must not here"
+
+
+def test_a_restrictive_rule_fires_on_a_value_it_cannot_read() -> None:
+    """**The bypass ADR 0060 closes.**
+
+    `require_approval` on `dataset: production`, with a broad allow behind it.
+    A mapping is a shape the constraint cannot address — and answering "no
+    match" to that meant the guard stepped aside and the allow took the call.
+    """
+    policy = Policy(
+        rules=(
+            Rule(
+                name="hold-production",
+                effect=Effect.REQUIRE_APPROVAL,
+                tools=("mock-b__delete_record",),
+                args={"dataset": ArgConstraint(equals=("production",))},
+            ),
+            Rule(name="allow-delete", effect=Effect.ALLOW, tools=("mock-b__delete_record",)),
+        )
+    )
+
+    def verdict(args: dict[str, object]) -> Verdict:
+        return evaluate(policy, _principal(), "mock-b__delete_record", args).verdict
+
+    assert verdict({"dataset": "production"}) is Verdict.APPROVAL
+    assert verdict({"dataset": ["production"]}) is Verdict.APPROVAL, "a list is read elementwise"
+    assert verdict({"dataset": {"name": "production"}}) is Verdict.APPROVAL, "unreadable: fires"
+    # And the other direction: a value it *can* read, that plainly does not match.
+    assert verdict({"dataset": "staging"}) is Verdict.ALLOW
+
+
+def test_an_allow_withholds_itself_on_a_value_it_cannot_read() -> None:
+    """The same undecidable value, on a permissive rule, fails closed the other
+    way: the grant does not apply and the deny default takes it."""
+    policy = Policy(
+        rules=(
+            Rule(
+                name="allow-public",
+                effect=Effect.ALLOW,
+                tools=("mock-a__read_document",),
+                args={"doc_id": ArgConstraint(equals=("public",))},
+            ),
+        )
+    )
+    request = {"doc_id": {"id": "public"}}
+
+    assert not evaluate(policy, _principal(), "mock-a__read_document", request).allowed
 
 
 def test_multiple_constrained_arguments_are_anded() -> None:
@@ -216,7 +277,10 @@ def test_multiple_constrained_arguments_are_anded() -> None:
                 name="two-args",
                 effect=Effect.ALLOW,
                 tools=("mock-a__read_document",),
-                args={"doc_id": ("public",), "format": ("pdf",)},
+                args={
+                    "doc_id": ArgConstraint(equals=("public",)),
+                    "format": ArgConstraint(equals=("pdf",)),
+                },
             ),
         )
     )

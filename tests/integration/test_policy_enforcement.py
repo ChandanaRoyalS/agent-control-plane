@@ -39,6 +39,7 @@ import pytest
 
 from acp.observability.log import JsonFormatter
 from acp.policy import Effect, Policy, Rule
+from acp.policy.arguments import ArgConstraint
 from acp.policy.record import parse_traffic
 from acp.policy.simulate import Outcome, simulate
 
@@ -160,7 +161,7 @@ def test_a_call_the_fast_path_cannot_decide_is_refused_by_the_backstop(
                 effect=Effect.ALLOW,
                 subjects=(ALICE,),
                 tools=(TOOL,),
-                args={"query": ("permitted",)},
+                args={"query": ArgConstraint(equals=("permitted",))},
             ),
         )
     )
@@ -186,7 +187,7 @@ def test_neither_refusal_names_the_rule_on_the_wire(keypair: Keypair) -> None:
                 name="allow-secret-rule-name",
                 effect=Effect.ALLOW,
                 tools=(TOOL,),
-                args={"query": ("permitted",)},
+                args={"query": ArgConstraint(equals=("permitted",))},
             ),
         )
     )

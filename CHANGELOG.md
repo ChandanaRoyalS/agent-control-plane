@@ -17,6 +17,59 @@ without somebody accepting the change.
 
 Nothing yet.
 
+## [2.0.0] - 2026-09-10
+
+A hardening release. An external review of 1.0.0 reproduced two bypasses and a
+denial-of-service path against the controls this gateway is named for. All
+1,898 tests passed against all three, which is the finding behind most of the
+work here: the suite was measuring the wrong things confidently.
+
+### Security
+
+- **The injection firewall screened one field.** An embedded resource — a
+  standard MCP content type whose text reaches the model exactly as a text
+  block's does — was relayed with zero characters inspected, while the same
+  payload in a text block was withheld. `structuredContent`, annotations and
+  any content type added by a future spec revision were open the same way.
+  Every string a result carries is now screened, with base64 image payloads the
+  only exclusion, matched by key rather than by the block's declared type
+  ([ADR 0059](docs/decisions/0059-screen-every-string-the-result-carries.md)).
+- **Argument-level policy rules compared `str()` renderings.** A
+  `require_approval` rule on `dataset: production` was skipped by sending
+  `["production"]` or `{"name": "production"}`; a deny on `limit: 1000` was
+  skipped by sending `1000.0`. Arguments are now compared as JSON values, and a
+  value a constraint cannot address is *undecidable* rather than a miss — which
+  matches a restrictive rule and fails to match a permissive one, so both
+  directions fail closed
+  ([ADR 0060](docs/decisions/0060-an-argument-is-a-json-value-not-its-string-form.md)).
+- **The screening character budget was per content block**, so a result with
+  eight blocks bought eight times the allowance and the cost of inspecting a
+  result was a number the upstream chose. It is now per result (ADR 0059).
+
+### Changed — breaking
+
+- `args:` constraints are typed. A rule may now match calls it previously
+  missed (a list containing the value, a float equal to an integer) and miss
+  calls it previously matched (a string spelling a number, `"true"` against a
+  boolean). Every such change moves toward the rule's evident intent, but it is
+  a change in meaning. No policy file shipped in this repository uses `args:`.
+- `args:` gains explicit operators — `equals`, `not_equals`, `gt`, `gte`, `lt`,
+  `lte`, `matches`, `present` — one family per argument. The bare-list shorthand
+  is unchanged and means `equals`.
+- Policy documents are validated harder at load time: two operator families in
+  one constraint, an empty value list, a non-scalar constraint value or an
+  invalid regular expression now fail at startup rather than behaving
+  surprisingly at call time.
+
+### Fixed
+
+- **The catalogue hid argument-scoped tools**, contradicting ADR 0031 and
+  disagreeing with `could_ever_allow` on the pre-dispatch path. `visible_tools`
+  evaluated with an empty argument mapping, so every rule carrying `args` fell
+  through to the deny default. An agent that never sees a tool never names it,
+  never triggers its approval, and the human is never asked. Visibility is now
+  decided by the fields a listing can decide (ADR 0060).
+
 ## [1.0.0] - 2026-08-14
 
 First release. The gateway is feature-complete against its plan, every

@@ -28,8 +28,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Final
 
 from acp.identity.principal import Principal
+from acp.policy.arguments import Outcome, check_all
 from acp.policy.schema import Effect, Policy, Rule
 
 
@@ -122,6 +124,15 @@ def matches_without_arguments(rule: Rule, subject: str, actor: str | None, tool:
     return not (rule.tools and tool not in rule.tools)
 
 
+RESTRICTIVE: Final = frozenset({Effect.DENY, Effect.REQUIRE_APPROVAL})
+"""The effects that exist to stop something.
+
+Named because an undecidable argument constraint resolves by asking whether its
+rule is a guard or a grant, and "guard" should be a property of the effect
+rather than a condition somebody re-derives at the call site.
+"""
+
+
 def _rule_matches(
     rule: Rule,
     subject: str,
@@ -137,18 +148,27 @@ def _rule_matches(
     that argument or supplies a value outside the allowed set — the same "set
     means one of these" claim as the other fields, so a missing argument is not a
     match any more than a missing actor is.
+
+    **The undecidable case, and why it resolves by effect** (ADR 0060). An
+    argument value can have a shape the constraint cannot address — a mapping
+    where a scalar was expected, a structure nested past
+    ``arguments.MAX_VALUE_DEPTH``. That is not "these are different"; it is "I
+    cannot tell", and the previous implementation answered both with *no match*.
+    Since restrictive rules sit in front of broad allows, "no match" on a puzzle
+    meant the guard silently stepped aside and the allow behind it took the
+    call — the bypass ADR 0060 records.
+
+    So an undecidable constraint **matches a `deny` or `require_approval` rule
+    and does not match an `allow` one**. A guard that cannot tell, fires; a
+    grant that cannot tell, withholds itself. Both directions fail closed, and
+    neither depends on the caller.
     """
     if not matches_without_arguments(rule, subject, actor, tool):
         return False
-    for name, allowed in rule.args.items():
-        if name not in arguments:
-            return False
-        # Compare as a string: policy values are strings (YAML scalars), and a
-        # tool argument's JSON value may be a number or bool. Matching by string
-        # form keeps the exact-match model simple and predictable across types.
-        if str(arguments[name]) not in allowed:
-            return False
-    return True
+    outcome = check_all(rule.args, arguments)
+    if outcome is Outcome.UNDECIDABLE:
+        return rule.effect in RESTRICTIVE
+    return outcome is Outcome.MATCH
 
 
 def evaluate(
@@ -175,6 +195,35 @@ def evaluate(
     actor = principal.actor.subject if principal.actor else None
     for rule in policy.rules:
         if _rule_matches(rule, principal.subject, actor, tool, args):
+            return decision_for(rule)
+    return Decision(allowed=False, rule=None)
+
+
+def evaluate_visibility(policy: Policy, principal: Principal, tool: str) -> Decision:
+    """The verdict for *listing* a tool, where no arguments exist yet.
+
+    Separate from `evaluate` because the question is different, and answering it
+    with `evaluate(..., arguments={})` answered a third question neither side
+    wanted. ADR 0031 committed to argument-scoped rules keeping their tool
+    visible: "delete against production needs a human" should show `delete` in
+    the catalogue, because an agent that never sees the tool never names it,
+    never triggers the approval, and the human is never asked.
+
+    But an argument constraint cannot hold for a call with no arguments, so
+    `evaluate` with an empty mapping fell through every such rule to the deny
+    default and **hid** the tool — the opposite of what ADR 0031 says, and
+    contradicting `could_ever_allow`, which said the same tool was reachable.
+    Nothing tested it, so the two disagreed quietly for four tasks.
+
+    This evaluates the rules the catalogue can actually decide: everything
+    except `args`, via the same `matches_without_arguments` the pre-dispatch
+    check and the simulator use (ADR 0030). A tool is visible when no rule
+    forbids it outright — enforcement at call time remains authoritative, and is
+    where the argument constraint is checked.
+    """
+    actor = principal.actor.subject if principal.actor else None
+    for rule in policy.rules:
+        if matches_without_arguments(rule, principal.subject, actor, tool):
             return decision_for(rule)
     return Decision(allowed=False, rule=None)
 

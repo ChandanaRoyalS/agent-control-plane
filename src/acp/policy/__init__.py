@@ -13,7 +13,7 @@ the first request.
 """
 
 from acp.policy.enforce import enforce_call
-from acp.policy.evaluate import Decision, evaluate
+from acp.policy.evaluate import Decision, evaluate, evaluate_visibility
 from acp.policy.filtering import visible_tools
 from acp.policy.schema import Effect, Policy, Rule
 from acp.policy.tenancy import DENY_ALL, PolicySet, load_policy_set
@@ -27,6 +27,7 @@ __all__ = [
     "Rule",
     "enforce_call",
     "evaluate",
+    "evaluate_visibility",
     "load_policy_set",
     "visible_tools",
 ]

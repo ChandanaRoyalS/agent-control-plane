@@ -27,6 +27,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from acp.identity.principal import Actor, Principal
+from acp.policy.arguments import ArgConstraint
 from acp.policy.evaluate import evaluate
 from acp.policy.schema import Effect, Policy, Rule
 
@@ -35,7 +36,28 @@ ISSUER = "https://idp.test"
 SUBJECTS = ("alice", "bob", "carol")
 ACTORS = ("agent-research", "agent-support")
 TOOLS = ("mock-a__search", "mock-a__create_ticket", "mock-b__delete_record")
-ARG_VALUES = ("public", "secret")
+RULE_ARG_VALUES: tuple[object, ...] = ("public", "secret", 10, True, None)
+"""What a *rule* may constrain an argument to: scalars, per the schema."""
+
+CALL_ARG_VALUES: tuple[object, ...] = (
+    "public",
+    "secret",
+    10,
+    10.0,
+    "10",
+    True,
+    1,
+    None,
+    ["public"],
+    ["secret", "public"],
+    [],
+    {"name": "public"},
+    [{"name": "public"}],
+)
+"""What a *call* may supply: every JSON shape, including the three that used to
+walk past a restrictive rule — a list, a mapping, and a number spelled as a
+string. The generator draws these so the tri-state in ADR 0060 is exercised
+rather than described."""
 
 subjects = st.sampled_from(SUBJECTS)
 actors = st.sampled_from(ACTORS)
@@ -63,14 +85,16 @@ def _subset(values: tuple[str, ...]) -> st.SearchStrategy[tuple[str, ...]]:
 def rules(draw: st.DrawFn, index: int = 0) -> Rule:
     return Rule(
         name=f"r{index}-{draw(st.integers(min_value=0, max_value=999))}",
-        effect=draw(st.sampled_from([Effect.ALLOW, Effect.DENY])),
+        effect=draw(st.sampled_from([Effect.ALLOW, Effect.DENY, Effect.REQUIRE_APPROVAL])),
         subjects=draw(_subset(SUBJECTS)),
         actors=draw(_subset(ACTORS)),
         tools=draw(_subset(TOOLS)),
         args=draw(
             st.dictionaries(
                 st.sampled_from(["doc_id"]),
-                st.lists(st.sampled_from(ARG_VALUES), unique=True, min_size=1).map(_freeze),
+                st.lists(st.sampled_from(RULE_ARG_VALUES), unique=True, min_size=1)
+                .map(tuple)
+                .map(lambda values: ArgConstraint(equals=values)),
                 max_size=1,
             )
         ),
@@ -95,7 +119,7 @@ def requests(draw: st.DrawFn) -> tuple[Principal, str, dict[str, object]]:
     )
     arguments: dict[str, object] = {}
     if draw(st.booleans()):
-        arguments["doc_id"] = draw(st.sampled_from(ARG_VALUES))
+        arguments["doc_id"] = draw(st.sampled_from(CALL_ARG_VALUES))
     return principal, draw(tools), arguments
 
 
@@ -171,6 +195,7 @@ def test_the_decision_is_the_first_matching_rule(
     else:
         assert decision.rule == expected.name
         assert decision.allowed is (expected.effect is Effect.ALLOW)
+        assert decision.requires_approval is (expected.effect is Effect.REQUIRE_APPROVAL)
 
 
 @given(policy=policies(), request=requests())
@@ -308,12 +333,54 @@ def _matches(rule: Rule, principal: Principal, tool: str, arguments: dict[str, o
     that generated it.
     """
     actor = principal.actor.subject if principal.actor else None
-    if rule.subjects and principal.subject not in rule.subjects:
-        return False
-    if rule.actors and (actor is None or actor not in rule.actors):
-        return False
-    if rule.tools and tool not in rule.tools:
-        return False
-    return all(
-        name in arguments and str(arguments[name]) in allowed for name, allowed in rule.args.items()
+    identity_holds = not (
+        (rule.subjects and principal.subject not in rule.subjects)
+        or (rule.actors and (actor is None or actor not in rule.actors))
+        or (rule.tools and tool not in rule.tools)
     )
+    if not identity_holds:
+        return False
+    for name, constraint in rule.args.items():
+        if name not in arguments:
+            return False
+        outcome = _oracle_outcome(constraint, arguments[name])
+        if outcome == "no":
+            return False
+        if outcome == "undecided":
+            # ADR 0060: a guard that cannot tell, fires; a grant that cannot
+            # tell, withholds itself.
+            return rule.effect in (Effect.DENY, Effect.REQUIRE_APPROVAL)
+    return True
+
+
+def _oracle_outcome(constraint: ArgConstraint, supplied: object) -> str:
+    """The tri-state, written from ADR 0060's prose.
+
+    Independent of `acp.policy.arguments` on purpose: an oracle that imported
+    the matcher would agree with it by construction, including when both are
+    wrong. Only `equals` is modelled, because only `equals` is drawn.
+    """
+    if isinstance(supplied, dict):
+        return "undecided"
+    if isinstance(supplied, (list, tuple)):
+        if not supplied:
+            return "no"
+        results = [_oracle_outcome(constraint, item) for item in supplied]
+        if "match" in results:
+            return "match"
+        return "undecided" if "undecided" in results else "no"
+    hit = any(_oracle_equal(candidate, supplied) for candidate in constraint.equals or ())
+    return "match" if hit else "no"
+
+
+def _oracle_equal(candidate: object, supplied: object) -> bool:
+    """JSON scalar equality. Booleans first, because Python says `True == 1`."""
+    if isinstance(candidate, bool) or isinstance(supplied, bool):
+        return candidate is supplied
+    if candidate is None or supplied is None:
+        return candidate is supplied
+    if isinstance(candidate, (int, float)) and isinstance(supplied, (int, float)):
+        return bool(candidate == supplied)
+    if isinstance(candidate, str) and isinstance(supplied, str):
+        return candidate == supplied
+    return False

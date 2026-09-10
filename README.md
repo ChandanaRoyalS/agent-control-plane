@@ -293,10 +293,14 @@ written to be read by somebody looking for the gaps. The short version:
 - **Tool descriptions are neither screened nor fenced**, so a hostile upstream
   can still address the model through its own catalogue. Tool *results* are
   screened in full as of 2.0.0 (ADR 0059); descriptions are the remaining half.
-- **The approval store is in memory unless you configure otherwise.**
-  `ACP_APPROVAL_STORE_FILE` makes it durable (ADR 0063); unset, a restart still
-  loses every pending decision. Either way, **two replicas cannot share one** —
-  that cut is unchanged.
+- **This is a single-instance system.** `ACP_APPROVAL_STORE_FILE` makes the
+  approval store durable across a restart (ADR 0063), and unset it is still in
+  memory. But **two gateways cannot share an approval at all**: one holds the
+  record, the retry reaches the other, and the caller is refused for a call a
+  human approved. Run two and human-in-the-loop becomes unreliable in a way that
+  looks like your operator denying calls they approved. Declined deliberately —
+  a project telling you not to run it in front of anything real has not earned a
+  second service — and written up in [THREAT_MODEL §6.5](docs/THREAT_MODEL.md).
 - **The static secrets store is shared per upstream**, which makes it the
   weakest credential boundary in the system.
 

@@ -303,14 +303,53 @@ Anyone who can write the file can write a chain.
 And: **clean screenings are not chained**, only findings. The chain is a record
 of findings, not of screenings.
 
-### 6.5 In-memory state: two different severities
+### 6.5 One process, and what that costs — **the largest operational gap**
 
-- **The approval store** is per process. Unlike the rate limiter's identical
-  cut, this one affects **correctness**: a replicated deployment where the
-  retry lands on a different process cannot resolve the approval. A restart
-  drops every pending approval.
-- **The audit chain is one file per process.** A replicated fleet writes
-  several independent chains with no global ordering between them.
+Two failures used to live here. One is closed and the other is not, and they are
+worth keeping apart because they fail for different reasons and only one of them
+was ever making the gateway give a *wrong answer*.
+
+**Closed in 2.0.0: a restart no longer loses a decision a person made.**
+Pending approvals were held in memory, so the sequence below produced a refusal
+for a call a human had approved, and nothing on the outside could distinguish it
+from the human having said no:
+
+1. An agent calls a tool the policy holds for a human.
+2. The gateway answers `input_required` and waits.
+3. Somebody deploys an unrelated change, or the container is rescheduled, or the
+   process is killed for memory. The gateway restarts — the ordinary case, not
+   the exotic one.
+4. The operator, four minutes later, approves.
+5. The token names nothing. The caller is told no.
+
+`ACP_APPROVAL_STORE_FILE` puts the store in SQLite and the sequence survives
+(ADR 0063). **Unset, it is still in memory and step 5 still happens** — the
+setting is presence-based like every other switch here, and the startup log says
+which one you got.
+
+**Open: two gateways cannot share one approval.** Copy A holds the record;
+the agent's retry reaches copy B; copy B has never heard of the token. Same
+refusal, different cause, and no configuration closes it — it needs storage both
+copies can see, which means Redis or Postgres and a second thing to operate.
+
+That was declined deliberately rather than overlooked. This gateway's entire
+deployment story is one container, and the honest reading is that a project
+telling you not to run it in front of anything real has not earned a second
+service. **The consequence to be clear about: this is a single-instance system.**
+Run two and human-in-the-loop approval becomes unreliable in a way that looks
+like the operator denying calls they approved. Not slower — wrong.
+
+**Also open: the audit chain is one file per process**, and now takes an
+exclusive lock (ADR 0063), so a second process on the same file fails to start
+rather than corrupting the chain silently. A replicated fleet therefore needs a
+file each, and writes several independent chains with no global ordering between
+them. Nothing merges them.
+
+**Also open: budget state is per process.** Rate limits and quotas are bounded
+against unbounded growth (ADR 0063) but not shared, so N replicas permit N times
+the configured limit. That is an *accuracy* cut in the sense ADR 0044 argues —
+it makes the numbers wrong, not the decisions — and it is the one of these three
+that a shared backend would fix most cheaply, if one ever arrives.
 
 ### 6.6 Budget gaps
 

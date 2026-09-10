@@ -10,12 +10,15 @@ See docs/decisions/0001-target-2026-07-28-spec-only.md.
 """
 
 __version__ = "2.0.0"
-"""The one place a human edits the version.
+"""The one place the version exists.
 
-`pyproject.toml` carries the same string because packaging needs it there, and
-a test asserts the two agree — two sources of truth for one fact is a
-disagreement waiting for a release. See ADR 0058 for what this number is a
-promise **about**, which is not the Python API.
+`pyproject.toml` declares `dynamic = ["version"]` and reads it from here at
+build time, so there is nothing to keep in agreement. It used to be written in
+both files with a test asserting they matched — which catches the disagreement
+only after somebody has made it, and is a worse answer than not being able to.
+
+See ADR 0058 for what this number is a promise **about**, which is not the
+Python API.
 """
 
 __all__ = ["__version__"]

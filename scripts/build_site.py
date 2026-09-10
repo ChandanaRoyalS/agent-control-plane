@@ -54,8 +54,8 @@ TRACE = ROOT / "docs" / "demo" / "trace.jsonl"
 OUTPUT = ROOT / "docs" / "index.html"
 DECISIONS = ROOT / "docs" / "decisions"
 
-REPO: Final = "https://github.com/chandanaroyal719-bot/agent-control-plane"
-IMAGE: Final = "ghcr.io/chandanaroyal719-bot/agent-control-plane:1.0.0"
+REPO: Final = "https://github.com/ChandanaRoyalS/agent-control-plane"
+IMAGE: Final = "ghcr.io/ChandanaRoyalS/agent-control-plane:1.0.0"
 
 RECORD_KEYS: Final = frozenset({"seq", "prev", "hash", "record"})
 
@@ -447,7 +447,7 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
   <div>
     <span class="pill">MCP gateway</span>
     <span class="pill">v1.0.0</span>
-    <span class="pill">1,893 tests</span>
+    <span class="pill">1,980 tests</span>
   </div>
   <h1>An AI agent reads a document. The document tells it to do something else.</h1>
   <p class="deck">This is the security boundary that sits in between &mdash; it decides what an
@@ -545,7 +545,7 @@ make audit-verify       # walk the chain it just wrote</pre>
 
 <footer>
   <a href="%%REPO%%">Repository</a> &middot;
-  <a href="%%REPO%%/blob/main/docs/decisions/README.md">58 architecture decisions</a> &middot;
+  <a href="%%REPO%%/blob/main/docs/decisions/README.md">63 architecture decisions</a> &middot;
   <a href="%%REPO%%/blob/main/docs/THREAT_MODEL.md">Threat model</a> &middot;
   <a href="%%REPO%%/releases/tag/v1.0.0">v1.0.0</a>
   <p style="margin-top:10px;color:var(--faint)">This page is generated from files in the

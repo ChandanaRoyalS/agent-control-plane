@@ -1,6 +1,10 @@
 [project]
 name = "agent-control-plane"
-version = "2.0.0"
+# Read from `acp.__version__` at build time rather than repeated here. Two
+# sources of truth for one fact is a disagreement waiting for a release, and a
+# test asserting they agree only catches the disagreement after somebody makes
+# it. See ADR 0058.
+dynamic = ["version"]
 description = "A policy-enforcing, injection-screening MCP gateway for AI agents."
 readme = "README.md"
 requires-python = ">=3.12"   # the floor, and CI's `compat` job runs the suite on it
@@ -49,6 +53,9 @@ dev = [
 perf = [
     "locust>=2.46.3",
 ]
+
+[tool.hatch.version]
+path = "src/acp/__init__.py"
 
 [build-system]
 requires = ["hatchling"]

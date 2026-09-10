@@ -121,3 +121,25 @@ def test_the_page_states_what_the_project_does_not_do(page: str) -> None:
     it — and the first thing an editor optimising for impact would remove."""
     assert "What it does not do" in page
     assert "It does not stop prompt injection" in page
+
+
+def test_the_readme_breakage_count_matches_the_harness_table() -> None:
+    """16 in the README, 18 in `ARCHITECTURE.md`, for four tasks.
+
+    Both numbers were written by hand about the same four harnesses, and the
+    repository's whole argument is that its claims are checkable. A claim worth
+    putting in the first four lines of the README is worth failing the build
+    over — the same reasoning `test_threat_model.py` applies to the numbers a
+    reader is most likely to believe without checking.
+    """
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+
+    claimed = re.search(r"proving (\d+) deliberate breakages", readme)
+    assert claimed is not None, "the README no longer states a breakage count"
+
+    # | `prove-cache` | 4 | ... |  and  | `prove-predispatch` | search + 5 | ... |
+    rows = re.findall(r"^\| `prove-[a-z]+` \| (?:search \+ )?(\d+) \|", architecture, re.M)
+    assert rows, "the harness table in ARCHITECTURE.md no longer parses"
+
+    assert int(claimed.group(1)) == sum(int(count) for count in rows)

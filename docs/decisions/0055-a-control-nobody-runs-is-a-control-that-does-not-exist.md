@@ -3,6 +3,8 @@
 **Status:** accepted
 **Date:** 2026-08-13
 
+> **Note (2.0.0).** `scripts/patch_*.py` were removed in 2.0.0 (see the README's *How this was built*); the references below are historical.
+
 ## Context
 
 Task 62's overhead measurement reads the running gateway's configuration and

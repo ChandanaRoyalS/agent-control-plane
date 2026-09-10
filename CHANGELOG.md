@@ -123,8 +123,23 @@ work here: the suite was measuring the wrong things confidently.
   each other's tokens, which is a different cut and stays in the threat model
   ([ADR 0063](docs/decisions/0063-durability-and-the-bounds-nobody-enforced.md)).
 
+### Removed
+
+- The 40 `scripts/patch_*.py` files. They were the delivery mechanism of a
+  code-generating sandbox, not tooling anybody runs, and they had been committed
+  and left. The README now says how this repository was built instead of leaving
+  it to be inferred from build scripts.
+
 ### Fixed
 
+- The version has one source. `pyproject.toml` declares
+  `dynamic = ["version"]` and reads `acp.__version__`; it used to be written by
+  hand in both files with a test asserting they matched, which catches the
+  disagreement only after somebody makes it.
+- Badges, image references and links pointed at `chandanaroyal719-bot`, which is
+  not this repository. Every one of them 404'd.
+- The README claimed 16 deliberate breakages and `ARCHITECTURE.md`'s table
+  itemised 18. A test now fails when they disagree.
 - Approvals reach the trace console for the first time. The handler used the
   synchronous `record`, which never published — and did an `fsync` on the event
   loop, the bug ADR 0053 removed from the request path and left here.
@@ -205,7 +220,7 @@ Stated here rather than left to be discovered:
 
 ### Published
 
-- Container image: `ghcr.io/chandanaroyal719-bot/agent-control-plane:1.0.0`.
+- Container image: `ghcr.io/ChandanaRoyalS/agent-control-plane:1.0.0`.
   Built without the mock upstreams and asserted to be, runs as uid 10001, and
   reads `config/` from a read-only mount so a compromised gateway cannot
   silence its own alarm.
@@ -213,6 +228,6 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1893 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/chandanaroyal719-bot/agent-control-plane/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/chandanaroyal719-bot/agent-control-plane/releases/tag/v1.0.0
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.0.0
 

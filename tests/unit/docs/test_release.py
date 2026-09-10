@@ -13,6 +13,7 @@ that cannot be stale about the version being tagged.
 from __future__ import annotations
 
 import tomllib
+from importlib import metadata
 from pathlib import Path
 
 import pytest
@@ -33,16 +34,29 @@ def changelog() -> str:
 
 
 # ---------------------------------------------------------------------------
-# One version, in two files
+# One version, in one file
 # ---------------------------------------------------------------------------
 
 
-def test_pyproject_and_the_package_agree_on_the_version() -> None:
-    """The failure this prevents is a wheel whose metadata says 1.0.0 and whose
-    `--version` says 0.9.0, which is only ever noticed by whoever is trying to
-    reproduce a bug."""
-    packaged = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]["version"]
-    assert packaged == __version__
+def test_the_version_has_exactly_one_source() -> None:
+    """This used to assert that two hand-written copies agreed.
+
+    A test like that catches the disagreement only *after* somebody has made
+    it, and the failure it was guarding against — a wheel whose metadata says
+    one version and whose `--version` says another — is better prevented than
+    detected. `pyproject.toml` now declares `dynamic = ["version"]` and hatch
+    reads `acp.__version__`, so there is nothing to keep in agreement.
+    """
+    project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]
+
+    assert "version" not in project, "the version is back in two places"
+    assert project["dynamic"] == ["version"]
+
+
+def test_the_built_distribution_carries_the_package_version() -> None:
+    """The property the two-file assertion was really about, asserted against
+    what packaging actually produced rather than against a second copy."""
+    assert metadata.version("agent-control-plane") == __version__
 
 
 def test_the_version_is_a_semantic_version() -> None:

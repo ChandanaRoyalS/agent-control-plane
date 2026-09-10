@@ -124,7 +124,7 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
     <a href="#trace">Trace</a>
     <a href="#measured">Measured</a>
     <a href="#limits">Limits</a>
-    <a href="https://github.com/chandanaroyal719-bot/agent-control-plane">Repository</a>
+    <a href="https://github.com/ChandanaRoyalS/agent-control-plane">Repository</a>
   </nav>
 </div></header>
 
@@ -134,7 +134,7 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
   <div>
     <span class="pill">MCP gateway</span>
     <span class="pill">v1.0.0</span>
-    <span class="pill">1,893 tests</span>
+    <span class="pill">1,980 tests</span>
   </div>
   <h1>An AI agent reads a document. The document tells it to do something else.</h1>
   <p class="deck">This is the security boundary that sits in between &mdash; it decides what an
@@ -155,7 +155,7 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
     <div class="rail" id="rail"></div>
   </div>
   <p class="note">Verbatim output of <code>make attack-demo</code>, captured to
-  <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/demo/attack.txt">docs/demo/attack.txt</a> and rendered here
+  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/demo/attack.txt">docs/demo/attack.txt</a> and rendered here
   by a build step &mdash; a test fails if this page and that file disagree.</p>
 </section>
 
@@ -174,7 +174,7 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
     <strong>A person, asked a direct question on a channel the agent cannot
     reach, stopped it.</strong></p>
     <p>That is a better argument for defence in depth than a run where the first layer wins, and
-    it is only available because <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0057-the-demo-reports-what-happened-it-does-not-assert-it.md">the demo</a> reports what happened instead of asserting it.
+    it is only available because <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0057-the-demo-reports-what-happened-it-does-not-assert-it.md">the demo</a> reports what happened instead of asserting it.
     And the first act is not merely unprotected &mdash; it is <em>unexplainable</em>. It left no
     record at all.</p>
   </div>
@@ -198,18 +198,18 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
     <div class="hashes" id="hashes"></div>
   </div>
   <p class="note">What this does <em>not</em> detect is truncation of the tail; an external
-  anchor does, and that limit is asserted as a passing test. <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0050-an-audit-record-is-not-a-log-line.md">ADR 0050</a></p>
+  anchor does, and that limit is asserted as a passing test. <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0050-an-audit-record-is-not-a-log-line.md">ADR 0050</a></p>
 </section>
 
 <section id="measured">
   <h2>Measured, not asserted</h2>
   <div class="grid">
-      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md"><span class="figure">0 of 106</span><span class="caption">benign documents withheld by the injection firewall</span></a>
-      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0047-a-baseline-not-a-threshold.md"><span class="figure">75% / 38%</span><span class="caption">recall and precision on the family this attack belongs to</span></a>
-      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">2.14&times;</span><span class="caption">of throughput is what durability costs, measured</span></a>
-      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">12.6&times;</span><span class="caption">p95 on a path with no disk write &mdash; a defect a load harness found</span></a>
-      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md"><span class="figure">6.7&ndash;7.2&times;</span><span class="caption">a direct call, on a cache miss, with the switch settings printed</span></a>
-      <a class="tile" href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md"><span class="figure">16</span><span class="caption">deliberate breakages, caught by the tests written to catch them</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md"><span class="figure">0 of 106</span><span class="caption">benign documents withheld by the injection firewall</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0047-a-baseline-not-a-threshold.md"><span class="figure">75% / 38%</span><span class="caption">recall and precision on the family this attack belongs to</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">2.14&times;</span><span class="caption">of throughput is what durability costs, measured</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">12.6&times;</span><span class="caption">p95 on a path with no disk write &mdash; a defect a load harness found</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md"><span class="figure">6.7&ndash;7.2&times;</span><span class="caption">a direct call, on a cache miss, with the switch settings printed</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md"><span class="figure">16</span><span class="caption">deliberate breakages, caught by the tests written to catch them</span></a>
   </div>
   <p class="note">Every figure links to the decision record that produced it, including the two
   that record a prediction the author got wrong.</p>
@@ -222,45 +222,45 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
         <h3>Identity</h3>
         <p class="claim">The caller's token reaches exactly one module and never travels onward.</p>
         <ul><li>Two identities: who it is for, and which agent did it</li><li>A credential minted per call, scoped to one upstream</li><li>A sweep, two static alarms and a mutation harness proving it</li></ul>
-        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0015-two-identities-not-one.md">0015</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0019-mint-a-credential-per-call-and-hold-none.md">0019</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md">0023</a></p>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0015-two-identities-not-one.md">0015</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0019-mint-a-credential-per-call-and-hold-none.md">0019</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md">0023</a></p>
       </article>
       <article class="card">
         <h3>Policy</h3>
         <p class="claim">Deny by default, and it is not configurable &mdash; no field, no variable.</p>
         <ul><li>A pure function is the whole of the decision logic</li><li>Rules reach into arguments, not just tool names</li><li>A tool the caller may not call never appears in the catalogue</li></ul>
-        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0025-deny-by-default-is-structural.md">0025</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0026-the-evaluator-is-a-pure-function.md">0026</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0031-argument-level-rules.md">0031</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0029-filter-the-catalogue-by-policy.md">0029</a></p>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0025-deny-by-default-is-structural.md">0025</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0026-the-evaluator-is-a-pure-function.md">0026</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0031-argument-level-rules.md">0031</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0029-filter-the-catalogue-by-policy.md">0029</a></p>
       </article>
       <article class="card">
         <h3>Budgets</h3>
         <p class="claim">A per-tool weighted cost against a rate limit and a quota.</p>
         <ul><li>A token bucket per principal, checked after authorization</li><li>A fixed, clock-aligned window</li><li>The one cache that sits inside the policy check</li></ul>
-        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0032-rate-limiting-token-bucket.md">0032</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0033-cost-accounting.md">0033</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0034-quotas-fixed-window.md">0034</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0035-a-result-cache-key-that-cannot-serve-the-wrong-person.md">0035</a></p>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0032-rate-limiting-token-bucket.md">0032</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0033-cost-accounting.md">0033</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0034-quotas-fixed-window.md">0034</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0035-a-result-cache-key-that-cannot-serve-the-wrong-person.md">0035</a></p>
       </article>
       <article class="card">
         <h3>Firewall</h3>
         <p class="claim">Detect first, decide later, and count the false positives before enforcing anything.</p>
         <ul><li>106 benign documents, and the two detectors that survived</li><li>Retrieved text fenced in a boundary the document cannot forge</li><li>A refusal that never quotes what it withheld</li></ul>
-        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0036-detect-before-deciding-and-count-the-false-positives.md">0036</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0037-tell-the-model-where-the-text-came-from.md">0037</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0038-refuse-loudly-and-never-quote-the-payload.md">0038</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md">0039</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0047-a-baseline-not-a-threshold.md">0047</a></p>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0036-detect-before-deciding-and-count-the-false-positives.md">0036</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0037-tell-the-model-where-the-text-came-from.md">0037</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0038-refuse-loudly-and-never-quote-the-payload.md">0038</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md">0039</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0047-a-baseline-not-a-threshold.md">0047</a></p>
       </article>
       <article class="card">
         <h3>Approvals</h3>
         <p class="claim">An agent cannot approve its own call because it cannot address
             the thing that approves calls.</p>
         <ul><li>An approval is granted to a call, fingerprinted, not to a token</li><li>Answered on the admin listener, and that placement is the control</li></ul>
-        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0048-an-approval-is-for-a-call-not-a-token.md">0048</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md">0049</a></p>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0048-an-approval-is-for-a-call-not-a-token.md">0048</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md">0049</a></p>
       </article>
       <article class="card">
         <h3>Audit</h3>
         <p class="claim">A call this gateway cannot record does not happen.</p>
         <ul><li>A hash chain, verified against an anchor the gateway cannot reach</li><li>What it does not detect is asserted as a passing test</li><li>A tenant comes from the registration that verified the token</li></ul>
-        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0050-an-audit-record-is-not-a-log-line.md">0050</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0051-a-tenant-is-an-issuer-not-a-claim.md">0051</a></p>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0050-an-audit-record-is-not-a-log-line.md">0050</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0051-a-tenant-is-an-issuer-not-a-claim.md">0051</a></p>
       </article>
       <article class="card">
         <h3>Performance</h3>
         <p class="claim">Latency per outcome, because an average over four populations
             describes no request that was made.</p>
         <ul><li>A load harness that found fsync on the event loop</li><li>An overhead number printed beside its switch settings</li><li>A second run that bounded the harness's own error</li></ul>
-        <p class="adrs"><a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0052-a-load-test-that-does-not-average-its-own-answer.md">0052</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md">0053</a> <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md">0054</a></p>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0052-a-load-test-that-does-not-average-its-own-answer.md">0052</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md">0053</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md">0054</a></p>
       </article>
   </div>
 </section>
@@ -282,22 +282,22 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
 
 <section id="run">
   <h2>Run it yourself</h2>
-  <pre class="cmd">git clone https://github.com/chandanaroyal719-bot/agent-control-plane.git
+  <pre class="cmd">git clone https://github.com/ChandanaRoyalS/agent-control-plane.git
 cd agent-control-plane
 docker compose up -d --wait
 make attack-demo        # the transcript above, on your machine
 make audit-verify       # walk the chain it just wrote</pre>
   <p class="note">Or pull the published image, pinned:
-  <code>docker pull ghcr.io/chandanaroyal719-bot/agent-control-plane:1.0.0</code></p>
+  <code>docker pull ghcr.io/ChandanaRoyalS/agent-control-plane:1.0.0</code></p>
 </section>
 
 </main>
 
 <footer>
-  <a href="https://github.com/chandanaroyal719-bot/agent-control-plane">Repository</a> &middot;
-  <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/decisions/README.md">58 architecture decisions</a> &middot;
-  <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/blob/main/docs/THREAT_MODEL.md">Threat model</a> &middot;
-  <a href="https://github.com/chandanaroyal719-bot/agent-control-plane/releases/tag/v1.0.0">v1.0.0</a>
+  <a href="https://github.com/ChandanaRoyalS/agent-control-plane">Repository</a> &middot;
+  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/README.md">63 architecture decisions</a> &middot;
+  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/THREAT_MODEL.md">Threat model</a> &middot;
+  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.0.0">v1.0.0</a>
   <p style="margin-top:10px;color:var(--faint)">This page is generated from files in the
   repository. Nothing on it is a mock-up.</p>
 </footer>

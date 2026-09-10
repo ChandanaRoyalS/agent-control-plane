@@ -13,7 +13,7 @@ in doing this properly; it is not a product and has no operational track record.
 
 ## Reporting a vulnerability
 
-Open a [security advisory](https://github.com/chandanaroyal719-bot/agent-control-plane/security/advisories/new)
+Open a [security advisory](https://github.com/ChandanaRoyalS/agent-control-plane/security/advisories/new)
 rather than a public issue, and please allow time for a fix before disclosing.
 
 If you would rather not use GitHub advisories, open a normal issue containing

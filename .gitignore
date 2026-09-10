@@ -51,3 +51,8 @@ audit/
 *.swp
 .DS_Store
 config/audit-checkpoint.json
+
+# Where the Claude desktop app saves files it sends you. Not part of the
+# project, and its presence makes the mutation harnesses refuse to run --
+# they require a clean tree so `git checkout .` is a complete recovery.
+Claude outputs/

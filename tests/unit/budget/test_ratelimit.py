@@ -88,3 +88,46 @@ def test_cost_greater_than_one_is_debited() -> None:
     assert rl.check("alice", T0, cost=3.0)
     assert rl.check("alice", T0, cost=3.0) is False  # only 2 left
     assert rl.check("alice", T0, cost=2.0)
+
+
+def test_the_bucket_map_is_bounded() -> None:
+    """**Unbounded growth an authenticated caller chooses the size of.**
+
+    One entry per principal, created on first sight — and created by
+    `retry_after` and `remaining` too, which only read. An identity provider
+    that mints distinct subjects, or simply a tenant with many users, grew this
+    without limit. The result cache and the credential cache were both bounded
+    for exactly this reason; this was not (ADR 0063).
+    """
+    limiter = RateLimiter(capacity=5, refill_per_second=1, max_principals=64)
+
+    for index in range(1_000):
+        limiter.check(f"subject-{index}", now=0.0)
+
+    assert len(limiter._buckets) <= 64  # noqa: SLF001
+
+
+def test_reading_a_limit_cannot_grow_the_map_without_bound() -> None:
+    """`retry_after` and `remaining` create a bucket as a side effect of being
+    asked, which makes an unauthenticated-looking read a write."""
+    limiter = RateLimiter(capacity=5, refill_per_second=1, max_principals=32)
+
+    for index in range(500):
+        limiter.remaining(f"subject-{index}")
+        limiter.retry_after(f"subject-{index}")
+
+    assert len(limiter._buckets) <= 32  # noqa: SLF001
+
+
+def test_the_most_recently_used_principal_survives_eviction() -> None:
+    """Least-recently-used, not first-seen: the principal still calling is the
+    one whose bucket state is worth keeping, and evicting a bucket refunds
+    whoever held it."""
+    limiter = RateLimiter(capacity=5, refill_per_second=1, max_principals=8)
+    limiter.check("steady", now=0.0)
+
+    for index in range(4):
+        limiter.check(f"other-{index}", now=0.0)
+        limiter.check("steady", now=0.0)
+
+    assert "steady" in limiter._buckets  # noqa: SLF001

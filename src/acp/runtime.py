@@ -30,6 +30,7 @@ from acp.approvals.operators import (
     directory_from_settings,
     load_operators,
 )
+from acp.approvals.sqlite_store import SqliteApprovalStore
 from acp.audit import AuditLog, FileAuditSink
 from acp.audit.chain import Entry
 from acp.budget import CostTable, QuotaCounter, RateLimiter, load_costs
@@ -422,6 +423,20 @@ def build_approval_store(
             "operator_channel": bool(
                 settings.approval_operator_token or settings.approval_operators_file
             ),
+        },
+    )
+    if settings.approval_store_file is not None:
+        return SqliteApprovalStore(
+            settings.approval_store_file, max_pending=settings.approval_max_pending
+        )
+    logger.warning(
+        "approval.volatile_store",
+        extra={
+            "consequence": (
+                "a restart loses every pending approval; a caller whose call was "
+                "approved is told no"
+            ),
+            "remedy": "set ACP_APPROVAL_STORE_FILE to a path on a durable volume",
         },
     )
     return InMemoryApprovalStore(max_pending=settings.approval_max_pending)

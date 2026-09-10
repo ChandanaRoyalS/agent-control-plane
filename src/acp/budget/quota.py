@@ -19,6 +19,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from acp.budget.ratelimit import MAX_TRACKED_PRINCIPALS
+
 
 @dataclass
 class QuotaCounter:
@@ -34,6 +36,7 @@ class QuotaCounter:
     limit: float
     window_seconds: float
     # Per principal: (window index that the tally belongs to, amount spent in it).
+    max_principals: int = MAX_TRACKED_PRINCIPALS
     _spent: dict[str, tuple[int, float]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -46,6 +49,17 @@ class QuotaCounter:
 
     def _window_index(self, now: float) -> int:
         return math.floor(now / self.window_seconds)
+
+    def _make_room(self) -> None:
+        """Bound the tally an authenticated caller chooses the size of.
+
+        The same unbounded-growth shape as the rate limiter's bucket map, and
+        the same argument for eviction being safe: entries are only ever
+        *spend*, so dropping the oldest refunds somebody who has not called
+        since. See `acp.budget.ratelimit.MAX_TRACKED_PRINCIPALS` and ADR 0063.
+        """
+        while len(self._spent) >= self.max_principals:
+            self._spent.pop(next(iter(self._spent)))
 
     def _used(self, principal: str, now: float) -> float:
         """Spend recorded for ``principal`` in the window containing ``now`` —
@@ -64,6 +78,8 @@ class QuotaCounter:
         used = self._used(principal, now)
         if used + cost > self.limit:
             return False
+        if principal not in self._spent:
+            self._make_room()
         self._spent[principal] = (self._window_index(now), used + cost)
         return True
 

@@ -14,6 +14,7 @@ a real monotonic clock at the one call site; the logic here never depends on it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Final
 
 
 @dataclass
@@ -96,6 +97,15 @@ class TokenBucket:
         return self.capacity if not self._initialised else self.tokens
 
 
+MAX_TRACKED_PRINCIPALS: Final = 10_000
+"""How many principals a limiter keeps buckets for.
+
+Generous — a deployment with ten thousand simultaneously-active principals has
+other problems — and finite, because the number of distinct subjects an issuer
+can mint is not. See `_make_room` for why eviction is safe.
+"""
+
+
 class RateLimiter:
     """Per-principal token buckets sharing one capacity and refill rate.
 
@@ -106,10 +116,17 @@ class RateLimiter:
     something the concept needs to be demonstrated.
     """
 
-    def __init__(self, capacity: float, refill_per_second: float) -> None:
+    def __init__(
+        self,
+        capacity: float,
+        refill_per_second: float,
+        *,
+        max_principals: int = MAX_TRACKED_PRINCIPALS,
+    ) -> None:
         self._capacity = capacity
         self._refill_per_second = refill_per_second
         self._buckets: dict[str, TokenBucket] = {}
+        self._max_principals = max_principals
 
     @property
     def capacity(self) -> float:
@@ -125,9 +142,31 @@ class RateLimiter:
     def _bucket(self, principal: str) -> TokenBucket:
         bucket = self._buckets.get(principal)
         if bucket is None:
+            self._make_room()
             bucket = TokenBucket(capacity=self._capacity, refill_per_second=self._refill_per_second)
-            self._buckets[principal] = bucket
+        else:
+            # Touch: move to the end, so eviction below drops the least recently
+            # *used* principal rather than the earliest seen.
+            del self._buckets[principal]
+        self._buckets[principal] = bucket
         return bucket
+
+    def _make_room(self) -> None:
+        """Bound the map an authenticated caller chooses the size of (ADR 0063).
+
+        One entry per principal, created on first sight — and created by
+        `retry_after` and `remaining` too, which only *read*. An identity
+        provider that mints distinct subjects, or simply a tenant with many
+        users, grew this without limit. The result cache and the credential
+        cache were both bounded for exactly this reason; these two were not.
+
+        Evicting a bucket **refunds** whoever held it, which is why the bound is
+        generous and why the eviction order is least-recently-used: the principal
+        whose bucket is dropped is the one who has not called for longest, and
+        is therefore the one whose bucket was closest to full anyway.
+        """
+        while len(self._buckets) >= self._max_principals:
+            self._buckets.pop(next(iter(self._buckets)))
 
     def check(self, principal: str, now: float, cost: float = 1.0) -> bool:
         """Try to spend one unit of ``principal``'s budget at time ``now``.

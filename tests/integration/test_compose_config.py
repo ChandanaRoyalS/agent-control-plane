@@ -189,6 +189,12 @@ DELIBERATELY_OFF = {
         "friends). The issuers file is the multi-issuer path, and configuring "
         "both would leave two answers to the question of who is trusted."
     ),
+    "ACP_APPROVAL_STORE_FILE": (
+        "the compose stack demonstrates the gateway rather than operating it, "
+        "and a durable approval store is an operational choice with a volume "
+        "behind it (ADR 0063). The in-memory default warns at startup, which is "
+        "the behaviour a reader of this demo should see."
+    ),
     "ACP_SECRETS_FILE": (
         "both mock upstreams take an exchanged token (ADR 0028), so there is no "
         "static credential for the store to hold. Wiring an empty secrets store "

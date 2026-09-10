@@ -62,6 +62,22 @@ work here: the suite was measuring the wrong things confidently.
   with no record of it — the write is now ahead of the decision, and a failed
   write returns 503 with the call still held
   ([ADR 0062](docs/decisions/0062-an-approval-names-the-person-who-gave-it.md)).
+- **Two processes could corrupt the audit chain silently.** ADR 0050 said "one
+  process, one file" and nothing enforced it: both recovered the same head and
+  interleaved entries from it, so every entry after the collision had a `prev`
+  that did not match the line above — corrupt from that moment, reported as
+  tampering by `acp audit verify`, with nothing failing at write time. The sink
+  now takes an advisory exclusive lock and a second writer is refused at
+  startup.
+- **Approval eviction crossed tenants.** The in-memory store dropped the
+  globally-oldest record regardless of tenant or state, so 256 calls from any
+  gated principal pushed every other tenant's pending approvals out. Eviction is
+  now per tenant, and decided or consumed records are swept before a live one is
+  dropped.
+- **The rate-limiter and quota maps grew without bound**, one entry per
+  principal, created even by the read-only `retry_after` and `remaining`. Both
+  are now bounded at 10,000 principals, least-recently-used; eviction refunds
+  whoever held the entry.
 - **The screening character budget was per content block**, so a result with
   eight blocks bought eight times the allowance and the cost of inspecting a
   result was a number the upstream chose. It is now per result (ADR 0059).
@@ -98,6 +114,14 @@ work here: the suite was measuring the wrong things confidently.
   one constraint, an empty value list, a non-scalar constraint value or an
   invalid regular expression now fail at startup rather than behaving
   surprisingly at call time.
+
+### Added
+
+- `ACP_APPROVAL_STORE_FILE` puts pending approvals in SQLite so a restart does
+  not lose them. Unset keeps the in-memory store and warns at startup naming the
+  consequence. Still one process: two gateways with two files cannot resolve
+  each other's tokens, which is a different cut and stays in the threat model
+  ([ADR 0063](docs/decisions/0063-durability-and-the-bounds-nobody-enforced.md)).
 
 ### Fixed
 

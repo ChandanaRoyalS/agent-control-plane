@@ -172,6 +172,19 @@ class GatewaySettings(BaseSettings):
     human's yes can still be spent.
     """
 
+    approval_store_file: Path | None = None
+    """Where pending approvals live, so a restart does not lose them.
+
+    Unset means memory, which is what shipped and which is a **correctness**
+    cut rather than an accuracy one (ADR 0063): a gateway that answered
+    `input_required`, took a person's yes and then restarted tells the caller no
+    for a call that was approved. Set it to a path on the same volume as the
+    audit chain and a restart loses nothing.
+
+    Still one process. Two gateways with two files cannot resolve each other's
+    tokens, and that is a different sentence from the one this closes.
+    """
+
     approval_max_pending: int = Field(default=DEFAULT_MAX_PENDING, gt=0)
     """Ceiling on held requests before the oldest is evicted.
 

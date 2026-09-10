@@ -32,6 +32,7 @@ exists for tests and for a deployment that has consciously traded the guarantee.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -207,8 +208,44 @@ class FileAuditSink:
         # than everything since the last block filled.
         self._handle = path.open("a", encoding="utf-8", buffering=1)
         self._path = path
+        # Taken **after** the handle is open and **before** the chain head is
+        # trusted, so no second writer can be recovering the same tail
+        # concurrently. See `_take_exclusive_lock`.
+        self._take_exclusive_lock()
         self._chain = Chain(head=head, seq=seq)
         self._fsync = fsync
+
+    def _take_exclusive_lock(self) -> None:
+        """One writer per chain file, enforced rather than documented (ADR 0063).
+
+        ADR 0050 says "one process, one file" and nothing made it true. Two
+        processes opening the same path each recovered the same head and then
+        interleaved entries from that head — every entry after the first
+        collision carries a `prev` that does not match the line above it, so the
+        chain is corrupt from that moment, `acp audit verify` reports tampering,
+        and **nothing failed at write time**. A hash chain whose integrity claim
+        can be broken by starting the service twice is a claim about a
+        deployment convention, not about the file.
+
+        `flock` is advisory, per open file description, and released
+        automatically when the process dies — which is the behaviour wanted for
+        a crash: the next start takes the lock rather than finding a stale one
+        nobody can clear. It does not span NFS reliably, and that limit is in
+        the threat model rather than defended against here.
+        """
+        try:
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            self._handle.close()
+            msg = (
+                f"another process is already writing the audit chain at "
+                f"{str(self._path)!r}. Two writers interleave entries from one "
+                f"recovered head, which corrupts the chain silently — every "
+                f"entry after the collision has a `prev` that does not match the "
+                f"line above it, and nothing fails until `acp audit verify` "
+                f"reports tampering on a file nobody touched."
+            )
+            raise ConfigurationError(msg) from exc
 
     @property
     def blocking(self) -> bool:
@@ -256,4 +293,10 @@ class FileAuditSink:
         return self._path
 
     def close(self) -> None:
+        # Closing the descriptor releases the lock; doing it explicitly first
+        # keeps the two facts in one place for anybody reading this.
+        try:
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+        except (OSError, ValueError):  # pragma: no cover — already closed
+            pass
         self._handle.close()

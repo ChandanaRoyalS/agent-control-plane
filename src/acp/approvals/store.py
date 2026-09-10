@@ -78,9 +78,35 @@ class InMemoryApprovalStore:
         self._max_pending = max_pending
 
     def create(self, request: ApprovalRequest) -> None:
-        while len(self._pending) >= self._max_pending:
-            self._pending.pop(next(iter(self._pending)))
+        self._make_room(request.tenant)
         self._pending[request.token] = request
+
+    def _make_room(self, tenant: str | None) -> None:
+        """Evict **within this tenant**, and sweep spent records first (ADR 0063).
+
+        This used to drop the globally-oldest record regardless of tenant or
+        state. Two consequences, both bad and both cheap for an attacker: 256
+        calls from any principal whose policy gates a tool pushed *every other
+        tenant's* pending approvals out of the store, and decided or consumed
+        records — which are history, not pressure — competed for the same room
+        as live ones.
+
+        So: sweep what is finished, then, if this tenant is still at its
+        ceiling, drop that tenant's oldest pending request. One tenant filling
+        its own store costs its own users a re-ask, which is the cost the bound
+        was always meant to impose.
+        """
+        spent = [token for token, held in self._pending.items() if held.state is not State.PENDING]
+        for token in spent:
+            del self._pending[token]
+
+        mine = [
+            token
+            for token, held in self._pending.items()
+            if held.tenant == tenant and held.state is State.PENDING
+        ]
+        while len(mine) >= self._max_pending:
+            del self._pending[mine.pop(0)]
 
     def get(self, token: str) -> ApprovalRequest | None:
         return self._pending.get(token)

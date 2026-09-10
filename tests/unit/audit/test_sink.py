@@ -217,3 +217,52 @@ def test_the_memory_sink_chains_for_real() -> None:
 
     assert verify(sink.lines()).intact
     assert sink.length == 4
+
+
+def test_a_second_writer_on_one_chain_file_is_refused(tmp_path: Path) -> None:
+    """**ADR 0050 said "one process, one file" and nothing made it true.**
+
+    Two processes opening the same path each recover the same head and then
+    interleave entries from it. Every entry after the first collision carries a
+    `prev` that does not match the line above it, so the chain is corrupt from
+    that moment, `acp audit verify` reports tampering, and *nothing fails at
+    write time*. A hash chain whose integrity claim can be broken by starting
+    the service twice is a claim about a deployment convention, not about the
+    file.
+    """
+    path = tmp_path / "audit.jsonl"
+    first = FileAuditSink(path)
+
+    with pytest.raises(ConfigurationError, match="already writing"):
+        FileAuditSink(path)
+
+    first.close()
+
+
+def test_the_lock_is_released_when_the_sink_is_closed(tmp_path: Path) -> None:
+    """Otherwise a restart in the same process — a test, a reload — would find
+    a lock nobody can clear."""
+    path = tmp_path / "audit.jsonl"
+    FileAuditSink(path).close()
+
+    reopened = FileAuditSink(path)
+    reopened.close()
+
+
+def test_a_second_writer_never_gets_far_enough_to_corrupt_the_chain(tmp_path: Path) -> None:
+    """The property the refusal protects, asserted on the file rather than on
+    the exception: what one writer wrote still verifies."""
+    path = tmp_path / "audit.jsonl"
+    sink = FileAuditSink(path)
+    sink.append(record(1))
+    sink.append(record(2))
+
+    with pytest.raises(ConfigurationError):
+        FileAuditSink(path)
+
+    sink.append(record(3))
+    sink.close()
+
+    head, seq = recover(path)
+    assert seq == 3
+    assert head

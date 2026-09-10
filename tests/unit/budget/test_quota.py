@@ -77,3 +77,15 @@ def test_a_non_positive_limit_is_rejected() -> None:
 def test_a_non_positive_window_is_rejected() -> None:
     with pytest.raises(ValueError, match="window must be positive"):
         QuotaCounter(limit=1, window_seconds=0)
+
+
+def test_the_tally_is_bounded() -> None:
+    """The same unbounded-growth shape as the rate limiter's bucket map, and
+    the same argument for eviction being safe: entries are only ever spend, so
+    dropping the oldest refunds somebody who has not called since (ADR 0063)."""
+    counter = QuotaCounter(limit=100, window_seconds=60, max_principals=64)
+
+    for index in range(1_000):
+        counter.check(f"subject-{index}", now=0.0, cost=1.0)
+
+    assert len(counter._spent) <= 64  # noqa: SLF001

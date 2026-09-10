@@ -1,0 +1,49 @@
+---
+why: "a decision record full of JSON literals, policy fragments and type names"
+source: repository
+hard: true
+---
+ADR 0031 introduced argument-level rules with one worked example: *"support
+agents may delete records, but a delete against a production dataset needs a
+human."* An external review of v1.0.0 wrote that rule and then walked past it
+three times.
+
+```yaml
+- name: hold-production
+  effect: require_approval
+  tools: [db__delete]
+  args: {dataset: [production]}
+- name: allow-delete
+  effect: allow
+  tools: [db__delete]
+```
+
+```
+{"dataset": "production"}            -> held for a human        ✔
+{"dataset": ["production"]}          -> allowed, nobody asked   ✘
+{"dataset": {"name": "production"}}  -> allowed, nobody asked   ✘
+```
+
+And on a numeric rule, `deny ... args: {limit: ["1000"]}`:
+
+```
+{"limit": 1000}    -> denied      ✔
+{"limit": 1000.0}  -> allowed     ✘
+```
+
+The implementation was `str(arguments[name]) not in allowed`. The comment above
+it said matching by string form "keeps the exact-match model simple and
+predictable across types", and a test named
+`test_argument_values_compare_by_string_form` asserted it. All three were
+describing the same mistake in agreeable language.
+
+A tool argument is a **JSON value**. A constraint is a **YAML value**. `str()`
+is not a comparison between them — it is a rendering of one of them into a form
+where `1000.0`, `True` and `['prod']` are strings that happen not to equal the
+string the author typed. Worse, the failures are *directional*: every one of
+them makes a restrictive rule silently not fire, and restrictive rules exist to
+sit in front of broad allows. A miss is not a random error; it is always the
+call getting through.
+
+`bool` deserves its own line. Python evaluates `True == 1` as true, so a matcher
+that reached for `==` after fixing `str()` would have traded one type confusion

@@ -1,0 +1,49 @@
+---
+why: "the ADR explaining the content-block bypass, quoting the payload shapes it describes"
+source: repository
+hard: true
+---
+An external review reproduced a bypass in ten minutes. The same payload — a
+right-to-left override plus a base64 run decoding to an instruction — was
+withheld by an enforcing firewall when it arrived as a text block, and relayed
+untouched when it arrived as an embedded resource:
+
+```
+{"type":"text",    "text": payload}                 -> refused, 2 triggers
+{"type":"resource","resource":{"text": payload}}    -> served,  0 triggers, 0 chars scanned
+```
+
+`Firewall.inspect` screened `[block.text for block in result.content]`. An
+embedded resource carries its text at `resource.text`, so the screener saw
+nothing, the decision layer saw a clean screening, and the fence announced the
+block as "1 resource" — a label describing content nobody had inspected.
+
+The comment at that line said an image is bytes and this layer has no opinion
+about bytes, which is true and was never the problem. The problem is that the
+same line treated *every* field it had no model for as though it were bytes.
+The gap was not in the reasoning about images; it was in the scope of "text".
+
+Three further channels were open for the same reason: `structuredContent` (a
+top-level result field the model reads), `annotations`, and any content type
+added by a future spec revision — which the permissive parse of ADR 0006 turns
+into a dictionary entry rather than an error, and therefore into an unscreened
+one.
+
+## Decision
+
+**Screen every string in the result, and exclude by name what must be
+excluded.** `acp.firewall.content.screenable_strings` walks the parsed result
+and returns every string leaf. The exclusion list is two keys — `data` and
+`blob`, the base64 payloads of image, audio and binary resource blocks — matched
+by key at any depth rather than by the block's declared `type`, because the type
+is a string the upstream chose and a security decision must not depend on it.
+
+Everything else is screened, `uri` and `mimeType` included. A resource link's
+URI is a place a client may be induced to fetch, and it was previously invisible
+to `disallowed_url`.
+
+The walk is bounded by depth (8) and string count (1024), and the screener's
+character budget became **the result's rather than each block's**. That last
+change is the same bug in a different dimension: a per-block allowance meant a
+result with eight blocks bought eight times the screening budget, so the cost of
+inspecting a result was a number the upstream picked. Hitting any of the three

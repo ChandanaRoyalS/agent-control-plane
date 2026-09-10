@@ -1,8 +1,8 @@
 # Architecture decisions
 
-Sixty-four decisions, each with the alternatives that were rejected and why.
+Sixty-five decisions, each with the alternatives that were rejected and why.
 
-**Start with the six at the bottom.** 0059 to 0064 were written after an
+**Start with the six at the bottom.** 0059 to 0065 were written after an
 external review of v1.0.0 reproduced two bypasses and a denial-of-service that
 all 1,898 tests had passed. They are the most useful ones here, because a
 decision made under a plan and a decision made after being shown you were wrong
@@ -158,6 +158,7 @@ denial-of-service path against v1.0.0.
 | [0062](0062-an-approval-names-the-person-who-gave-it.md) | the row said somebody with the credential approved it, wrote the live token into the log, and committed before it recorded |
 | [0063](0063-durability-and-the-bounds-nobody-enforced.md) | four limits this repository had written down and had not made true |
 | [0064](0064-the-corpus-could-not-see-what-it-was-not-shown.md) | the corpus was written by the person who wrote the detectors, one day after them |
+| [0065](0065-the-hardest-benign-document-is-the-one-describing-the-attack.md) | the firewall screened the ADRs describing it, and withheld none of them |
 
 ## The format
 

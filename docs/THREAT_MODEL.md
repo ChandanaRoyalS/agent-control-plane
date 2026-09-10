@@ -214,7 +214,7 @@ documents, 2,000 bootstrap resamples (seed 20260812):
 |---|---|---|
 | exfiltration | 5/5 | 0 |
 | obfuscation | 10/11 | **6** |
-| direct_override | 8/10 | 0 |
+| direct_override | 9/10 | 0 |
 | tool_confusion | 3/4 | 0 |
 | boundary_escape | 1/4 | 0 |
 | **delayed_multi_step** | **0/4** | 0 |
@@ -231,15 +231,22 @@ Precision, on the flagged set:
 | firewall family | precision | interval |
 |---|---|---|
 | obfuscation | 77% (10/13) | [54%, 100%] |
-| direct_override | 63% (12/19) | [42%, 84%] |
-| exfiltration | 42% (5/12) | [17%, 67%] |
+| direct_override | 62% (13/21) | [43%, 81%] |
+| exfiltration | 38% (5/13) | [15%, 69%] |
 | tool_confusion | 38% (3/8) | **[12%, 75%]** |
 
 **Under half of what this firewall flags is an attack**, and `tool_confusion`'s
-lower bound is *zero*. That is survivable only because of the row that matters
-most — **0 of 106 benign documents withheld** — so the bar between "found
-something" and "acted on it" is carrying the entire deployment. Any proposal to
-lower that bar now has a number to argue against.
+lower bound is 12%. That is survivable only because of the row that matters
+most — **0 of 111 benign documents withheld**, an exact upper bound of 2.7% —
+so the bar between "found something" and "acted on it" is carrying the entire
+deployment. Any proposal to lower that bar now has a number to argue against.
+
+Five of those 111 are this repository's own ADRs about prompt injection,
+including the one that lists thirteen working evasions verbatim in a table
+(ADR 0065). Two of the five flag and neither can withhold, which is the
+demotion in ADR 0039 demonstrated on a document class that did not exist when
+it was decided: security documentation quotes the attacks it describes, and a
+detector that withheld it would refuse the document explaining why it exists.
 
 Only two detectors can withhold anything at all: bidirectional overrides, and
 base64 that decodes to an instruction. `instruction_override` and the

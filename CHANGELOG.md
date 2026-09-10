@@ -120,6 +120,20 @@ work here: the suite was measuring the wrong things confidently.
   the headline becomes `[≤2.8%]`, and — pointing the other way — 5-of-5
   exfiltration recall becomes `[≥54.9%]` rather than a bare 100%.
 
+- **The firewall now screens this repository's own documentation about it.**
+  Five excerpts from ADRs 0059-0064 joined the benign corpus, including the one
+  listing thirteen working evasions verbatim in a table. **0 of 111 withheld**
+  (exact upper bound 2.7%); two flag, and neither detector can withhold — which
+  is ADR 0039's demotion holding against a document class that did not exist
+  when it was decided. Flag rate 19.8% → 20.7%
+  ([ADR 0065](docs/decisions/0065-the-hardest-benign-document-is-the-one-describing-the-attack.md)).
+- **Override patterns for French, Spanish, German, Portuguese and Italian**,
+  accents optional. 2.0.0 left this open because the false-positive cost across
+  the i18n corpus had not been measured; it has been, and it is **zero new
+  findings across all eight i18n documents**. `direct_override` recall 80% →
+  90%. Japanese, Korean, Arabic and Hindi still match nothing, with a test
+  asserting it so the gap stays visible.
+
 ### Changed — breaking
 
 - **`ACP_APPROVAL_OPERATOR_TOKEN` no longer starts a gateway.** A single shared

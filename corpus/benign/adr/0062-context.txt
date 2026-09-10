@@ -1,0 +1,49 @@
+---
+why: "an ADR about approval records, containing a credential field name and an audit row"
+source: repository
+hard: true
+---
+`build_decide`'s docstring says the row an investigation wants is *"who approved
+the delete, and what did they say they had checked"*. The row it wrote could
+answer the second half:
+
+```python
+audit.record(
+    AuditCategory.APPROVAL,
+    "approval.decided",
+    subject=decided.subject,
+    tool=decided.tool,
+    rule=decided.rule,
+    outcome=...,
+    reason=answer.reason or None,
+    detail={"fingerprint": decided.fingerprint, "request_state": decided.token},
+)
+```
+
+Three defects, in ascending order of seriousness.
+
+**No operator identity.** The channel is authenticated by one shared bearer
+token (`ACP_APPROVAL_OPERATOR_TOKEN`), so the record says that somebody holding
+it said yes. Where four people hold that credential, the chain narrows an
+incident to four people, and the free-text `reason` — written by whoever is
+explaining themselves — is the only thing distinguishing them. For the one row
+in this system describing a thing a *person* did, that is the wrong answer.
+
+**The live approval token is in the record.** `request_state` is `decided.token`:
+a 256-bit credential that is still spendable at the moment it is written, in
+clear, into a file that outlives the approval it grants, under a key the
+redactor's fragment list does not match. The fingerprint next to it already
+identifies the call durably and grants nothing.
+
+**The decision was committed before it was recorded.** `store.decide(...)` ran,
+then `audit.record(...)`. A sink that raises therefore leaves a **live approval
+with no record of it** — the exact outcome an audit log exists to make
+impossible. And `record` rather than `arecord` means an `fsync` on the event
+loop, which is the bug ADR 0053 removed from the request path and left here, and
+means `_publish` never runs, so approvals never appeared on the trace console.
+
+## Decision
+
+**The credential identifies a named operator, and the name goes in the chain.**
+`ACP_APPROVAL_OPERATORS_FILE` carries one credential per person;
+`OperatorDirectory.resolve` returns *who* rather than *whether*, comparing every

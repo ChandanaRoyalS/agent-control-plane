@@ -1,0 +1,49 @@
+---
+why: "a tenancy ADR naming issuers, subjects and a cache key version"
+source: repository
+hard: true
+---
+ADR 0051 made a tenant an *issuer registration* rather than a claim, and that
+boundary is right: a label the gateway stamps after verification cannot be
+forged by a token, and `tenancy.py` falls to `DENY_ALL` for an unknown label
+rather than to the default policy.
+
+What ADR 0051 did not do is make the label **mandatory**. It is optional, and
+`config/issuers.yaml.example` — the file an operator copies — registered two
+identity providers with no labels at all:
+
+```yaml
+issuers:
+  - issuer: https://idp.corp.example/realms/acp
+    audience: agent-control-plane
+  - issuer: https://idp.partner.example/
+    audience: agent-control-plane-partner
+```
+
+Both principals then carry `tenant=None`, and nothing downstream of the
+validator looks at which issuer a principal came from:
+
+| what | keyed on | sees the issuer |
+|---|---|---|
+| policy rule matching | `principal.subject` | no |
+| result cache | `(tenant, subject, actor, upstream, tool, args)` | no |
+| budget account | `[tenant, subject]` | no |
+
+So the partner identity provider mints `sub: cfo@corp`, and that principal
+receives the corporate CFO's policy grants, the corporate CFO's cached results
+and the corporate CFO's budget. ADR 0051's own text describes this collision —
+"two identity providers each have an alice" — and closed it only for
+deployments that opted in.
+
+**Isolation that has to be opted into is isolation the shipped configuration
+does not have.** The review that found this did not need to construct an exotic
+deployment; it read the example file.
+
+## Decision
+
+Two changes, because there are two distinct collisions.
+
+**1. Between tenants: the label is mandatory as soon as there is a second
+issuer.** One issuer owns its whole subject namespace and there is nothing to
+collide with, so `tenant` stays optional there. With two or more, every
+registration names its tenant or the gateway refuses to start — checked on the

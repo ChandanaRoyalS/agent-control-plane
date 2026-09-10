@@ -1,7 +1,7 @@
 {
   "benign": {
-    "flagged": 21,
-    "total": 106,
+    "flagged": 23,
+    "total": 111,
     "withheld": 0
   },
   "deployment": "6 allowed hosts, 8 tools in the catalogue",
@@ -20,7 +20,7 @@
       "withheld": 0
     },
     "direct_override": {
-      "detected": 8,
+      "detected": 9,
       "total": 10,
       "withheld": 0
     },
@@ -47,12 +47,12 @@
   },
   "reported": {
     "direct_override": {
-      "attack_hits": 12,
-      "benign_hits": 7
+      "attack_hits": 13,
+      "benign_hits": 8
     },
     "exfiltration": {
       "attack_hits": 5,
-      "benign_hits": 7
+      "benign_hits": 8
     },
     "obfuscation": {
       "attack_hits": 10,

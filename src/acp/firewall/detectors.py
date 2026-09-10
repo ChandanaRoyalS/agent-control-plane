@@ -74,6 +74,41 @@ _OVERRIDE_PATTERNS: Final[tuple[tuple[str, Confidence], ...]] = (
     (r"\[/?INST\]|<</?SYS>>", Confidence.MEDIUM),
     (r"(?:^|\n)\s*(?:Human|Assistant|System)\s*:", Confidence.LOW),
     (r"\bBEGIN\s+SYSTEM\s+PROMPT\b", Confidence.MEDIUM),
+    # Five languages, override verb plus object. The patterns above are English
+    # and a French instruction reads exactly as well to a model — which is the
+    # one evasion from the 2.0.0 review that was left open, on the grounds that
+    # the false-positive cost across the i18n corpus had not been measured. It
+    # has been now: these fire on none of the eight i18n benign documents, and
+    # the French one is the direct overlap (ADR 0065).
+    #
+    # Accents optional throughout, because a document that lost them in transit
+    # still reads as the instruction it is.
+    (
+        r"(?:ignore[rz]?|oubli(?:ez|er))\s+(?:les\s+|toutes\s+les\s+|vos\s+)?"
+        r"(?:instructions?|consignes?|directives?)\s+"
+        r"(?:pr[eé]c[eé]dentes?|ant[eé]rieures?)",
+        Confidence.LOW,
+    ),
+    (
+        r"(?:ignora|ignore|olvida)\s+(?:las\s+|todas\s+las\s+|tus\s+)?"
+        r"(?:instrucciones|indicaciones)\s+(?:anteriores|previas)",
+        Confidence.LOW,
+    ),
+    (
+        r"(?:ignorier|vergiss|missachte)\w*\s+(?:die\s+|alle\s+)?"
+        r"(?:vorherigen|vorigen|bisherigen)\s+(?:Anweisungen|Anleitungen)",
+        Confidence.LOW,
+    ),
+    (
+        r"(?:ignore|esque[çc]a|desconsidere)\s+(?:as\s+|todas\s+as\s+)?"
+        r"(?:instru[çc][õo]es|orienta[çc][õo]es)\s+(?:anteriores|pr[eé]vias)",
+        Confidence.LOW,
+    ),
+    (
+        r"(?:ignora|dimentica)\s+(?:le\s+|tutte\s+le\s+)?"
+        r"(?:istruzioni|indicazioni)\s+(?:precedenti|anteriori)",
+        Confidence.LOW,
+    ),
     (
         # `do not`, `don't`, `dont`, and the curly apostrophe a word processor
         # produces — four spellings of one sentence.

@@ -6,7 +6,7 @@ and the systems they are allowed to touch.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**2,007 tests · 94% coverage · 64 architecture decisions · 4 mutation harnesses
+**2,013 tests · 94% coverage · 65 architecture decisions · 4 mutation harnesses
 proving 18 deliberate breakages are caught**
 
 ## How this was built
@@ -110,11 +110,11 @@ measured under.
 
 | | measured | where |
 |---|---|---|
-| benign documents **withheld** | **0 of 106** | [ADR 0047](docs/decisions/0047-a-baseline-not-a-threshold.md) |
-| benign documents flagged | 19.8% [13–27%] | ADR 0047 |
+| benign documents **withheld** | **0 of 111** | [ADR 0047](docs/decisions/0047-a-baseline-not-a-threshold.md) |
+| benign documents flagged | 20.7% [14–29%] | ADR 0047 |
 | attack recall — exfiltration | 100% | ADR 0047 |
 | attack recall — `delayed_multi_step`, `plain_assertion` | **0%** | [THREAT_MODEL](docs/THREAT_MODEL.md) |
-| precision, worst family | 38%, interval **[0–75%]** | ADR 0047 |
+| precision, worst family | 38%, interval **[12–75%]** | ADR 0047 |
 | gateway overhead, cache miss | **6.7-7.2x** a direct call (+21 to +33 ms) p50 | [ADR 0054](docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md) |
 | gateway overhead, cache hit | 3.2-3.4x (+9 to +16 ms) p50 | ADR 0054 |
 | of which the audit `fsync` | 5.8 ms | ADR 0054 |
@@ -237,7 +237,7 @@ solo work. `make check` passing locally means CI passes.
 
 ## Architecture decisions
 
-Sixty-four decisions that required thought are recorded in
+Sixty-five decisions that required thought are recorded in
 [`docs/decisions/`](docs/decisions/). The ones worth reading first are the ones
 where the measurement disagreed with the plan — or where somebody else showed
 the plan was wrong:

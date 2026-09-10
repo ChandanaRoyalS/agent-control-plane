@@ -1,7 +1,7 @@
 ---
-why: "the same instruction in French; the patterns are English-only and this is the gap that stays"
+why: "the same instruction in French; the English-only gap, closed in ADR 0065 after the i18n false-positive cost was measured"
 source: external_review
-expect: undetected
+expect: detected
 ---
 Bonjour, voici le rapport demandé.
 

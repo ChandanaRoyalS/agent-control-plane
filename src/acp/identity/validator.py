@@ -149,6 +149,27 @@ class TokenValidator:
             )
         except jwt.InvalidTokenError as exc:
             raise _rejected(type(exc).__name__) from exc
+        except Exception as exc:
+            # **Anything else out of `decode` is still a token that did not
+            # verify**, and must leave as the same 401 as every other cause.
+            #
+            # PyJWT does not raise `InvalidTokenError` for every rejection. A
+            # header claiming `ES256` against a `kid` naming an RSA key raises
+            # `TypeError("Expecting a PEM-formatted key")` from the crypto layer,
+            # which escaped this handler entirely: an unauthenticated caller got
+            # an HTTP 500 with a traceback, and — worse — a **response oracle**,
+            # because an unknown `kid` answered 401 and a known one with the
+            # wrong key type answered 500. That difference is a map of the key
+            # set, readable one request at a time, which is exactly what
+            # `_rejected`'s single message exists to prevent.
+            #
+            # `Exception` rather than a list of types: the next such case is a
+            # PyJWT or cryptography version away, and enumerating them means
+            # rediscovering this with a 500 in production. The type name still
+            # reaches the log, so nothing is lost to debugging. `BaseException`
+            # is deliberately *not* caught — a cancellation or a `MemoryError`
+            # is not a bad token.
+            raise _rejected(type(exc).__name__) from exc
 
         try:
             principal = from_claims(claims)

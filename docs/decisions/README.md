@@ -1,8 +1,8 @@
 # Architecture decisions
 
-Sixty-eight decisions, each with the alternatives that were rejected and why.
+Sixty-nine decisions, each with the alternatives that were rejected and why.
 
-**Start with the six at the bottom.** 0059 to 0068 were written after an
+**Start with the six at the bottom.** 0059 to 0069 were written after an
 external review of v1.0.0 reproduced two bypasses and a denial-of-service that
 all 1,898 tests had passed. They are the most useful ones here, because a
 decision made under a plan and a decision made after being shown you were wrong
@@ -162,6 +162,7 @@ denial-of-service path against v1.0.0.
 | [0066](0066-a-buffer-defeats-the-rewind-that-protects-the-chain.md) | one transient disk error made the chain report tampering on itself, and a test covered it |
 | [0067](0067-record-the-dispatch-before-the-dispatch.md) | "a call this gateway cannot record does not happen" was a claim the request path did not keep |
 | [0068](0068-a-guard-matches-loosely-a-grant-matches-exactly.md) | a deny rule was bypassable by pressing shift, and normalising everywhere would have been worse |
+| [0069](0069-any-failure-to-verify-is-a-rejection.md) | a key-type mismatch answered an unauthenticated caller with a 500, and a map of the key set |
 
 ## The format
 

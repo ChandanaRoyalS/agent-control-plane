@@ -91,6 +91,15 @@ number. A control with none of those is listed in §6 instead.
 
 ### 5.1 Identity and credentials
 
+**Every rejection is the same rejection.** A caller learns that their token is
+not valid and nothing else; the cause travels in `details` for the operational
+log and is stripped before the response is written. This was briefly untrue: a
+header claiming `ES256` against an RSA key raised `TypeError` from the crypto
+layer rather than `InvalidTokenError`, escaped the handler, and answered an
+unauthenticated caller with an HTTP 500 — so an unknown `kid` gave 401 and a
+known one with the wrong key type gave 500, mapping the key set one request at
+a time. Any exception out of `decode` is now a rejection (ADR 0069).
+
 - **The caller's token is never forwarded upstream.** Asserted across every
   wrapper composition, protocol method and credential shape, with each outbound
   request searched *whole* rather than one header inspected (ADR 0023).

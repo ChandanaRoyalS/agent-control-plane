@@ -169,6 +169,15 @@ work here: the suite was measuring the wrong things confidently.
   before it decides anything
   ([ADR 0068](docs/decisions/0068-a-guard-matches-loosely-a-grant-matches-exactly.md)).
 
+- **An algorithm/key-type mismatch returned an unauthenticated HTTP 500 with a
+  traceback — and a response oracle.** PyJWT raises `TypeError` rather than
+  `InvalidTokenError` when a header claims `ES256` against an RSA key, so it
+  escaped the handler that turns a bad token into a 401. An unknown `kid`
+  answered 401 and a known `kid` with the wrong key type answered 500, which
+  maps the key set one request at a time — exactly what the single rejection
+  message exists to prevent. Any exception out of `decode` is now a rejection
+  ([ADR 0069](docs/decisions/0069-any-failure-to-verify-is-a-rejection.md)).
+
 ### Changed — breaking
 
 - **`ACP_APPROVAL_OPERATOR_TOKEN` no longer starts a gateway.** A single shared

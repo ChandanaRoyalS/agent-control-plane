@@ -18,6 +18,7 @@ from typing import Any
 import anyio
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from acp.exceptions import AuthenticationError, ConfigurationError
 from acp.identity.issuers import single_issuer
@@ -333,3 +334,51 @@ def test_the_token_itself_never_appears_in_the_error(keypair: Keypair) -> None:
     rendered = str(caught.value.to_jsonrpc_error())
     assert token not in rendered
     assert token[:24] not in rendered
+
+
+def test_an_algorithm_that_the_key_cannot_serve_is_a_rejection_not_a_crash(
+    keypair: Keypair,
+) -> None:
+    """**A 500 with a traceback, to an unauthenticated caller.**
+
+    PyJWT does not raise `InvalidTokenError` for every rejection. A header
+    claiming `ES256` verified against an RSA key raises
+    `TypeError("Expecting a PEM-formatted key")` from the crypto layer, which
+    escaped the handler that turns a bad token into a 401.
+
+    The crash is the smaller half. The larger half is the **response oracle**:
+    an unknown `kid` answered 401 and a known `kid` with the wrong key type
+    answered 500, so the difference maps the key set one request at a time —
+    which is precisely what `_rejected`'s single message exists to prevent.
+    """
+    signing = ec.generate_private_key(ec.SECP256R1())
+    token = jwt.encode(claims(), signing, algorithm="ES256", headers={"kid": keypair.kid})
+
+    checker = validator(keypair, algorithms=("RS256", "ES256"))
+
+    with pytest.raises(AuthenticationError):
+        run(lambda: checker.validate(token))
+
+
+def test_every_rejection_carries_the_same_message(keypair: Keypair) -> None:
+    """The property the oracle broke. A caller learns that the token is not
+    valid and nothing else — the cause travels in `details` for the log and is
+    stripped before the response is written."""
+    signing = ec.generate_private_key(ec.SECP256R1())
+    checker = validator(keypair, algorithms=("RS256", "ES256"))
+
+    rejections = []
+    for token in (
+        keypair.sign(claims(exp=1)),  # expired
+        keypair.sign(claims(aud="somebody-else")),  # wrong audience
+        keypair.sign(claims(iss="https://elsewhere.test")),  # wrong issuer
+        jwt.encode(
+            claims(), signing, algorithm="ES256", headers={"kid": keypair.kid}
+        ),  # wrong type
+        "not-a-token-at-all",
+    ):
+        with pytest.raises(AuthenticationError) as raised:
+            run(lambda t=token: checker.validate(t))
+        rejections.append(str(raised.value))
+
+    assert len(set(rejections)) == 1, f"the message varies by cause: {set(rejections)}"

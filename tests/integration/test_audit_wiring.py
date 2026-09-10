@@ -18,13 +18,18 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+import httpx
 import pytest
 
 from acp.audit import AuditLog, FileAuditSink, verify
+from acp.audit.sink import MemoryAuditSink
 from acp.config import GatewaySettings
 from acp.exceptions import AuditUnavailableError
+from acp.mocks import mock_a, mock_b
 from acp.policy import Effect, Policy, Rule
 from acp.runtime import build_audit_log
+from acp.upstream.client import UpstreamClient
+from acp.upstream.config import UpstreamConfig
 
 from ..tokens import Keypair, claims
 from .helpers import authenticated_gateway, call_gateway, post_gateway
@@ -138,8 +143,10 @@ def test_opting_out_of_fail_closed_is_loud(
 def test_an_allowed_call_is_chained(
     keypair: Keypair, tmp_path: Path, open_audit: Callable[[Path], AuditLog]
 ) -> None:
-    """**The one the unit tests cannot reach.** Two records, because "alice was
-    allowed to search" and "the search ran" are different facts."""
+    """**The one the unit tests cannot reach.** Three records, because "alice
+    was allowed to search", "the gateway dispatched it" and "it came back" are
+    three different facts — and only the first two can be chained *before* they
+    are true, which is what ADR 0050's claim requires and ADR 0067 restored."""
     path = tmp_path / "audit.jsonl"
 
     async def _run() -> None:
@@ -151,9 +158,12 @@ def test_an_allowed_call_is_chained(
     anyio.run(_run)
 
     written = records(path)
-    assert [r["category"] for r in written] == ["authorization", "tool_call"]
+    assert [r["category"] for r in written] == ["authorization", "tool_call", "tool_call"]
     assert written[0]["outcome"] == "allowed"
-    assert written[1]["outcome"] == "completed"
+    # Chained before the upstream was touched: an unwritable record refuses the
+    # call rather than leaving the side effect done and the chain silent.
+    assert written[1]["outcome"] == "allowed"
+    assert written[2]["outcome"] == "completed"
 
 
 def test_the_chain_the_gateway_writes_verifies(
@@ -177,7 +187,8 @@ def test_the_chain_the_gateway_writes_verifies(
 
     result = verify(path.read_text().splitlines())
     assert result.intact
-    assert result.entries == 6
+    # Three per call: authorized, dispatched, completed (ADR 0067).
+    assert result.entries == 9
 
 
 def test_a_denial_is_chained(
@@ -278,3 +289,69 @@ def test_a_call_that_cannot_be_recorded_is_refused(keypair: Keypair, tmp_path: P
 
     assert payload["error"]["code"] == AuditUnavailableError.code
     assert "audit" not in json.dumps(payload).lower()
+
+
+def test_a_call_that_cannot_be_recorded_never_reaches_the_upstream(
+    keypair: Keypair,
+) -> None:
+    """**The half of the guarantee the refusal test does not cover.**
+
+    ADR 0050's claim is that a call this gateway cannot record does not happen.
+    The test above proves the *caller* is refused; it says nothing about whether
+    the side effect already occurred, and until ADR 0067 it had. The tool-call
+    record was chained after dispatch, so an unwritable record meant the
+    upstream had run, the caller was told the call failed, and the chain was
+    silent about the whole thing — the worst of the three outcomes.
+
+    Counted at the transport and filtered to `tools/call`, so it observes the
+    dispatch itself rather than the catalogue fetches the registry makes to
+    resolve a name — those are the same URL and are not a side effect.
+    """
+    dispatched: list[str] = []
+
+    def counting(app: Any) -> httpx.AsyncClient:
+        async def transport(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content or b"{}")
+            if body.get("method") == "tools/call":
+                dispatched.append(str(body.get("params", {}).get("name")))
+            inner = httpx.ASGITransport(app=app)
+            return await inner.handle_async_request(request)
+
+        return httpx.AsyncClient(transport=httpx.MockTransport(transport))
+
+    class BrokenOnToolCall:
+        head = "0" * 64
+        length = 0
+        blocking = True
+
+        def append(self, record: Any) -> Any:
+            # The authorization record is allowed through, so the failure lands
+            # exactly on the write that guards dispatch.
+            if str(record.category) == "tool_call":
+                raise OSError("no space left on device")
+            return MemoryAuditSink().append(record)
+
+        def close(self) -> None:
+            """Required by the protocol."""
+
+    clients = [
+        UpstreamClient(UpstreamConfig(name="mock-a", url="http://mock/mcp"), counting(mock_a.app)),
+        UpstreamClient(UpstreamConfig(name="mock-b", url="http://mock/mcp"), counting(mock_b.app)),
+    ]
+
+    async def _run() -> dict[str, Any]:
+        async with authenticated_gateway(
+            keypair,
+            token=keypair.sign(claims()),
+            policy=ALLOW,
+            audit=AuditLog(BrokenOnToolCall(), required=True),
+            clients=clients,
+        ) as agent:
+            return await call_gateway(
+                agent, "tools/call", {"name": TOOL, "arguments": {"query": "x"}}
+            )
+
+    payload = anyio.run(_run)
+
+    assert payload["error"]["code"] == AuditUnavailableError.code
+    assert dispatched == [], f"the upstream was dispatched to anyway: {dispatched}"

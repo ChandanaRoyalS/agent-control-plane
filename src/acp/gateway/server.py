@@ -569,6 +569,17 @@ def build_server(
                 # replayed from a cache entry is a per-entry one (ADR 0037).
                 return to_mcp_call_tool_result(_framed(held, params.name, provenance))
 
+        # **Chained before the upstream is touched.** ADR 0050's claim is that a
+        # call this gateway cannot record does not happen, and until now the
+        # tool-call record was written *after* dispatch: a failed write left the
+        # side effect done and the chain silent about it. With no policy loaded
+        # there was no authorization record either, so a call could reach an
+        # upstream having produced no audit rows at all.
+        #
+        # An unwritable record now refuses the call instead, before anything
+        # external has happened. See ADR 0067 for what this costs.
+        await _audit_call(audit, principal, params.name, AuditOutcome.ALLOWED)
+
         try:
             result = await registry.call_tool(params.name, arguments)
         except ACPError as exc:
@@ -577,10 +588,12 @@ def build_server(
             )
             raise to_mcp_error(exc) from exc
 
-        # A call that reached an upstream and came back. Separate from the
-        # authorization record above on purpose: "alice was allowed to search"
-        # and "the search ran" are different facts, and a cache hit or a held
-        # approval makes the first true while the second never happens.
+        # And the outcome, once it is known. Two records rather than one,
+        # because "the gateway dispatched this" and "it came back" are different
+        # facts and only the first can be recorded before it is true. Separate
+        # from the authorization record above for the same reason: "alice was
+        # allowed to search" is true even when a cache hit or a held approval
+        # means the search never runs.
         await _audit_call(audit, principal, params.name, AuditOutcome.COMPLETED)
 
         # Screened on the miss path only. A cache hit was screened before it was

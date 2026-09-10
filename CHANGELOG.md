@@ -147,6 +147,17 @@ work here: the suite was measuring the wrong things confidently.
   failure tests fail against the previous implementation
   ([ADR 0066](docs/decisions/0066-a-buffer-defeats-the-rewind-that-protects-the-chain.md)).
 
+- **"A call this gateway cannot record does not happen" was a claim the request
+  path did not keep.** `on_call_tool` called the upstream and chained
+  `tool.called` afterwards, so a failed audit write left the side effect done,
+  the caller told it failed, and the chain silent — and with no policy loaded, a
+  call could reach an upstream having produced no audit rows at all. The
+  dispatch is now chained before the upstream is touched. Three records per
+  call: authorized, dispatched, completed. **This costs one more `fsync` per
+  call** — roughly 28% of the gateway's fixed cost by ADR 0054's numbers, not
+  re-measured here
+  ([ADR 0067](docs/decisions/0067-record-the-dispatch-before-the-dispatch.md)).
+
 ### Changed — breaking
 
 - **`ACP_APPROVAL_OPERATOR_TOKEN` no longer starts a gateway.** A single shared

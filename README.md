@@ -6,7 +6,7 @@ and the systems they are allowed to touch.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**2,017 tests · 94% coverage · 66 architecture decisions · 4 mutation harnesses
+**2,019 tests · 94% coverage · 67 architecture decisions · 4 mutation harnesses
 proving 18 deliberate breakages are caught**
 
 ## How this was built
@@ -237,7 +237,7 @@ solo work. `make check` passing locally means CI passes.
 
 ## Architecture decisions
 
-Sixty-six decisions that required thought are recorded in
+Sixty-seven decisions that required thought are recorded in
 [`docs/decisions/`](docs/decisions/). The ones worth reading first are the ones
 where the measurement disagreed with the plan — or where somebody else showed
 the plan was wrong:

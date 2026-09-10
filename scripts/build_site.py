@@ -447,7 +447,7 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
   <div>
     <span class="pill">MCP gateway</span>
     <span class="pill">v1.0.0</span>
-    <span class="pill">2,017 tests</span>
+    <span class="pill">2,019 tests</span>
   </div>
   <h1>An AI agent reads a document. The document tells it to do something else.</h1>
   <p class="deck">This is the security boundary that sits in between &mdash; it decides what an
@@ -545,7 +545,7 @@ make audit-verify       # walk the chain it just wrote</pre>
 
 <footer>
   <a href="%%REPO%%">Repository</a> &middot;
-  <a href="%%REPO%%/blob/main/docs/decisions/README.md">66 architecture decisions</a> &middot;
+  <a href="%%REPO%%/blob/main/docs/decisions/README.md">67 architecture decisions</a> &middot;
   <a href="%%REPO%%/blob/main/docs/THREAT_MODEL.md">Threat model</a> &middot;
   <a href="%%REPO%%/releases/tag/v1.0.0">v1.0.0</a>
   <p style="margin-top:10px;color:var(--faint)">This page is generated from files in the

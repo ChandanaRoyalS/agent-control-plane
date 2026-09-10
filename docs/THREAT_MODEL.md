@@ -310,6 +310,14 @@ Anyone who can write the file can write a chain.
 And: **clean screenings are not chained**, only findings. The chain is a record
 of findings, not of screenings.
 
+**A post-dispatch write failure still tells the caller no for a call that ran.**
+The dispatch itself is now chained before the upstream is touched (ADR 0067), so
+an unrecordable call does not happen. The remaining window is the *outcome*
+record: if that write fails, the tool has already run and the caller is told the
+call failed. For a non-idempotent tool a retry then performs the side effect
+twice. Closing it needs a two-phase record or an idempotency key on the upstream
+call, and neither is built.
+
 ### 6.5 One process, and what that costs — **the largest operational gap**
 
 Two failures used to live here. One is closed and the other is not, and they are

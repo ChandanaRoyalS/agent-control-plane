@@ -28,9 +28,10 @@ counting refusals, and by then a legitimate caller has already been told no.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
+from itertools import islice
 from typing import Final
 
 from acp.firewall import detectors
@@ -39,6 +40,22 @@ from acp.firewall.classifier import OllamaClassifier
 from acp.firewall.findings import DETECTOR_NAMES, Confidence, Family, Finding
 
 logger = logging.getLogger(__name__)
+
+MAX_FINDINGS_PER_DETECTOR: Final = 64
+"""How many findings one detector may report about one result.
+
+**Capping costs enforcement nothing.** `triggers_for` withholds on the presence
+of a single HIGH finding from an enforceable detector; the sixty-fifth
+zero-width character does not make the result more withheld than the first. What
+the cap removes is allocation whose size the upstream chooses: a result of
+256KB of U+200B produced 262,140 `Finding` objects, each with an evidence string
+and a metrics increment, on the request loop.
+
+Every detector is a generator, so the cap is applied with `islice` and the
+findings past it are never constructed. That a detector was cut is reported —
+see `Screening.capped` — because a count that silently stops counting is a
+number a reader would believe.
+"""
 
 MAX_SCREENED_CHARS: Final = 256 * 1024
 """How much of a document is examined.
@@ -65,6 +82,15 @@ class Screening:
     """
 
     scanned_chars: int = 0
+
+    capped: frozenset[str] = frozenset()
+    """Detectors that had more to say than `MAX_FINDINGS_PER_DETECTOR` allows.
+
+    Not the same claim as `truncated`. Truncated means text was never examined;
+    capped means it was examined and the *listing* stopped. Enforcement is
+    unaffected — one finding is enough to withhold — so a capped screening is
+    still a complete decision, and stays cacheable.
+    """
 
     @property
     def clean(self) -> bool:
@@ -148,28 +174,36 @@ class Screener:
         truncated = len(text) > budget
         window = text[:budget]
 
+        found: list[Finding] = []
+        capped: set[str] = set()
+
+        def take(name: str, produced: Iterator[Finding]) -> None:
+            """Up to the cap, and record whether there was more."""
+            batch = list(islice(produced, MAX_FINDINGS_PER_DETECTOR))
+            found.extend(batch)
+            if len(batch) == MAX_FINDINGS_PER_DETECTOR and next(produced, None) is not None:
+                capped.add(name)
+
         # Obfuscation first, over the *raw* window, because these detectors are
         # the only ones whose evidence the next step destroys.
-        found: list[Finding] = [
-            *detectors.invisible_characters(window),
-            *detectors.bidirectional_override(window),
-        ]
+        take("invisible_characters", detectors.invisible_characters(window))
+        take("bidirectional_override", detectors.bidirectional_override(window))
 
         # Then the same text with the hiding removed, so a payload that used it
         # is matched by everything below as if it had never been disguised.
         cleaned = detectors.strip_invisible(window)
 
-        found.extend(detectors.instruction_override(cleaned))
-        found.extend(detectors.external_image(cleaned, self._policy.allowed_hosts))
-        found.extend(detectors.disallowed_url(cleaned, self._policy.allowed_hosts))
-        found.extend(detectors.encoded_payload(cleaned))
-        found.extend(detectors.tool_name_mention(cleaned, self._policy.tools))
+        take("instruction_override", detectors.instruction_override(cleaned))
+        take("external_image", detectors.external_image(cleaned, self._policy.allowed_hosts))
+        take("disallowed_url", detectors.disallowed_url(cleaned, self._policy.allowed_hosts))
+        take("encoded_payload", detectors.encoded_payload(cleaned))
+        take("tool_name_mention", detectors.tool_name_mention(cleaned, self._policy.tools))
 
         # The model-based detector runs last, over the same de-obfuscated
         # text, and only when one is attached. It emits findings like any
         # other detector; a model that is absent, down, or slow adds nothing.
         if self._classifier is not None:
-            found.extend(self._classifier.classify(cleaned))
+            take(CLASSIFIER_NAME, iter(self._classifier.classify(cleaned)))
 
         if found or truncated:
             # One line per screening, not per finding: a document with two
@@ -186,7 +220,12 @@ class Screener:
                 },
             )
 
-        return Screening(findings=tuple(found), truncated=truncated, scanned_chars=len(window))
+        return Screening(
+            findings=tuple(found),
+            truncated=truncated,
+            scanned_chars=len(window),
+            capped=frozenset(capped),
+        )
 
     def screen_all(self, texts: Sequence[str], *, complete: bool = True) -> Screening:
         """One screening over several strings — everything a tool result carries.
@@ -211,6 +250,7 @@ class Screener:
         """
         findings: list[Finding] = []
         truncated = not complete
+        capped: set[str] = set()
         scanned = 0
         for text in texts:
             remaining = self._policy.max_chars - scanned
@@ -223,8 +263,14 @@ class Screener:
             screening = self._screen(text, remaining)
             findings.extend(screening.findings)
             truncated = truncated or screening.truncated
+            capped |= screening.capped
             scanned += screening.scanned_chars
-        return Screening(findings=tuple(findings), truncated=truncated, scanned_chars=scanned)
+        return Screening(
+            findings=tuple(findings),
+            truncated=truncated,
+            scanned_chars=scanned,
+            capped=frozenset(capped),
+        )
 
 
 def _counts(findings: Sequence[Finding]) -> dict[Family, int]:

@@ -588,7 +588,9 @@ def build_server(
         # and re-screening every hit would erase the reason the cache exists.
         # The honest cost, and its two bounds, are in ADR 0038.
         if firewall is not None:
-            inspection = firewall.inspect(result, tool=params.name, tools=registry.known_tools)
+            inspection = await firewall.ainspect(
+                result, tool=params.name, tools=registry.known_tools
+            )
             await _audit_screening(audit, principal, params.name, inspection)
             if inspection.refused:
                 # Returned unframed, and that is deliberate: the fence marks

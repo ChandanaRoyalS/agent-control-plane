@@ -39,6 +39,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
     "pytest-cov>=6.0",
+    "pytest-timeout>=2.3",
     "mypy>=1.14",
     "ruff>=0.9",
     "hypothesis>=6.123",
@@ -142,6 +143,11 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=xml",
     "--cov-fail-under=80",
+    # No test in this suite legitimately takes 60 seconds. A hang is a defect
+    # worth a red build rather than a job somebody cancels twenty minutes
+    # later — and the suite screens attacker-shaped input, where "does not
+    # finish" is the failure mode being defended against.
+    "--timeout=60",
 ]
 markers = [
     "integration: drives a mock upstream ASGI app in-process",

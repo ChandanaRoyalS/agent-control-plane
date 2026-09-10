@@ -13,12 +13,17 @@ mechanism than the attack had on its own.
 from __future__ import annotations
 
 import base64
+import threading
+import time
+from unittest.mock import patch
 
 import pytest
 
 from acp.firewall.decision import (
     ENFORCEABLE,
+    SCREENING_TIMEOUT_SECONDS,
     Firewall,
+    Inspection,
     Mode,
     firewall_for,
     triggers_for,
@@ -455,3 +460,57 @@ def test_every_enforceable_detector_can_actually_produce_a_high_finding(detector
     fired = [f for f in inspection.triggers if f.detector == detector]
     assert fired, f"{detector} is enforceable but did not produce a trigger"
     assert fired[0].confidence is Confidence.HIGH
+
+
+async def test_screening_that_overruns_its_deadline_refuses_the_result() -> None:
+    """An un-screenable result is not a result the firewall approved.
+
+    Serving it because the check was slow would make the timeout the bypass —
+    the same fail-open shape as truncation being served, and the reason the
+    deadline refuses rather than passes through.
+    """
+    firewall = Firewall(enforce=True)
+    slow = CallToolResult(content=[ContentBlock(type="text", text="ordinary")])
+
+    def never_finishes(*_args: object, **_kwargs: object) -> Inspection:
+        # Abandoned by the deadline and left to run; its result is discarded.
+        time.sleep(SCREENING_TIMEOUT_SECONDS + 2)
+        return Inspection(result=slow, screening=Screening(), refused=False)
+
+    started = time.perf_counter()
+    with patch.object(Firewall, "inspect", never_finishes):
+        inspection = await firewall.ainspect(slow, tool="mock-a__read")
+    elapsed = time.perf_counter() - started
+
+    # Released at the deadline rather than when the worker happened to finish:
+    # a timeout that waits for the thing it is timing out is a description of
+    # the stall, not a bound on it.
+    assert elapsed < SCREENING_TIMEOUT_SECONDS + 1
+    assert inspection.refused
+    assert inspection.incident
+    assert inspection.screening.truncated
+    assert "WITHHELD" in inspection.result.text()
+
+
+async def test_screening_runs_off_the_event_loop() -> None:
+    """The bug ADR 0053 found in the audit sink, in the other CPU-bound place.
+
+    Screening is work over a string an upstream chose, and it ran synchronously
+    inside `on_call_tool` — so one large result stopped every other request in
+    the process, whether or not they were screening anything.
+    """
+    firewall = Firewall(enforce=False)
+    result = CallToolResult(content=[ContentBlock(type="text", text="ordinary")])
+    caller = threading.get_ident()
+    seen: list[int] = []
+
+    original = Firewall.inspect
+
+    def record(self: Firewall, *args: object, **kwargs: object) -> Inspection:
+        seen.append(threading.get_ident())
+        return original(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    with patch.object(Firewall, "inspect", record):
+        await firewall.ainspect(result, tool="mock-a__read")
+
+    assert seen and seen[0] != caller

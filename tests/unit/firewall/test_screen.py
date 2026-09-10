@@ -6,8 +6,17 @@ first one cannot be quietly weakened later.
 
 from __future__ import annotations
 
+import time
+import tracemalloc
+
 from acp.firewall.findings import DETECTOR_NAMES, Confidence, Family
-from acp.firewall.screen import MAX_SCREENED_CHARS, Screener, ScreenPolicy, screen_policy_for
+from acp.firewall.screen import (
+    MAX_FINDINGS_PER_DETECTOR,
+    MAX_SCREENED_CHARS,
+    Screener,
+    ScreenPolicy,
+    screen_policy_for,
+)
 
 ZWSP = "\u200b"
 RLO = "\u202e"
@@ -100,9 +109,16 @@ def test_a_pathological_document_does_not_hang() -> None:
     """
     hostile = ("![" + "a" * 400 + "](" + "b" * 400 + ")") * 50 + "https://" + "c" * 2000
 
+    started = time.perf_counter()
     screening = screener(max_chars=200_000).screen(hostile)
+    elapsed = time.perf_counter() - started
 
-    assert isinstance(screening.findings, tuple)
+    # The assertion used to be `isinstance(screening.findings, tuple)`, which a
+    # screener that took an hour would also satisfy. A budget, generously set:
+    # this document screens in single-digit milliseconds, and a regression that
+    # made a pattern quadratic would blow through a second.
+    assert elapsed < 1.0, f"screening took {elapsed:.2f}s"
+    assert screening.scanned_chars == len(hostile)
 
 
 # ---------------------------------------------------------------------------
@@ -167,3 +183,67 @@ def test_the_policy_helper_freezes_what_it_is_given() -> None:
 
     assert policy.allowed_hosts == frozenset({"docs.corp"})
     assert policy.tools == frozenset({"mock-a__search"})
+
+
+# ---------------------------------------------------------------------------
+# Bounds an upstream chooses the size of
+# ---------------------------------------------------------------------------
+
+
+def test_a_detector_may_not_report_more_than_its_cap() -> None:
+    """256KB of zero-width characters produced 262,140 `Finding` objects, each
+    with an evidence string and a metrics increment, on the request loop.
+
+    Capping costs enforcement nothing: `triggers_for` withholds on the presence
+    of one HIGH finding from an enforceable detector, and the sixty-fifth
+    zero-width character does not make a result more withheld than the first.
+    """
+    screening = screener().screen(ZWSP * 5_000)
+
+    assert len(screening.findings) == MAX_FINDINGS_PER_DETECTOR
+    assert screening.capped == frozenset({"invisible_characters"})
+
+
+def test_a_capped_screening_is_still_a_complete_decision() -> None:
+    """Capped is not truncated. The text *was* examined; the listing stopped.
+
+    So unlike a truncated screening, a capped one may still be cached — and
+    saying otherwise would turn a large benign document into a permanent cache
+    miss.
+    """
+    screening = screener().screen(ZWSP * 5_000)
+
+    assert screening.capped
+    assert not screening.truncated
+
+
+def test_the_result_budget_is_not_multiplied_by_the_block_count() -> None:
+    """It used to be per block, so eight blocks bought eight times the
+    allowance and the cost of screening was a number the upstream chose."""
+    block = "a" * 100_000
+    screening = screener(max_chars=150_000).screen_all([block, block, block])
+
+    assert screening.scanned_chars == 150_000
+    assert screening.truncated
+
+
+def test_screening_a_hostile_result_stays_within_a_time_and_memory_budget() -> None:
+    """The denial-of-service an external review measured at 35 seconds and
+    384MB, on the event loop, from eight content blocks an upstream chose.
+
+    Two bounds fixed it: one character budget per *result* rather than per
+    block, and a cap on findings per detector. This asserts both, together,
+    against the shape that produced the original number.
+    """
+    hostile = [ZWSP * (256 * 1024)] * 8
+
+    tracemalloc.start()
+    started = time.perf_counter()
+    screening = screener().screen_all(hostile)
+    elapsed = time.perf_counter() - started
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    assert elapsed < 2.0, f"screening took {elapsed:.2f}s"
+    assert peak < 32 * 1024 * 1024, f"screening peaked at {peak / 1e6:.0f}MB"
+    assert screening.scanned_chars == MAX_SCREENED_CHARS

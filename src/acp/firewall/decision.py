@@ -27,11 +27,14 @@ import secrets
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from typing import Final
+
+from anyio import fail_after, to_thread
 
 from acp.firewall.classifier import OllamaClassifier
 from acp.firewall.content import screenable_strings
-from acp.firewall.findings import Confidence, Finding
+from acp.firewall.findings import Confidence, Family, Finding
 from acp.firewall.screen import MAX_SCREENED_CHARS, Screener, Screening, ScreenPolicy
 from acp.observability import metrics
 from acp.upstream.models import CallToolResult, ContentBlock
@@ -105,6 +108,21 @@ Both demoted detectors still fire, are still logged, and still count toward
 `would_refuse` in report mode. What changed is that they no longer withhold
 anything on their own. Tasks 51 and 52 can promote them again by combining them
 with a second signal — which is what the corpus says they need.
+"""
+
+SCREENING_TIMEOUT_SECONDS: Final = 5.0
+"""How long screening one result may take before the gateway gives up on it.
+
+The bounds inside the screener make this unreachable for anything the current
+detectors do — a 256KB result with a finding on every character screens in about
+a tenth of a second. It exists for the detector nobody has written yet, and for
+the case those bounds do not model: `re` has no timeout, so a future pattern
+with catastrophic backtracking would otherwise hold the worker thread for as
+long as the upstream's text asked it to.
+
+Reaching it **refuses the result**. An un-screenable result is not a result the
+firewall approved, and serving it because the check was slow would make the
+timeout the bypass.
 """
 
 INCIDENT_BYTES: Final = 8
@@ -281,6 +299,69 @@ class Firewall:
             incident=incident,
             triggers=triggers,
         )
+
+    async def ainspect(
+        self,
+        result: CallToolResult,
+        *,
+        tool: str,
+        tools: AbstractSet[str] = frozenset(),
+    ) -> Inspection:
+        """`inspect`, off the event loop and under a deadline.
+
+        Screening is CPU work over a string an upstream chose, and it ran
+        synchronously inside `on_call_tool` — the same shape of bug ADR 0053
+        found in the audit sink, where one request's disk write stopped every
+        other request in the process. It is far cheaper than an `fsync` per
+        byte, but it is unbounded in a way an `fsync` is not: the number of
+        bytes is the upstream's choice.
+
+        So it moves to a worker thread, the way the audit write did. Unlike the
+        audit write it needs no serialisation — screening touches nothing shared
+        — so there is no `CapacityLimiter` here, and concurrent results screen
+        concurrently.
+
+        **What the deadline can and cannot do.** Python cannot interrupt CPU
+        work in another thread, so the timeout releases the *caller* and
+        abandons the worker, which runs to completion and has its result thrown
+        away. A stream of results that all overran would therefore still consume
+        threads. That is the honest limit, and it is why the bounds inside the
+        screener — one character budget per result, a cap on findings per
+        detector — are the real defence and this is only the backstop for the
+        detector nobody has written yet.
+        """
+        try:
+            with fail_after(SCREENING_TIMEOUT_SECONDS):
+                return await to_thread.run_sync(
+                    partial(self.inspect, result, tool=tool, tools=tools),
+                    # The deadline has to release *this* request, not wait for
+                    # the thread it is giving up on — waiting would make the
+                    # timeout a description of the stall rather than a bound on
+                    # it. The thread is abandoned and runs to completion; its
+                    # result is discarded.
+                    abandon_on_cancel=True,
+                )
+        except TimeoutError:
+            incident = secrets.token_hex(INCIDENT_BYTES)
+            logger.exception(
+                "firewall.timeout",
+                extra={"tool": tool, "incident": incident, "seconds": SCREENING_TIMEOUT_SECONDS},
+            )
+            metrics.record_firewall_decision(decision="timeout")
+            timed_out = Finding(
+                detector="screening_timeout",
+                family=Family.OBFUSCATION,
+                confidence=Confidence.HIGH,
+                evidence="screening did not finish within its deadline",
+                offset=0,
+            )
+            return Inspection(
+                result=refusal(tool, (timed_out,), incident),
+                screening=Screening(truncated=True),
+                refused=True,
+                incident=incident,
+                triggers=(timed_out,),
+            )
 
     def _record(
         self,

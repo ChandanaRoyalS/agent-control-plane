@@ -55,6 +55,16 @@ work here: the suite was measuring the wrong things confidently.
   eight blocks bought eight times the allowance and the cost of inspecting a
   result was a number the upstream chose. It is now per result (ADR 0059).
 
+- **A hostile result could stall the request loop.** Eight content blocks of
+  zero-width characters produced 262,140 `Finding` objects — 35 seconds and
+  384MB, measured, on the event loop, from a size the upstream chose. Three
+  bounds: the character budget is per result (above), each detector reports at
+  most 64 findings for one result, and screening runs in a worker thread under
+  a deadline that refuses rather than serves. The same input now screens in
+  118ms and 0.5MB. Capping costs enforcement nothing — one HIGH finding from an
+  enforceable detector is what withholds a result, and the sixty-fifth does not
+  withhold it further.
+
 ### Changed — breaking
 
 - Registering more than one issuer without a `tenant` label on every one of
@@ -76,6 +86,11 @@ work here: the suite was measuring the wrong things confidently.
   surprisingly at call time.
 
 ### Fixed
+
+- The test suite has a 60-second per-test timeout. A hang is now a red build
+  rather than a job somebody cancels twenty minutes later — and this suite
+  screens attacker-shaped input, where "does not finish" is the failure mode
+  being defended against.
 
 - **The catalogue hid argument-scoped tools**, contradicting ADR 0031 and
   disagreeing with `could_ever_allow` on the pre-dispatch path. `visible_tools`

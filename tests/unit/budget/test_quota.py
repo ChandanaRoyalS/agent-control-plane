@@ -88,4 +88,4 @@ def test_the_tally_is_bounded() -> None:
     for index in range(1_000):
         counter.check(f"subject-{index}", now=0.0, cost=1.0)
 
-    assert len(counter._spent) <= 64  # noqa: SLF001
+    assert len(counter._spent) <= 64

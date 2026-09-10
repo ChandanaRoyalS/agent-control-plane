@@ -104,7 +104,7 @@ def test_the_bucket_map_is_bounded() -> None:
     for index in range(1_000):
         limiter.check(f"subject-{index}", now=0.0)
 
-    assert len(limiter._buckets) <= 64  # noqa: SLF001
+    assert len(limiter._buckets) <= 64
 
 
 def test_reading_a_limit_cannot_grow_the_map_without_bound() -> None:
@@ -116,7 +116,7 @@ def test_reading_a_limit_cannot_grow_the_map_without_bound() -> None:
         limiter.remaining(f"subject-{index}")
         limiter.retry_after(f"subject-{index}")
 
-    assert len(limiter._buckets) <= 32  # noqa: SLF001
+    assert len(limiter._buckets) <= 32
 
 
 def test_the_most_recently_used_principal_survives_eviction() -> None:
@@ -130,4 +130,4 @@ def test_the_most_recently_used_principal_survives_eviction() -> None:
         limiter.check(f"other-{index}", now=0.0)
         limiter.check("steady", now=0.0)
 
-    assert "steady" in limiter._buckets  # noqa: SLF001
+    assert "steady" in limiter._buckets

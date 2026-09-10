@@ -10,14 +10,16 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from acp.approvals.record import State, request_for
+from acp.approvals.record import ApprovalRequest, State, request_for
 from acp.approvals.sqlite_store import SqliteApprovalStore
 from acp.approvals.store import InMemoryApprovalStore
 
 TOOL = "mock-b__delete_record"
 
 
-def held(subject: str = "alice", tenant: str | None = None, created: float | None = None):  # noqa: ANN201
+def held(
+    subject: str = "alice", tenant: str | None = None, created: float | None = None
+) -> ApprovalRequest:
     request = request_for(
         tenant=tenant,
         subject=subject,

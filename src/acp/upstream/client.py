@@ -340,10 +340,36 @@ class UpstreamClient:
 
     def _parse(self, response: httpx.Response, method: str) -> dict[str, Any]:
         """Turn an HTTP response into a JSON-RPC result, or raise."""
-        if response.is_error:  # httpx: any 4xx or 5xx
+        if response.is_server_error:  # 5xx — the upstream is struggling
             raise UpstreamUnavailableError(
                 f"{self.config.name} returned HTTP {response.status_code}",
                 upstream=self.config.name,
+                details={"method": method, "status": response.status_code},
+            )
+        if response.is_client_error:  # 4xx — the upstream received it and said no
+            # **Not a health signal**, and `counts_as_failure` already says so in
+            # prose: "errors the upstream returned deliberately ... prove the
+            # upstream is alive and answering. Opening the circuit on them means
+            # an agent sending bad arguments can take a perfectly healthy
+            # upstream offline for everybody."
+            #
+            # Every 4xx was nonetheless mapped to `UpstreamUnavailableError`,
+            # which is `recoverable` — so it was retried three times, counted
+            # three times, and opened the breaker in two calls. A 413 from
+            # oversized arguments, a WAF's 403, or a 401 from the deliberately
+            # uncredentialed health prober (ADR 0028) each withdrew the upstream
+            # from *every* tenant's catalogue.
+            #
+            # 429 belongs here too and is worth naming: retrying into a server
+            # that just asked you to stop is the one response where retrying is
+            # unambiguously wrong.
+            raise UpstreamRejectedError(
+                f"{self.config.name} returned HTTP {response.status_code}",
+                upstream=self.config.name,
+                # The HTTP status stands in for a JSON-RPC code here: the
+                # upstream answered below the protocol layer, so there is no
+                # JSON-RPC error object to read one from.
+                upstream_code=response.status_code,
                 details={"method": method, "status": response.status_code},
             )
 

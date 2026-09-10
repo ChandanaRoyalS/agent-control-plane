@@ -178,6 +178,21 @@ work here: the suite was measuring the wrong things confidently.
   message exists to prevent. Any exception out of `decode` is now a rejection
   ([ADR 0069](docs/decisions/0069-any-failure-to-verify-is-a-rejection.md)).
 
+- **A 4xx from an upstream opened its circuit**, withdrawing it from every
+  tenant's catalogue. `counts_as_failure`'s own docstring says these "prove the
+  upstream is alive and answering", and `_parse` mapped every 4xx and 5xx alike
+  to a recoverable error — so a 413 from oversized arguments, a WAF's 403, a 429
+  retried into the server that asked for less, or a 401 from the deliberately
+  uncredentialed health prober each took a healthy upstream offline in two
+  calls. 5xx still counts; 4xx is now `UpstreamRejectedError` carrying the HTTP
+  status.
+- **A cancelled half-open probe wedged the breaker permanently.** The release
+  ran `await self._leave(exc)`, and taking an `anyio.Lock` is a checkpoint — so
+  under cancellation it re-raised before acquiring and the probe slot was never
+  returned. Every later caller was refused until restart. The release is now
+  shielded
+  ([ADR 0070](docs/decisions/0070-a-refusal-is-not-a-symptom.md)).
+
 ### Changed — breaking
 
 - **`ACP_APPROVAL_OPERATOR_TOKEN` no longer starts a gateway.** A single shared

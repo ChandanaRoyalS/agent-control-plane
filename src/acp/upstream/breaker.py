@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 import anyio
+from anyio import CancelScope
 
 from acp.exceptions import (
     ACPError,
@@ -220,9 +221,18 @@ class CircuitBreaker:
         try:
             yield
         except BaseException as exc:
-            await self._leave(exc)
+            # **Shielded, because `_leave` takes a lock and taking a lock is a
+            # checkpoint.** Under cancellation `anyio.Lock.acquire` re-raises
+            # before it acquires, so `_leave` never ran — and a half-open probe
+            # that is never released leaves `_probes_in_flight` incremented
+            # forever. The breaker then refuses every caller until the process
+            # restarts, which is the exact failure this context manager exists
+            # to prevent and which its own docstring describes.
+            with CancelScope(shield=True):
+                await self._leave(exc)
             raise
-        await self._leave(None)
+        with CancelScope(shield=True):
+            await self._leave(None)
 
     async def _enter(self) -> None:
         async with self._lock:

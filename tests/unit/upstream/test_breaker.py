@@ -7,10 +7,12 @@ and the timing rules are the part most worth testing carefully.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
 import anyio
+import anyio.lowlevel
 import pytest
 
 from acp.exceptions import (
@@ -18,6 +20,7 @@ from acp.exceptions import (
     UpstreamProtocolError,
     UpstreamRejectedError,
     UpstreamTimeoutError,
+    UpstreamUnavailableError,
 )
 from acp.upstream.breaker import (
     BreakerPolicy,
@@ -483,3 +486,67 @@ def test_the_recovery_event_reports_no_outstanding_failures(
 
     assert opened.consecutive_failures == 2  # type: ignore[attr-defined]
     assert closed.consecutive_failures == 0  # type: ignore[attr-defined]
+
+
+async def test_a_cancelled_call_releases_its_half_open_probe() -> None:
+    """**The wedge this context manager's own docstring warns about.**
+
+    `guard` released the probe with `await self._leave(exc)` inside `except
+    BaseException`. `_leave` takes the breaker's lock, and taking an
+    `anyio.Lock` is a checkpoint — under cancellation it re-raises *before* it
+    acquires, so `_leave` never ran and `_probes_in_flight` stayed incremented.
+
+    The breaker then refuses every caller until the process restarts. A
+    cancelled request is the ordinary case here: a client disconnects, a
+    deadline fires, a task group unwinds.
+    """
+    clock = FakeClock()
+    circuit = breaker(clock, failure_threshold=1, reset_timeout=0.0, half_open_max_calls=1)
+
+    # Trip it, then let it fall to half-open.
+    with contextlib.suppress(UpstreamTimeoutError):
+        async with circuit.guard():
+            raise timeout()
+    clock.advance(1.0)
+
+    async def cancelled_probe() -> None:
+        with anyio.CancelScope() as scope:
+            async with circuit.guard():
+                scope.cancel()
+                await anyio.lowlevel.checkpoint()
+
+    await cancelled_probe()
+
+    # The probe was cancelled, so its slot must be back. Without the shield the
+    # next call raises UpstreamCircuitOpenError forever.
+    async with circuit.guard():
+        pass
+
+
+def test_a_client_error_is_not_evidence_that_the_upstream_is_unhealthy() -> None:
+    """**What `counts_as_failure`'s own docstring already promised.**
+
+    "Errors the upstream returned deliberately ... prove the upstream is alive
+    and answering. Opening the circuit on them means an agent sending bad
+    arguments can take a perfectly healthy upstream offline for everybody."
+
+    Every 4xx was nonetheless mapped to `UpstreamUnavailableError`, which is
+    `recoverable` — so it was retried three times, counted three times, and
+    opened the breaker in two calls. A 413 from oversized arguments, a WAF's
+    403, or a 401 from the deliberately uncredentialed health prober each
+    withdrew the upstream from every tenant's catalogue.
+    """
+    for status in (400, 401, 403, 404, 413, 429):
+        rejected = UpstreamRejectedError(
+            f"mock-a returned HTTP {status}", upstream="mock-a", upstream_code=status
+        )
+
+        assert not counts_as_failure(rejected), status
+
+
+def test_a_server_error_still_is() -> None:
+    """The other half. A 5xx is the upstream failing to answer, which is exactly
+    what the breaker is for."""
+    assert counts_as_failure(
+        UpstreamUnavailableError("mock-a returned HTTP 503", upstream="mock-a")
+    )

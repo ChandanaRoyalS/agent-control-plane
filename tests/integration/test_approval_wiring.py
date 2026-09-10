@@ -26,6 +26,7 @@ from typing import Any
 import anyio
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from acp.admin import build_admin_app
 from acp.approvals import APPROVALS_PATH, InMemoryApprovalStore, request_for
@@ -92,7 +93,7 @@ def settings_for(
         auth_required=False,
         health_probing_enabled=False,
         schema_drift_detection_enabled=False,
-        approval_operator_token=approval_operator_token,
+        approval_operator_token=SecretStr(approval_operator_token),
         approval_ttl_seconds=approval_ttl_seconds,
         approval_max_pending=approval_max_pending,
         **extra,

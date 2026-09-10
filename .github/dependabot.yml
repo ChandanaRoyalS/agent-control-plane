@@ -1,0 +1,30 @@
+# Dependency updates, proposed as pull requests against a protected `main` like
+# every other change.
+#
+# Weekly rather than daily: this repository pins exactly (`uv.lock`, `UV_FROZEN`
+# in CI and in the image), so an update is a deliberate change somebody reads,
+# and a daily cadence turns that into a queue nobody reads. Grouped for the same
+# reason — twelve separate patch bumps is twelve reviews of one decision.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-patch-and-minor:
+        update-types: ["minor", "patch"]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"

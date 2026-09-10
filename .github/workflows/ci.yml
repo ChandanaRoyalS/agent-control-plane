@@ -46,6 +46,33 @@ jobs:
       - name: Test
         run: uv run pytest
 
+      # ------------------------------------------------------------------
+      # Supply chain. A gateway whose whole argument is that it sits on a
+      # trust boundary should know what it is built out of.
+      # ------------------------------------------------------------------
+
+      - name: Audit dependencies for known vulnerabilities
+        # Against the *locked* set, which is what ships — resolving fresh here
+        # would audit a dependency tree no artifact of this repository contains.
+        run: |
+          uv export --frozen --all-groups --no-emit-project --format requirements-txt \
+            > /tmp/locked.txt
+          uvx pip-audit --strict --requirement /tmp/locked.txt
+
+      - name: Build an SBOM
+        run: |
+          uvx --from cyclonedx-bom cyclonedx-py requirements /tmp/locked.txt \
+            --output-format json --outfile /tmp/sbom.json
+          python -c "import json,sys; d=json.load(open('/tmp/sbom.json')); \
+            print(f\"sbom: {len(d.get('components', []))} components\")"
+
+      - name: Upload the SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: /tmp/sbom.json
+
       # A security test that has never been seen to fail is a claim about
       # whoever wrote it. This breaks the no-passthrough invariant three ways and
       # fails the build if the suite does not notice — and if an anchor has

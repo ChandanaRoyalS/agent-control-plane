@@ -283,3 +283,45 @@ def test_a_symmetric_algorithm_for_one_issuer_is_still_refused() -> None:
             default_algorithms=["RS256"],
             leeway=60.0,
         )
+
+
+def test_a_plaintext_token_endpoint_is_refused() -> None:
+    """`jwks_url` was guarded and this was not — the wrong way round.
+
+    A key set is public material. The token endpoint receives **the caller's own
+    bearer token and this gateway's client secret** on every exchange (ADR
+    0019), so plain HTTP publishes both to anyone on the path and lets the
+    credential that comes back be replaced.
+    """
+    with pytest.raises(ConfigurationError, match="token_endpoint"):
+        registry_from_documents(
+            [
+                {
+                    "issuer": CORP,
+                    "audience": AUDIENCE,
+                    "jwks_url": f"{CORP}/keys",
+                    "token_endpoint": "http://idp.corp.test/token",
+                }
+            ],
+            default_algorithms=["RS256"],
+            leeway=60.0,
+        )
+
+
+def test_a_loopback_token_endpoint_is_permitted_like_a_key_set() -> None:
+    """The same exemption the key-set check makes, for the same reason: a
+    developer running an identity provider on localhost is not on a network."""
+    registry = registry_from_documents(
+        [
+            {
+                "issuer": CORP,
+                "audience": AUDIENCE,
+                "jwks_url": f"{CORP}/keys",
+                "token_endpoint": "http://127.0.0.1:8080/token",
+            }
+        ],
+        default_algorithms=["RS256"],
+        leeway=60.0,
+    )
+
+    assert len(registry) == 1

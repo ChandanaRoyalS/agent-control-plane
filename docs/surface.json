@@ -38,8 +38,8 @@
     },
     {
       "variable": "ACP_APPROVAL_OPERATOR_TOKEN",
-      "type": "str",
-      "default": "''"
+      "type": "SecretStr",
+      "default": ""
     },
     {
       "variable": "ACP_APPROVAL_STORE_FILE",
@@ -83,8 +83,8 @@
     },
     {
       "variable": "ACP_AUTH_CLIENT_SECRET",
-      "type": "str",
-      "default": "''"
+      "type": "SecretStr",
+      "default": ""
     },
     {
       "variable": "ACP_AUTH_CREDENTIAL_CACHE_MAX_ENTRIES",

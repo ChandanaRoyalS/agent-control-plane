@@ -117,6 +117,14 @@ work here: the suite was measuring the wrong things confidently.
 
 ### Added
 
+- **Supply-chain checks in CI**: `pip-audit` against the locked dependency set
+  (not a fresh resolve — the lock is what ships), a CycloneDX SBOM uploaded as
+  an artifact, and Dependabot for Python, Actions and Docker. The first run
+  found five CVEs in `httpx`/`httpcore`, now upgraded.
+- **Released images are signed.** `cosign sign` keylessly, over the *digest*
+  rather than a tag — a tag is a mutable pointer, so signing one is a signature
+  over "whatever is there now". An SBOM is attested against the same digest, and
+  the release notes carry the digest and the `cosign verify` command.
 - `ACP_APPROVAL_STORE_FILE` puts pending approvals in SQLite so a restart does
   not lose them. Unset keeps the in-memory store and warns at startup naming the
   consequence. Still one process: two gateways with two files cannot resolve
@@ -132,6 +140,23 @@ work here: the suite was measuring the wrong things confidently.
 
 ### Fixed
 
+- **A configuration error reproduced the environment, secrets included.**
+  Pydantic renders `input_value=...` into `str(exc)`, and for a settings model
+  that input is every `ACP_*` variable in clear — so one unrelated
+  misconfiguration put the client secret and operator token into whatever reads
+  a startup failure. `SecretStr` does not cover this: it protects the validated
+  field, and this error is raised while explaining why validation did not
+  finish. Errors now report the field and the reason without the input.
+- `ACP_AUTH_CLIENT_SECRET` and `ACP_APPROVAL_OPERATOR_TOKEN` are `SecretStr`,
+  so a `repr()` of the settings no longer carries them.
+- **`token_endpoint` did not require https, while `jwks_url` did** — the wrong
+  way round if you only get one. A key set is public material; the token
+  endpoint receives the caller's own bearer token and this gateway's client
+  secret on every exchange.
+- Compose credentials moved to `.env` (see `.env.compose.example`), with the
+  demo values as defaults so the stack still starts. Not because those strings
+  are sensitive, but because a compose file with credentials inlined is what
+  somebody copies when they build a real one.
 - The version has one source. `pyproject.toml` declares
   `dynamic = ["version"]` and reads `acp.__version__`; it used to be written by
   hand in both files with a test asserting they matched, which catches the

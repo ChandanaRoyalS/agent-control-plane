@@ -182,6 +182,9 @@ def registry_from_documents(
         jwks_url = _required(document, "jwks_url", label)
         _reject_plaintext_keys(jwks_url, label, insecure_hosts)
         token_endpoint = document.get("token_endpoint")
+        _reject_plaintext_token_endpoint(
+            token_endpoint if isinstance(token_endpoint, str) else "", label, insecure_hosts
+        )
         tenant = _tenant_label(document.get("tenant"), label)
         algorithms = document.get("algorithms") or list(default_algorithms)
         if not isinstance(algorithms, list):
@@ -294,6 +297,30 @@ def _tenant_label(value: object, label: object) -> str | None:
         )
         raise ConfigurationError(msg)
     return value
+
+
+def _reject_plaintext_token_endpoint(
+    token_endpoint: str, label: object, insecure_hosts: Iterable[str]
+) -> None:
+    """The same https rule as the key set, on the endpoint that carries more.
+
+    `jwks_url` was guarded and this was not, which is the wrong way round if you
+    only get one. A key set is public material; the token endpoint receives
+    **the caller's own bearer token and this gateway's client secret** on every
+    exchange (ADR 0019). Over plain HTTP both are readable in transit by anyone
+    on the path, and the credential that comes back can be replaced.
+    """
+    if not token_endpoint:
+        return
+    parts = urlsplit(token_endpoint)
+    if parts.scheme == "https" or plaintext_permitted(parts.hostname, insecure_hosts):
+        return
+    msg = (
+        f"issuer {label!r}: `token_endpoint` {token_endpoint!r} must use https. Every "
+        f"exchange posts the caller's own token and this gateway's client secret to "
+        f"it, so plain HTTP publishes both to anyone on the path."
+    )
+    raise ConfigurationError(msg)
 
 
 def _reject_plaintext_keys(jwks_url: str, label: object, insecure_hosts: Iterable[str]) -> None:

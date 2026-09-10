@@ -215,7 +215,9 @@ services:
       # A real deployment mounts this at /run/secrets/auth_client_secret and
       # never puts it in the environment, because a process's environment is
       # readable by anything that can see /proc.
-      ACP_AUTH_CLIENT_SECRET: dev-only-not-a-secret-either
+      # From `.env` (see `.env.compose.example`), with the demo value as the
+      # default so the stack starts without one.
+      ACP_AUTH_CLIENT_SECRET: ${ACP_AUTH_CLIENT_SECRET:-dev-only-not-a-secret-either}
       # OpenTelemetry's own variables, not ACP_ ones. `jaeger` is the service
       # name below; on the host this same gateway finds Jaeger on localhost
       # with no configuration at all, because 4318 is already the OTLP/HTTP
@@ -334,8 +336,8 @@ services:
       KC_HEALTH_ENABLED: "true"
       # Dev credentials for the admin console, in a file that is in git. They
       # unlock a realm containing two invented users and no data.
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}
     volumes:
       # Read-only. Keycloak imports the realm and never needs to write here, and
       # a config source an application can rewrite is a config source that tells

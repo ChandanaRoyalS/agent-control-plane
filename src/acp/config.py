@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from acp.approvals.record import DEFAULT_TTL_SECONDS
@@ -147,7 +147,7 @@ class GatewaySettings(BaseSettings):
     between them is the one that records more.
     """
 
-    approval_operator_token: str = ""
+    approval_operator_token: SecretStr = SecretStr("")
     """Credential for the approval channel on the admin listener (task 55).
 
     Empty means the channel does not exist — not that it exists and refuses.
@@ -461,7 +461,7 @@ class GatewaySettings(BaseSettings):
     the feature appear to work.
     """
 
-    auth_client_secret: str = ""
+    auth_client_secret: SecretStr = SecretStr("")
     """The gateway's client secret.
 
     Read from the secrets *directory* in any real deployment — a file at
@@ -608,7 +608,7 @@ class GatewaySettings(BaseSettings):
     @property
     def exchange_configured(self) -> bool:
         """Whether the gateway will mint per-upstream credentials (task 27)."""
-        return bool(self.auth_client_id and self.auth_client_secret)
+        return bool(self.auth_client_id and self.auth_client_secret.get_secret_value())
 
     @model_validator(mode="after")
     def _identity_settings_are_coherent(self) -> GatewaySettings:
@@ -655,7 +655,7 @@ class GatewaySettings(BaseSettings):
 
         pair = {
             "ACP_AUTH_CLIENT_ID": self.auth_client_id,
-            "ACP_AUTH_CLIENT_SECRET": self.auth_client_secret,
+            "ACP_AUTH_CLIENT_SECRET": self.auth_client_secret.get_secret_value(),
         }
         absent = [name for name, value in pair.items() if not value]
         if absent and len(absent) != len(pair):
@@ -709,6 +709,29 @@ class GatewaySettings(BaseSettings):
             )
             raise ValueError(msg)
         return self
+
+
+def _without_input(exc: ValidationError) -> str:
+    """A validation error's message, with the offending *input* left out.
+
+    Pydantic renders `input_value=...` into `str(exc)`, and for a settings model
+    that input is the whole environment as a dictionary — including
+    `ACP_AUTH_CLIENT_SECRET` and `ACP_APPROVAL_OPERATOR_TOKEN` in clear. So a
+    single unrelated misconfiguration puts both secrets into whatever reads the
+    startup failure: a log aggregator, a crash reporter, a screenshot in a
+    ticket.
+
+    `SecretStr` does not help here and it is worth being precise about why: it
+    protects the *validated* field, and this error is raised while explaining
+    why validation did not finish. The input never became a `SecretStr`.
+
+    `include_input=False` keeps the part a deployer needs — which field, and
+    what is wrong with it — and drops the part only an attacker wants.
+    """
+    return "; ".join(
+        f"{'.'.join(str(part) for part in error['loc']) or '(model)'}: {error['msg']}"
+        for error in exc.errors(include_input=False, include_url=False)
+    )
 
 
 def allowed_hosts_for(hosts: list[str], port: int) -> list[str]:
@@ -783,7 +806,7 @@ def load_upstreams(path: Path) -> list[UpstreamConfig]:
             configs.append(UpstreamConfig.model_validate(entry))
         except ValidationError as exc:
             label = entry.get("name", f"#{index}")
-            msg = f"upstream {label!r} in {str(path)!r} is invalid: {exc}"
+            msg = f"upstream {label!r} in {str(path)!r} is invalid: {_without_input(exc)}"
             raise ConfigurationError(msg) from exc
 
     _reject_duplicate_names(configs, path)
@@ -853,5 +876,7 @@ def load_settings(**overrides: Any) -> GatewaySettings:
     try:
         return GatewaySettings(**overrides)
     except ValidationError as exc:
-        msg = f"invalid gateway configuration: {exc}"
+        # Never `{exc}`: it renders the offending input, which for a settings
+        # model is the environment. See `_without_input`.
+        msg = f"invalid gateway configuration: {_without_input(exc)}"
         raise ConfigurationError(msg) from exc

@@ -399,7 +399,9 @@ def build_approval_store(
     if policy is None or not policy.gates_calls:
         return None
 
-    if not (settings.approval_operator_token or settings.approval_operators_file):
+    if not (
+        settings.approval_operator_token.get_secret_value() or settings.approval_operators_file
+    ):
         logger.warning(
             "approval.no_operator_channel",
             extra={
@@ -421,7 +423,8 @@ def build_approval_store(
             "ttl_seconds": settings.approval_ttl_seconds,
             "max_pending": settings.approval_max_pending,
             "operator_channel": bool(
-                settings.approval_operator_token or settings.approval_operators_file
+                settings.approval_operator_token.get_secret_value()
+                or settings.approval_operators_file
             ),
         },
     )
@@ -710,7 +713,7 @@ def build_token_exchanger(
     return TokenExchanger(
         validator.issuers,
         client_id=settings.auth_client_id,
-        client_secret=settings.auth_client_secret,
+        client_secret=settings.auth_client_secret.get_secret_value(),
         # The whole estate, so a credential minted for one upstream can be
         # checked for opening another's door (task 28). Passed here rather than
         # discovered, because "which audiences are mine" is a fact about this
@@ -862,7 +865,7 @@ def build_operators(settings: GatewaySettings) -> OperatorDirectory | None:
     """
     path = settings.approval_operators_file
     named = load_operators(path) if path else None
-    return directory_from_settings(settings.approval_operator_token, named)
+    return directory_from_settings(settings.approval_operator_token.get_secret_value(), named)
 
 
 @asynccontextmanager

@@ -416,3 +416,44 @@ def test_a_malformed_issuers_file_is_a_startup_failure(
 def test_a_missing_issuers_file_names_itself(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match=r"issuers\.yaml"):
         load_issuers(tmp_path / "issuers.yaml")
+
+
+def test_a_configuration_error_does_not_reproduce_the_environment() -> None:
+    """**`SecretStr` does not cover this, and it is worth being precise why.**
+
+    Pydantic renders `input_value=...` into `str(exc)`, and for a settings model
+    that input is the whole environment as a dictionary — including
+    `ACP_AUTH_CLIENT_SECRET` and `ACP_APPROVAL_OPERATOR_TOKEN` in clear. So one
+    unrelated misconfiguration puts both secrets into whatever reads a startup
+    failure: a log aggregator, a crash reporter, a screenshot in a ticket.
+
+    `SecretStr` protects the *validated* field. This error is raised while
+    explaining why validation did not finish, so the input never became one.
+    """
+    with pytest.raises(ConfigurationError) as raised:
+        load_settings(
+            auth_client_id="gw",
+            auth_client_secret="the-client-secret-value",
+            approval_operator_token="the-operator-token-value-long-enough",
+        )
+
+    message = str(raised.value)
+    assert "the-client-secret-value" not in message
+    assert "the-operator-token-value" not in message
+    # Still useful: a deployer must be able to tell what is wrong.
+    assert "token exchange" in message
+
+
+def test_a_settings_repr_does_not_carry_its_secrets() -> None:
+    settings = load_settings(
+        auth_issuer="https://idp.test",
+        auth_audience="gw",
+        auth_client_id="gw",
+        auth_client_secret="the-client-secret-value",
+        approval_operator_token="the-operator-token-value-long-enough",
+    )
+
+    assert "the-client-secret-value" not in repr(settings)
+    assert "the-operator-token-value" not in repr(settings)
+    # And readable by the code that needs it.
+    assert settings.auth_client_secret.get_secret_value() == "the-client-secret-value"

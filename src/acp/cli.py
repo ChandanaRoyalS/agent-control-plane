@@ -590,7 +590,7 @@ def _serve_command(args: argparse.Namespace) -> int:
                     # a gated deployment with no channel looks identical to a
                     # working one until the first call is held and never answered.
                     "approval_channel": bool(
-                        settings.approval_operator_token
+                        settings.approval_operator_token.get_secret_value()
                         and getattr(app.state, "approvals", None) is not None
                     ),
                 },

@@ -18,6 +18,7 @@ on:
 permissions:
   contents: write # to create the GitHub release
   packages: write # to push to ghcr.io
+  id-token: write # to sign the image with cosign, keylessly
 
 env:
   UV_FROZEN: "1"
@@ -179,6 +180,7 @@ jobs:
         # is a convenience and a hazard — it is what somebody gets when they
         # forget to pin — so the README pins a version everywhere it shows a
         # `docker run`.
+        id: push
         run: |
           version="${{ steps.version.outputs.version }}"
           docker tag "${IMAGE}:${version}" "${IMAGE}:${{ steps.version.outputs.minor }}"
@@ -186,11 +188,62 @@ jobs:
           docker push "${IMAGE}:${version}"
           docker push "${IMAGE}:${{ steps.version.outputs.minor }}"
           docker push "${IMAGE}:latest"
+          # The digest, not the tag. A tag is a mutable pointer, so signing one
+          # is a signature over "whatever is there now" — which is the thing an
+          # attacker with push access changes.
+          digest="$(docker inspect --format='{{index .RepoDigests 0}}' \
+            "${IMAGE}:${version}" | cut -d@ -f2)"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      # ------------------------------------------------------------------
+      # Provenance. Signed after the push because a signature is over what is
+      # in the registry, and attested by digest for the same reason.
+      # ------------------------------------------------------------------
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign the image
+        # Keyless: the signature is bound to this workflow's OIDC identity and
+        # recorded in the public transparency log, so there is no signing key to
+        # store, rotate, or lose. Verify with:
+        #   cosign verify ghcr.io/OWNER/agent-control-plane@DIGEST \
+        #     --certificate-identity-regexp='^https://github.com/OWNER/' \
+        #     --certificate-oidc-issuer=https://token.actions.githubusercontent.com
+        run: cosign sign --yes "${IMAGE}@${{ steps.push.outputs.digest }}"
+
+      - name: Build an SBOM for the image
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          format: cyclonedx-json
+          output-file: /tmp/image-sbom.json
+          upload-artifact: false
+
+      - name: Attest the SBOM
+        run: |
+          cosign attest --yes --type cyclonedx \
+            --predicate /tmp/image-sbom.json \
+            "${IMAGE}@${{ steps.push.outputs.digest }}"
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          {
+            echo
+            echo "---"
+            echo
+            echo "Image: \`${IMAGE}@${{ steps.push.outputs.digest }}\`"
+            echo
+            echo "Signed keylessly with cosign. Verify:"
+            echo
+            echo '```'
+            echo "cosign verify ${IMAGE}@${{ steps.push.outputs.digest }} \\"
+            echo "  --certificate-identity-regexp='^https://github.com/${{ github.repository_owner }}/' \\"
+            echo "  --certificate-oidc-issuer=https://token.actions.githubusercontent.com"
+            echo '```'
+          } >> /tmp/notes.md
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --notes-file /tmp/notes.md \

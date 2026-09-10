@@ -25,6 +25,11 @@ from typing import Any
 from starlette.applications import Starlette
 
 from acp.approvals import DEFAULT_TTL_SECONDS, ApprovalStore, InMemoryApprovalStore
+from acp.approvals.operators import (
+    OperatorDirectory,
+    directory_from_settings,
+    load_operators,
+)
 from acp.audit import AuditLog, FileAuditSink
 from acp.audit.chain import Entry
 from acp.budget import CostTable, QuotaCounter, RateLimiter, load_costs
@@ -393,11 +398,13 @@ def build_approval_store(
     if policy is None or not policy.gates_calls:
         return None
 
-    if not settings.approval_operator_token:
+    if not (settings.approval_operator_token or settings.approval_operators_file):
         logger.warning(
             "approval.no_operator_channel",
             extra={
-                "reason": "ACP_APPROVAL_OPERATOR_TOKEN is not set",
+                "reason": (
+                    "neither ACP_APPROVAL_OPERATORS_FILE nor ACP_APPROVAL_OPERATOR_TOKEN is set"
+                ),
                 "consequence": (
                     "the policy holds calls for a human, and nothing on this gateway "
                     "can answer one: every gated call waits out its TTL and is then "
@@ -412,7 +419,9 @@ def build_approval_store(
             "gated_rules": sorted(_gated_rule_names(policy)),
             "ttl_seconds": settings.approval_ttl_seconds,
             "max_pending": settings.approval_max_pending,
-            "operator_channel": bool(settings.approval_operator_token),
+            "operator_channel": bool(
+                settings.approval_operator_token or settings.approval_operators_file
+            ),
         },
     )
     return InMemoryApprovalStore(max_pending=settings.approval_max_pending)
@@ -827,6 +836,18 @@ async def _with_keys(document: dict[str, Any], settings: GatewaySettings) -> dic
     if metadata.token_endpoint and not document.get("token_endpoint"):
         discovered["token_endpoint"] = metadata.token_endpoint
     return {**document, **discovered}
+
+
+def build_operators(settings: GatewaySettings) -> OperatorDirectory | None:
+    """The people entitled to answer a held call, or ``None`` for no channel.
+
+    Presence-based like every other switch here. A named file wins over the
+    single shared token, because between the two the safe guess is the one whose
+    audit rows can name a person (ADR 0062).
+    """
+    path = settings.approval_operators_file
+    named = load_operators(path) if path else None
+    return directory_from_settings(settings.approval_operator_token, named)
 
 
 @asynccontextmanager

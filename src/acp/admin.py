@@ -30,6 +30,7 @@ from starlette.routing import Route
 
 from acp import __version__
 from acp.approvals.operator import operator_routes
+from acp.approvals.operators import OperatorDirectory
 from acp.approvals.store import ApprovalStore
 from acp.audit import AuditLog
 from acp.console.app import console_routes
@@ -135,7 +136,7 @@ def build_admin_app(
     health: HealthMonitor | None = None,
     drift: DriftDetector | None = None,
     approvals: ApprovalStore | None = None,
-    operator_credential: str = "",
+    operators: OperatorDirectory | None = None,
     audit: AuditLog | None = None,
     *,
     console: TraceHub | None = None,
@@ -163,12 +164,12 @@ def build_admin_app(
             Route(HEALTH_PATH, _healthz, methods=["GET"]),
             Route(READY_PATH, build_readyz(health), methods=["GET"]),
             Route(SCHEMAS_PATH, build_schemas(drift), methods=["GET"]),
-            *operator_routes(approvals, operator_credential, audit),
+            *operator_routes(approvals, operators, audit),
             # Here for the same reason the approval channel is (task 63): this
             # stream carries every principal's activity, so an agent that could
             # open it would read what every other caller is doing. It shares the
             # operator credential because it is the same trust boundary — a
             # person who may approve a call may certainly watch one.
-            *console_routes(console, operator_credential),
+            *console_routes(console, operators),
         ]
     )

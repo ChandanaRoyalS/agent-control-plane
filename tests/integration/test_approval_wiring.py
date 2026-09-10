@@ -31,7 +31,7 @@ from acp.admin import build_admin_app
 from acp.approvals import APPROVALS_PATH, InMemoryApprovalStore, request_for
 from acp.config import GatewaySettings
 from acp.policy import Effect, Policy, Rule
-from acp.runtime import build_approval_store, gateway_from_settings
+from acp.runtime import build_approval_store, build_operators, gateway_from_settings
 
 from ..tokens import Keypair, claims
 from .helpers import authenticated_gateway, call_gateway
@@ -40,7 +40,7 @@ pytestmark = pytest.mark.integration
 
 ALICE = "alice@example.test"
 TOOL = "mock-a__search"
-CREDENTIAL = "operator-credential-for-tests"
+CREDENTIAL = "operator-credential-for-tests-long-enough-for-the-floor"
 
 GATED = Policy(
     rules=(
@@ -196,7 +196,7 @@ def test_the_admin_app_serves_the_channel_when_the_settings_configure_one() -> N
     store = build_approval_store(settings, GATED)
 
     async def _run() -> int:
-        app = build_admin_app(None, None, store, settings.approval_operator_token)
+        app = build_admin_app(None, None, store, build_operators(settings))
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://admin"
         ) as client:
@@ -213,7 +213,7 @@ def test_the_admin_app_serves_no_channel_when_the_settings_configure_none() -> N
     store = build_approval_store(settings, GATED)
 
     async def _run() -> int:
-        app = build_admin_app(None, None, store, settings.approval_operator_token)
+        app = build_admin_app(None, None, store, build_operators(settings))
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://admin"
         ) as client:

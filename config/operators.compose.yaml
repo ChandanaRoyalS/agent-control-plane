@@ -1,0 +1,15 @@
+# The people entitled to answer a held call, one credential each (ADR 0062).
+#
+# Named rather than shared, because an approval is the one record in this system
+# describing a thing a *person* did. A single shared token authenticates the
+# channel and leaves the audit row able to say only that somebody holding it
+# said yes — which narrows an incident to everyone who holds it.
+#
+# Committed in the clear for the same reason the Keycloak client secret is: this
+# stack is a demonstration on loopback, and both tokens say so in their own text.
+# A real deployment puts these in the secret store like any other credential.
+operators:
+  - name: dev-approver
+    token: dev-only-operator-token-for-the-compose-demo-not-a-secret
+  - name: dev-second-approver
+    token: dev-only-second-operator-token-for-the-compose-demo-either

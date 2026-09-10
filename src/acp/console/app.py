@@ -24,7 +24,6 @@ the framing is genuinely good — it is only the client that is hand-rolled.
 
 from __future__ import annotations
 
-import secrets
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
@@ -33,6 +32,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from acp.approvals.operators import OperatorDirectory
 from acp.console.hub import TraceHub
 from acp.console.page import PAGE
 
@@ -50,19 +50,23 @@ ignored by the parser.
 """
 
 
-def _authorized(request: Request, credential: str) -> bool:
-    """Whether this request carries the operator credential.
+def _authorized(request: Request, operators: OperatorDirectory) -> bool:
+    """Whether this request carries a recognised operator credential.
 
     `compare_digest` rather than `==`, and for the reason the operator channel
     gives: a short-circuiting comparison against a secret leaks its prefix one
     request at a time, and this is a listener somebody will eventually expose
     beyond loopback whatever the default says.
+
+    Watching does not need to say *which* operator is watching — the console
+    changes nothing — so unlike `build_decide` this only asks whether the
+    credential is one of the directory's.
     """
     header = request.headers.get("authorization", "")
     scheme, _, presented = header.partition(" ")
     if scheme.lower() != "bearer":
         return False
-    return secrets.compare_digest(presented, credential)
+    return operators.resolve(presented) is not None
 
 
 def _unauthorized() -> Response:
@@ -90,11 +94,11 @@ def build_page() -> Any:
     return page
 
 
-def build_stream(hub: TraceHub, credential: str) -> Any:
+def build_stream(hub: TraceHub, operators: OperatorDirectory) -> Any:
     """The event stream, one line per thing that happened."""
 
     async def stream(request: Request) -> Response:
-        if not _authorized(request, credential):
+        if not _authorized(request, operators):
             return _unauthorized()
 
         async def body() -> AsyncIterator[str]:
@@ -146,7 +150,7 @@ def build_stream(hub: TraceHub, credential: str) -> Any:
     return stream
 
 
-def console_routes(hub: TraceHub | None, credential: str) -> Sequence[Route]:
+def console_routes(hub: TraceHub | None, operators: OperatorDirectory | None) -> Sequence[Route]:
     """The console's routes, or none at all.
 
     Two ways to get nothing, and they are the same answer to different
@@ -155,9 +159,9 @@ def console_routes(hub: TraceHub | None, credential: str) -> Sequence[Route]:
     closed**, following the operator channel: a route that exists and always
     refuses still tells an unauthenticated caller what this deployment runs.
     """
-    if hub is None or not credential:
+    if hub is None or operators is None or not len(operators):
         return ()
     return (
         Route(CONSOLE_PATH, build_page(), methods=["GET"]),
-        Route(STREAM_PATH, build_stream(hub, credential), methods=["GET"]),
+        Route(STREAM_PATH, build_stream(hub, operators), methods=["GET"]),
     )

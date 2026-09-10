@@ -85,7 +85,10 @@ services:
       # above is: this stack is a demonstration on loopback. A real deployment
       # puts this in the secret store like any other production credential —
       # it is the one write on a listener that is otherwise read-only.
-      ACP_APPROVAL_OPERATOR_TOKEN: dev-only-operator-token
+      # One credential per person, so `acp audit verify` can show *who*
+      # approved a call rather than only that somebody with the credential did
+      # (ADR 0062). Mounted by the ./config:/app/config:ro bind above.
+      ACP_APPROVAL_OPERATORS_FILE: /app/config/operators.compose.yaml
       # Five minutes is the default. Named here because it is the default-deny
       # (ADR 0048) wearing the clothes of a timeout: raising it widens the
       # window in which one person's yes can still be spent.

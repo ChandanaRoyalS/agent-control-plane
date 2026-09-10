@@ -137,6 +137,16 @@ class GatewaySettings(BaseSettings):
     the disk's sync rate — and Phase 8 measures it rather than guessing.
     """
 
+    approval_operators_file: Path | None = None
+    """One credential per person, so the audit row can name who approved.
+
+    YAML: ``operators: [{name: alice, token: ...}, ...]``. Preferred over
+    `approval_operator_token`, which authenticates *the channel* and leaves an
+    approval attributable only to the set of people holding one secret — see
+    `acp.approvals.operators`. Set both and this wins, because the safe guess
+    between them is the one that records more.
+    """
+
     approval_operator_token: str = ""
     """Credential for the approval channel on the admin listener (task 55).
 

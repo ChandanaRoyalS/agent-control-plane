@@ -51,6 +51,17 @@ work here: the suite was measuring the wrong things confidently.
   a second issuer is registered, and the issuer joins the result-cache key and
   the budget account so that two directories inside one tenant cannot collide
   either ([ADR 0061](docs/decisions/0061-a-tenant-label-is-mandatory-once-there-are-two-issuers.md)).
+- **An approval did not record who gave it.** The channel was one shared bearer
+  token, so the chain said somebody holding it said yes — and where several
+  people hold it, the free-text reason was the only thing distinguishing them.
+  Credentials now identify a named operator and the name goes in the record.
+  The row also carried `request_state`: the live, still-spendable approval
+  token, in clear, under a key the redactor does not match. It is gone; the
+  fingerprint identifies the call and grants nothing. And the decision was
+  committed *before* it was recorded, so a failing sink left a live approval
+  with no record of it — the write is now ahead of the decision, and a failed
+  write returns 503 with the call still held
+  ([ADR 0062](docs/decisions/0062-an-approval-names-the-person-who-gave-it.md)).
 - **The screening character budget was per content block**, so a result with
   eight blocks bought eight times the allowance and the cost of inspecting a
   result was a number the upstream chose. It is now per result (ADR 0059).
@@ -67,6 +78,9 @@ work here: the suite was measuring the wrong things confidently.
 
 ### Changed — breaking
 
+- Operator credentials must be at least 32 characters. The shipped
+  `dev-only-operator-token` was 23, on a channel that shows every argument of
+  every held call. Compose now mounts `config/operators.compose.yaml`.
 - Registering more than one issuer without a `tenant` label on every one of
   them is now a startup failure. One issuer stays unlabelled-by-default.
 - The result-cache key version moves to `acp-result-v3` and budget accounts
@@ -87,6 +101,9 @@ work here: the suite was measuring the wrong things confidently.
 
 ### Fixed
 
+- Approvals reach the trace console for the first time. The handler used the
+  synchronous `record`, which never published — and did an `fsync` on the event
+  loop, the bug ADR 0053 removed from the request path and left here.
 - The test suite has a 60-second per-test timeout. A hang is now a red build
   rather than a job somebody cancels twenty minutes later — and this suite
   screens attacker-shaped input, where "does not finish" is the failure mode

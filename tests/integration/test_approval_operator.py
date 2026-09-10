@@ -32,6 +32,10 @@ from acp.approvals import (
     State,
     request_for,
 )
+from acp.approvals.operators import Operator, OperatorDirectory
+from acp.approvals.record import ApprovalRequest
+from acp.audit.sink import MemoryAuditSink
+from acp.audit.writer import AuditLog
 from acp.policy import Effect, Policy, Rule
 
 from ..tokens import Keypair, claims
@@ -39,7 +43,9 @@ from .helpers import authenticated_gateway, call_gateway
 
 pytestmark = pytest.mark.integration
 
-CREDENTIAL = "operator-credential-for-tests"
+CREDENTIAL = "operator-credential-for-tests-long-enough"
+OPERATOR = "tess"
+OPERATORS = OperatorDirectory([Operator(name=OPERATOR, token=CREDENTIAL)])
 ALICE = "alice@example.test"
 TOOL = "mock-a__search"
 
@@ -77,14 +83,15 @@ def admin(
     path: str,
     *,
     store: InMemoryApprovalStore | None,
-    credential: str = CREDENTIAL,
+    operators: OperatorDirectory | None = OPERATORS,
     bearer: str | None = CREDENTIAL,
+    audit: AuditLog | None = None,
     body: Any = None,
 ) -> httpx.Response:
     """One request to the admin listener, built exactly as an operator would."""
 
     async def _run() -> httpx.Response:
-        app = build_admin_app(None, None, store, credential)
+        app = build_admin_app(None, None, store, operators, audit)
         transport = httpx.ASGITransport(app=app)
         headers = {} if bearer is None else {"authorization": f"Bearer {bearer}"}
         async with httpx.AsyncClient(transport=transport, base_url="http://admin") as client:
@@ -126,7 +133,7 @@ def test_the_gateway_listener_has_no_approval_routes(keypair: Keypair) -> None:
 def test_no_credential_means_no_channel() -> None:
     """A feature nobody configured does not exist. The store is present and the
     routes are still absent, because the missing half is the entitlement."""
-    response = admin("GET", APPROVALS_PATH, store=held_store(), credential="")
+    response = admin("GET", APPROVALS_PATH, store=held_store(), operators=None)
 
     assert response.status_code == 404
 
@@ -360,7 +367,7 @@ def test_a_body_that_is_not_json_is_refused() -> None:
     token = store.pending()[0].token
 
     async def _run() -> httpx.Response:
-        app = build_admin_app(None, None, store, CREDENTIAL)
+        app = build_admin_app(None, None, store, OPERATORS)
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://admin") as client:
             return await client.post(
@@ -411,7 +418,7 @@ def test_a_person_on_the_admin_port_unblocks_a_call_on_the_gateway_port(
             token = first["result"]["requestState"]
 
             # The other listener, the other credential, the other participant.
-            operator = build_admin_app(None, None, store, CREDENTIAL)
+            operator = build_admin_app(None, None, store, OPERATORS)
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=operator), base_url="http://admin"
             ) as console:
@@ -444,7 +451,7 @@ def test_a_denial_on_the_admin_port_stops_the_call(keypair: Keypair) -> None:
             first = await call_gateway(agent, "tools/call", params)
             token = first["result"]["requestState"]
 
-            operator = build_admin_app(None, None, store, CREDENTIAL)
+            operator = build_admin_app(None, None, store, OPERATORS)
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=operator), base_url="http://admin"
             ) as console:
@@ -460,3 +467,117 @@ def test_a_denial_on_the_admin_port_stops_the_call(keypair: Keypair) -> None:
 
     assert payload["error"]["code"] == -32040
     assert "production dataset" not in str(payload)
+
+
+def _recording_audit() -> tuple[AuditLog, MemoryAuditSink]:
+    """A real `AuditLog` over an in-memory chain, so the row is really built."""
+    sink = MemoryAuditSink()
+    return AuditLog(sink), sink
+
+
+class _BrokenSink:
+    """A sink that cannot write. Declared blocking so the failure crosses the
+    thread boundary the way a real one does."""
+
+    head = "0" * 64
+    length = 0
+    blocking = True
+
+    def append(self, _record: Any) -> Any:
+        raise OSError("no space left on device")
+
+    def close(self) -> None:
+        """Part of the protocol, so the double stays a double."""
+
+
+def _failing_audit() -> AuditLog:
+    return AuditLog(_BrokenSink(), required=True)
+
+
+def _pending(store: InMemoryApprovalStore) -> ApprovalRequest:
+    """The one request a store holds, for a test that needs its token."""
+    request = request_for(
+        tenant=None,
+        subject=ALICE,
+        actor=None,
+        tool=TOOL,
+        arguments={"query": "x"},
+        rule="approve-searches",
+        now=time.time(),
+    )
+    assert request is not None
+    store.create(request)
+    return request
+
+
+def test_the_audit_row_names_the_operator_who_approved() -> None:
+    """**The row an investigation actually wants** (ADR 0062).
+
+    `build_decide`'s own docstring said it records "who approved the delete, and
+    what did they say they had checked". It recorded the second half. With four
+    people holding one credential, the chain narrowed an incident to four
+    people and the free-text reason — written by whoever is explaining
+    themselves — was the only thing distinguishing them.
+    """
+    store = InMemoryApprovalStore()
+    request = _pending(store)
+    audit, sink = _recording_audit()
+
+    admin(
+        "POST",
+        approval_path(request.token),
+        store=store,
+        audit=audit,
+        body={"approved": True, "reason": "checked with the data team"},
+    )
+
+    (entry,) = sink.entries
+    assert entry.record["detail"]["operator"] == OPERATOR
+    assert entry.record["reason"] == "checked with the data team"
+
+
+def test_the_audit_row_does_not_carry_the_live_approval_token() -> None:
+    """It used to, under `request_state` — a key the redactor does not match.
+
+    That is a still-spendable credential written in clear into a file that
+    outlives the approval it grants. The fingerprint identifies the call
+    durably and grants nothing, which is what an audit row is for.
+    """
+    store = InMemoryApprovalStore()
+    request = _pending(store)
+    audit, sink = _recording_audit()
+
+    admin("POST", approval_path(request.token), store=store, audit=audit, body={"approved": True})
+
+    (entry,) = sink.entries
+    assert "request_state" not in entry.record["detail"]
+    # And not anywhere else in the row either, under any key.
+    assert request.token not in json.dumps(entry.record, default=str)
+    assert entry.record["detail"]["fingerprint"] == request.fingerprint
+
+
+def test_an_audit_failure_leaves_no_live_approval_behind() -> None:
+    """**Write-ahead, which is the opposite of the order this handler used.**
+
+    `store.decide` committed first and the audit write followed, so a sink that
+    raised left a live approval with no record of it — the one outcome an audit
+    log exists to make impossible. Recorded first, a failed write means the
+    approval never takes effect, which is the safe direction: an investigation
+    can reconcile a decision with no downstream effect, but an approval with no
+    row is invisible.
+    """
+    store = InMemoryApprovalStore()
+    request = _pending(store)
+
+    response = admin(
+        "POST",
+        approval_path(request.token),
+        store=store,
+        audit=_failing_audit(),
+        body={"approved": True},
+    )
+
+    assert response.status_code == 503
+    held = store.get(request.token)
+    assert held is not None
+    assert held.state is State.PENDING

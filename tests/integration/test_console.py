@@ -22,13 +22,15 @@ from starlette.responses import StreamingResponse
 from starlette.testclient import TestClient
 
 from acp.admin import build_admin_app
+from acp.approvals.operators import Operator, OperatorDirectory
 from acp.console.app import CONSOLE_PATH, STREAM_PATH, build_stream
 from acp.console.events import Source, TraceEvent
 from acp.console.hub import TraceHub
 
 pytestmark = pytest.mark.integration
 
-CREDENTIAL = "operator-token-for-tests"
+CREDENTIAL = "operator-token-for-tests-long-enough"
+OPERATORS = OperatorDirectory([Operator(name="tess", token=CREDENTIAL)])
 
 
 def an_event(name: str = "policy.denied") -> TraceEvent:
@@ -46,13 +48,13 @@ def test_the_console_is_absent_when_no_credential_is_configured() -> None:
     """Absent rather than present and closed, following the operator channel: a
     route that exists and always refuses still tells an unauthenticated caller
     what this deployment runs."""
-    client = TestClient(build_admin_app(console=TraceHub(), operator_credential=""))
+    client = TestClient(build_admin_app(console=TraceHub(), operators=None))
     assert client.get(CONSOLE_PATH).status_code == 404
     assert client.get(STREAM_PATH).status_code == 404
 
 
 def test_the_console_is_absent_when_there_is_no_hub() -> None:
-    client = TestClient(build_admin_app(console=None, operator_credential=CREDENTIAL))
+    client = TestClient(build_admin_app(console=None, operators=OPERATORS))
     assert client.get(CONSOLE_PATH).status_code == 404
 
 
@@ -60,7 +62,7 @@ def test_the_page_is_served_without_a_credential() -> None:
     """Deliberate: it contains no data, and `fetch` can carry a header where an
     address bar cannot. Gating it would make the console unreachable from a
     browser while protecting markup."""
-    client = TestClient(build_admin_app(console=TraceHub(), operator_credential=CREDENTIAL))
+    client = TestClient(build_admin_app(console=TraceHub(), operators=OPERATORS))
     response = client.get(CONSOLE_PATH)
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
@@ -70,14 +72,14 @@ def test_the_stream_refuses_without_the_credential() -> None:
     """THE ONE THAT MATTERS. This stream carries every principal's activity, so
     an unauthenticated reader is a cross-principal disclosure of everything the
     gateway is doing."""
-    client = TestClient(build_admin_app(console=TraceHub(), operator_credential=CREDENTIAL))
+    client = TestClient(build_admin_app(console=TraceHub(), operators=OPERATORS))
     response = client.get(STREAM_PATH)
     assert response.status_code == 401
     assert "Bearer" in response.headers["www-authenticate"]
 
 
 def test_the_stream_refuses_the_wrong_credential() -> None:
-    client = TestClient(build_admin_app(console=TraceHub(), operator_credential=CREDENTIAL))
+    client = TestClient(build_admin_app(console=TraceHub(), operators=OPERATORS))
     headers = {"Authorization": "Bearer not-the-token"}
     assert client.get(STREAM_PATH, headers=headers).status_code == 401
 
@@ -86,7 +88,7 @@ def test_the_stream_refuses_a_credential_in_the_query_string() -> None:
     """`EventSource` cannot set headers, and the usual workaround is a token in
     the URL — which lands in browser history, referrers and access logs. It is
     not accepted here, so nobody can quietly adopt it."""
-    client = TestClient(build_admin_app(console=TraceHub(), operator_credential=CREDENTIAL))
+    client = TestClient(build_admin_app(console=TraceHub(), operators=OPERATORS))
     assert client.get(f"{STREAM_PATH}?token={CREDENTIAL}").status_code == 401
 
 
@@ -135,7 +137,7 @@ def test_a_watcher_receives_what_was_published_before_it_connected() -> None:
     a blank page until the next request."""
     hub = TraceHub()
     hub.publish(an_event("policy.allowed"))
-    endpoint = build_stream(hub, CREDENTIAL)
+    endpoint = build_stream(hub, OPERATORS)
 
     async def run() -> list[str]:
         response = await endpoint(_request(CREDENTIAL))
@@ -159,7 +161,7 @@ def test_a_watcher_receives_what_is_published_after_it_connects() -> None:
     """The other half, and the one that would break silently: a console that
     only ever replayed history would look perfect for the first second."""
     hub = TraceHub()
-    endpoint = build_stream(hub, CREDENTIAL)
+    endpoint = build_stream(hub, OPERATORS)
 
     async def run() -> list[str]:
         response = await endpoint(_request(CREDENTIAL))
@@ -185,7 +187,7 @@ def test_the_watcher_is_unsubscribed_when_the_stream_ends() -> None:
     demo has been run a few dozen times."""
     hub = TraceHub()
     hub.publish(an_event())
-    endpoint = build_stream(hub, CREDENTIAL)
+    endpoint = build_stream(hub, OPERATORS)
 
     async def run() -> None:
         response = await endpoint(_request(CREDENTIAL))

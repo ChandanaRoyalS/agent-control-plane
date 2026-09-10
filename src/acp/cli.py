@@ -34,7 +34,7 @@ from acp.policy import Policy, evaluate
 from acp.policy.loader import load_policy
 from acp.policy.record import parse_traffic
 from acp.policy.simulate import CHANGED, Outcome, simulate
-from acp.runtime import gateway_from_settings
+from acp.runtime import build_operators, gateway_from_settings
 from acp.schema import SchemaSnapshot, diff
 from acp.secrets import cli as secrets_cli
 from acp.upstream import ListToolsResult, UpstreamClient, UpstreamConfig
@@ -570,7 +570,7 @@ def _serve_command(args: argparse.Namespace) -> int:
                     # object, deliberately: an operator channel pointed at a
                     # second store would answer approvals nobody is waiting on.
                     getattr(app.state, "approvals", None),
-                    settings.approval_operator_token,
+                    build_operators(settings),
                     getattr(app.state, "audit", None),
                     # The hub the audit log publishes to. The same object,
                     # deliberately, and for the same reason as the approval

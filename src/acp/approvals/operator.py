@@ -37,7 +37,6 @@ reader that cannot be given a system prompt.
 from __future__ import annotations
 
 import json
-import secrets
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -47,11 +46,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from acp.approvals.operators import Operator, OperatorDirectory
 from acp.approvals.record import ApprovalRequest, State
 from acp.approvals.store import ApprovalStore
 from acp.audit import AuditLog
 from acp.audit import Category as AuditCategory
 from acp.audit import Outcome as AuditOutcome
+from acp.exceptions import AuditUnavailableError
 
 APPROVALS_PATH: Final = "/approvals"
 APPROVAL_PATH: Final = "/approvals/{token}"
@@ -130,19 +131,23 @@ def as_view(request: ApprovalRequest, now: float) -> dict[str, Any]:
     }
 
 
-def _authorized(request: Request, credential: str) -> bool:
-    """Whether this request carries the operator credential.
+def _authorized(request: Request, operators: OperatorDirectory) -> Operator | None:
+    """Which operator this request carries the credential of, or ``None``.
 
     ``compare_digest`` rather than ``==``: the comparison is against a secret,
     and a short-circuiting comparison over a value an attacker controls leaks its
     prefix one request at a time. Cheap to do correctly, and this is a listener
     somebody will eventually expose beyond loopback whatever the default says.
+
+    Returns *who* rather than *whether*, because the answer is needed in the
+    audit row and re-deriving it at the call site would mean comparing the
+    credential twice.
     """
     header = request.headers.get("authorization", "")
     scheme, _, presented = header.partition(" ")
     if scheme.lower() != "bearer":
-        return False
-    return secrets.compare_digest(presented, credential)
+        return None
+    return operators.resolve(presented)
 
 
 def _unauthorized() -> Response:
@@ -153,7 +158,7 @@ def _unauthorized() -> Response:
     )
 
 
-def build_pending(reader: ApprovalReader, credential: str) -> Any:
+def build_pending(reader: ApprovalReader, operators: OperatorDirectory) -> Any:
     """`GET /approvals` — every call currently waiting on a person.
 
     Authenticated even though it only reads, because of *what* it reads. The list
@@ -163,7 +168,7 @@ def build_pending(reader: ApprovalReader, credential: str) -> Any:
     """
 
     async def pending(request: Request) -> Response:
-        if not _authorized(request, credential):
+        if _authorized(request, operators) is None:
             return _unauthorized()
         now = time.time()
         return JSONResponse(
@@ -237,7 +242,9 @@ def _unanswerable(held: ApprovalRequest | None, now: float) -> Response | None:
     return None
 
 
-def build_decide(store: ApprovalStore, credential: str, audit: AuditLog | None = None) -> Any:
+def build_decide(
+    store: ApprovalStore, operators: OperatorDirectory, audit: AuditLog | None = None
+) -> Any:
     """`POST /approvals/{token}` — a person's answer, recorded once.
 
     **The human's decision is chained.** Every other audit record in this project
@@ -248,7 +255,8 @@ def build_decide(store: ApprovalStore, credential: str, audit: AuditLog | None =
     """
 
     async def decide(request: Request) -> Response:
-        if not _authorized(request, credential):
+        operator = _authorized(request, operators)
+        if operator is None:
             return _unauthorized()
 
         answer = await _read_answer(request)
@@ -257,38 +265,73 @@ def build_decide(store: ApprovalStore, credential: str, audit: AuditLog | None =
 
         token = request.path_params["token"]
         now = time.time()
-        refusal = _unanswerable(store.get(token), now)
-        if refusal is not None:
-            return refusal
-
-        decided = store.decide(token, approved=answer.approved, reason=answer.reason)
-        if decided is None:  # pragma: no cover — the lookup above already found it
-            return JSONResponse({"error": "no such request"}, status_code=404)
+        held = store.get(token)
+        refusal = _unanswerable(held, now)
+        if refusal is not None or held is None:
+            return refusal or JSONResponse({"error": "no such request"}, status_code=404)
 
         if audit is not None:
-            # The operator's `reason` **is** recorded here, unlike almost
-            # everything else a caller supplies. It is the one free-text field in
-            # the system written by a trusted, authenticated human who knows it
-            # is being kept — "checked with the data team" is exactly what makes
-            # this row worth having, and withholding it would leave an approval
-            # nobody can account for.
-            audit.record(
-                AuditCategory.APPROVAL,
-                "approval.decided",
-                subject=decided.subject,
-                tool=decided.tool,
-                rule=decided.rule,
-                outcome=AuditOutcome.ALLOWED if answer.approved else AuditOutcome.DENIED,
-                reason=answer.reason or None,
-                detail={"fingerprint": decided.fingerprint, "request_state": decided.token},
-            )
+            # **Recorded before it is applied**, which is the opposite of the
+            # order this handler used. `store.decide` committed first and the
+            # audit write followed, so a sink that raised left a *live approval
+            # with no record of it* — the one outcome an audit log exists to
+            # make impossible.
+            #
+            # Write-ahead is the standard answer and the safe one here. If the
+            # write succeeds and the decision then fails, the chain holds a
+            # decision with no downstream effect, which an investigation can see
+            # and reconcile. An approval with no row is invisible.
+            #
+            # `arecord` rather than `record`: this handler is `async`, and the
+            # synchronous form does an `fsync` on the event loop — the exact bug
+            # ADR 0053 removed from the request path, still present here. It also
+            # never reached `_publish`, so approvals were missing from the
+            # console.
+            try:
+                await audit.arecord(
+                    AuditCategory.APPROVAL,
+                    "approval.decided",
+                    subject=held.subject,
+                    tool=held.tool,
+                    rule=held.rule,
+                    outcome=AuditOutcome.ALLOWED if answer.approved else AuditOutcome.DENIED,
+                    # The operator's `reason` **is** recorded here, unlike almost
+                    # everything else a caller supplies. It is the one free-text
+                    # field in the system written by a trusted, authenticated human
+                    # who knows it is being kept.
+                    reason=answer.reason or None,
+                    # `operator` is the point of this row. Without it the chain says
+                    # somebody holding the credential approved a call, and an
+                    # investigation into "who approved the delete" ends at the set of
+                    # people who hold it.
+                    #
+                    # `request_state` is **not** here any more: it was the live,
+                    # still-spendable approval token, written in clear to a file that
+                    # outlives the approval, under a key the redactor does not match.
+                    # The fingerprint identifies the call durably and grants nothing.
+                    detail={"fingerprint": held.fingerprint, "operator": operator.name},
+                )
+            except AuditUnavailableError:
+                # The decision is *not* applied. A held call that stays held is
+                # a person having to ask again; a live approval with no record
+                # of it is the outcome this log exists to make impossible.
+                return JSONResponse(
+                    {"error": "the decision could not be recorded, so it was not applied"},
+                    status_code=503,
+                )
+
+        decided = store.decide(token, approved=answer.approved, reason=answer.reason)
+        if decided is None:  # pragma: no cover — guarded by the lookup above
+            return JSONResponse({"error": "no such request"}, status_code=404)
         return JSONResponse({**as_view(decided, now), "notice": UNTRUSTED_NOTICE})
 
     return decide
 
 
 def operator_routes(
-    store: ApprovalStore | None, credential: str, audit: AuditLog | None = None
+    store: ApprovalStore | None,
+    operators: OperatorDirectory | None,
+    audit: AuditLog | None = None,
 ) -> Sequence[Route]:
     """The approval routes, or none at all.
 
@@ -302,11 +345,11 @@ def operator_routes(
     listing endpoint; that is a smaller failure than refusing to mount a channel
     an operator could still use to answer a token they were told about.
     """
-    if store is None or not credential:
+    if store is None or operators is None or not len(operators):
         return ()
 
-    routes = [Route(APPROVAL_PATH, build_decide(store, credential, audit), methods=["POST"])]
+    routes = [Route(APPROVAL_PATH, build_decide(store, operators, audit), methods=["POST"])]
     reader = store if isinstance(store, ApprovalReader) else None
     if reader is not None:
-        routes.insert(0, Route(APPROVALS_PATH, build_pending(reader, credential), methods=["GET"]))
+        routes.insert(0, Route(APPROVALS_PATH, build_pending(reader, operators), methods=["GET"]))
     return routes

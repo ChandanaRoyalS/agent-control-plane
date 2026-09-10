@@ -31,6 +31,7 @@ from pydantic import SecretStr
 from acp.admin import build_admin_app
 from acp.approvals import APPROVALS_PATH, InMemoryApprovalStore, request_for
 from acp.config import GatewaySettings
+from acp.exceptions import ConfigurationError
 from acp.policy import Effect, Policy, Rule
 from acp.runtime import build_approval_store, build_operators, gateway_from_settings
 
@@ -74,6 +75,7 @@ def settings_for(
     policy_file: Path | None = None,
     upstreams_file: Path | None = None,
     approval_operator_token: str = "",
+    approval_operators_file: Path | None = None,
     approval_ttl_seconds: float = 300.0,
     approval_max_pending: int = 256,
 ) -> GatewaySettings:
@@ -88,6 +90,8 @@ def settings_for(
         extra["policy_file"] = policy_file
     if upstreams_file is not None:
         extra["upstreams_file"] = upstreams_file
+    if approval_operators_file is not None:
+        extra["approval_operators_file"] = approval_operators_file
     return GatewaySettings(  # type: ignore[call-arg]
         _env_file=None,
         auth_required=False,
@@ -191,9 +195,22 @@ def test_the_startup_line_names_the_rules_that_gate(caplog: pytest.LogCaptureFix
 # ---------------------------------------------------------------------------
 
 
-def test_the_admin_app_serves_the_channel_when_the_settings_configure_one() -> None:
+def operators_file(tmp_path: Path) -> Path:
+    """One named operator, which since ADR 0062 is the only shape accepted.
+
+    A shared token is refused at startup rather than recorded as `shared`, so a
+    test that configures one is testing the refusal, not the routes.
+    """
+    path = tmp_path / "operators.yaml"
+    path.write_text(f"operators:\n  - name: tess\n    token: {CREDENTIAL}\n", encoding="utf-8")
+    return path
+
+
+def test_the_admin_app_serves_the_channel_when_the_settings_configure_one(
+    tmp_path: Path,
+) -> None:
     """Assembled the way `acp serve` assembles it, from the same two values."""
-    settings = settings_for(approval_operator_token=CREDENTIAL)
+    settings = settings_for(approval_operators_file=operators_file(tmp_path))
     store = build_approval_store(settings, GATED)
 
     async def _run() -> int:
@@ -274,3 +291,23 @@ def test_the_configured_ttl_is_the_ttl_the_caller_gets(keypair: Keypair) -> None
 
     held = store.pending()[0]
     assert held.expires_at - held.created_at == pytest.approx(12.0)
+
+
+def test_a_gateway_configured_with_a_shared_credential_does_not_start() -> None:
+    """**Through the real builder, not just the directory constructor.**
+
+    The unit test asserts `directory_from_settings` refuses. This asserts that
+    the refusal survives the path `acp serve` actually takes — a check that
+    exists in a helper nothing calls at startup is a check that does not exist.
+    """
+    settings = settings_for(approval_operator_token=CREDENTIAL)
+
+    with pytest.raises(ConfigurationError, match="ACP_APPROVAL_OPERATORS_FILE"):
+        build_operators(settings)
+
+
+def test_a_gateway_with_no_approval_channel_at_all_still_starts() -> None:
+    """The refusal is about a *shared* credential, not about the feature being
+    absent. A gateway whose policy never holds a call for a human needs no
+    operators, and must not be made to invent some."""
+    assert build_operators(settings_for()) is None

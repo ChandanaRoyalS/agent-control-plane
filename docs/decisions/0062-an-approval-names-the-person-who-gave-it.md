@@ -54,10 +54,10 @@ matching operator's position does not leak through response time. Credentials
 are refused below 32 characters — the channel they open shows every argument of
 every held call, and the shipped `dev-only-operator-token` was 23.
 
-A deployment with one shared token still works and records the operator as
-`shared`, with a warning at startup. Neither empty nor a plausible name: empty
-reads as "not populated yet", and a name would be a lie. `shared` states exactly
-what is known.
+**A shared token is refused at startup.** `ACP_APPROVAL_OPERATOR_TOKEN` remains
+a recognised setting so that the error can explain the migration rather than the
+variable being silently ignored, but a gateway configured with it does not
+start, and the message carries the file format.
 
 **`request_state` is gone from the record.** The fingerprint stays.
 
@@ -76,6 +76,9 @@ story, and a revocation story for a channel whose users are a handful of people
 on loopback. Named bearer credentials get from "somebody" to "alice", which is
 the whole distance this defect is about; the next step is a real one and is
 named in the threat model rather than pretended at here.
+
+**Keep the shared token and warn.** What this ADR originally decided; see the
+amendment under Consequences for why it was reversed.
 
 **Record the operator from a header the client supplies.** `X-Operator: alice`.
 Self-asserted identity in an audit record is worse than no identity, because it
@@ -98,11 +101,24 @@ operators, which also makes the demo show a name.
 Approvals reach the trace console for the first time, because `arecord`
 publishes and `record` never did.
 
-The `shared` fallback means the improvement is opt-in for existing deployments,
-which is a real limit: a deployment that ignores the startup warning gets the
-old attribution with a better-named field. The alternative was refusing to start
-on a configuration that works today, for a defect that is about the quality of
-evidence rather than about access.
+**Amended 2026-09-10.** This ADR originally accepted a shared token and recorded
+approvals under it as `shared`, with a startup warning, on the reasoning that an
+existing deployment should not fail to start over the *quality* of its evidence
+rather than over access.
+
+That was wrong, and ADR 0061 — written three commits earlier, about the same
+shape of problem — already contained the argument against it: **isolation that
+has to be opted into is isolation the shipped configuration does not have.** A
+warning at startup is a line in a log a container platform discards. The
+deployment runs for a year, and the day somebody asks who approved the delete,
+the answer is the set of people holding one secret — which is exactly the state
+this ADR was written to end.
+
+The two positions are not reconcilable and the earlier one loses. A gateway
+whose policy can hold a call for a human now requires operators who can be
+named. Deployments upgrading past 2.0.0 with only `ACP_APPROVAL_OPERATOR_TOKEN`
+set will fail to start, loudly, with the fix in the error message — which is the
+correct cost for this, and is what "breaking change" is for.
 
 What would make us revisit: an operator population large enough that credential
 distribution is the problem rather than attribution — at which point the answer

@@ -45,15 +45,6 @@ written verbatim into an audit record, so it is validated once here rather than
 escaped everywhere it is read.
 """
 
-SHARED_OPERATOR: Final = "shared"
-"""The name recorded when the deployment configured one anonymous token.
-
-Deliberately not a person's name and deliberately not empty. Empty would read as
-"this field is not populated yet"; a plausible-looking name would be a lie. A
-row saying `shared` states exactly what is known: somebody holding the shared
-credential approved this, and the record cannot say who.
-"""
-
 MIN_TOKEN_LENGTH: Final = 32
 """Shortest operator credential accepted.
 
@@ -129,24 +120,41 @@ def directory_from_settings(
     routed at all (task 55). Presence-based, like every other switch in
     `runtime`.
 
-    Named operators win when both are configured, because the alternative is
-    guessing which the operator meant and the safe guess is the one that
-    records less.
+    **A shared credential is refused rather than downgraded.** An earlier
+    version of this accepted `ACP_APPROVAL_OPERATOR_TOKEN` and recorded every
+    approval as `shared`, with a warning — on the reasoning that an existing
+    deployment should not fail to start over the *quality* of its evidence.
+
+    That reasoning does not survive contact with ADR 0061, which was written
+    three commits earlier and says the opposite about the same shape of problem:
+    **isolation that has to be opted into is isolation the shipped configuration
+    does not have.** A warning at startup is a line in a log a container
+    platform discards. The deployment then runs for a year, and the day somebody
+    asks who approved the delete, the answer is the set of people who hold one
+    secret.
+
+    So: a policy that can hold a call for a human needs operators who can be
+    named, and a gateway configured otherwise does not start. The failure is
+    loud, immediate, and fixed by writing one file.
     """
     if named:
         return OperatorDirectory(Operator(name=name, token=token) for name, token in named.items())
     if single_token:
-        logger.warning(
-            "approvals.shared_credential",
-            extra={
-                "consequence": (
-                    "approvals will be recorded as 'shared'; the chain cannot say "
-                    "which person approved a call"
-                ),
-                "remedy": "configure ACP_APPROVAL_OPERATORS_FILE with one credential per person",
-            },
+        msg = (
+            "ACP_APPROVAL_OPERATOR_TOKEN is a single shared credential, so an "
+            "approval recorded under it names no one — the audit chain can say "
+            "only that somebody holding the secret said yes. Configure "
+            "ACP_APPROVAL_OPERATORS_FILE instead, with one credential per "
+            "person:\n"
+            "\n"
+            "    operators:\n"
+            "      - name: alice\n"
+            "        token: <at least 32 characters>\n"
+            "\n"
+            "See ADR 0062. If this gateway's policy never holds a call for a "
+            "human, unset both and the approval channel is not routed at all."
         )
-        return OperatorDirectory([Operator(name=SHARED_OPERATOR, token=single_token)])
+        raise ConfigurationError(msg)
     return None
 
 

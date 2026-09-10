@@ -11,7 +11,6 @@ import pytest
 
 from acp.approvals.operators import (
     MIN_TOKEN_LENGTH,
-    SHARED_OPERATOR,
     Operator,
     OperatorDirectory,
     directory_from_settings,
@@ -39,21 +38,40 @@ def test_an_unknown_credential_resolves_to_nobody() -> None:
     assert directory.resolve("") is None
 
 
-def test_a_shared_token_records_as_shared_rather_than_as_a_name() -> None:
-    """Neither empty nor plausible.
+def test_a_shared_token_is_refused_rather_than_downgraded() -> None:
+    """**The judgment this reverses.**
 
-    Empty reads as "this field is not populated yet"; a name would be a lie. A
-    row saying `shared` states exactly what is known — somebody holding the
-    shared credential approved this, and the record cannot say who.
+    An earlier version accepted a shared credential and recorded every approval
+    as `shared`, with a warning, so that an existing deployment would not fail
+    to start over the *quality* of its evidence.
+
+    ADR 0061 — written three commits earlier, about the same shape of problem —
+    says the opposite: isolation that has to be opted into is isolation the
+    shipped configuration does not have. A warning at startup is a line in a log
+    a container platform discards; the deployment then runs for a year, and the
+    day somebody asks who approved the delete the answer is the set of people
+    holding one secret.
     """
-    directory = directory_from_settings("a-shared-token-long-enough-to-pass")
-
-    assert directory is not None
-    assert directory.names == (SHARED_OPERATOR,)
+    with pytest.raises(ConfigurationError, match="ACP_APPROVAL_OPERATORS_FILE"):
+        directory_from_settings("a-shared-token-long-enough-to-pass")
 
 
-def test_named_operators_win_over_a_shared_token() -> None:
-    """Between the two, the safe guess is the one that records more."""
+def test_the_refusal_says_how_to_fix_it() -> None:
+    """A startup failure a deployer cannot act on is an outage with extra
+    steps. This one carries the file format in the message."""
+    with pytest.raises(ConfigurationError) as raised:
+        directory_from_settings("a-shared-token-long-enough-to-pass")
+
+    message = str(raised.value)
+    assert "operators:" in message
+    assert "name: alice" in message
+    assert "ADR 0062" in message
+
+
+def test_named_operators_are_accepted_alongside_a_stale_shared_token() -> None:
+    """The migration path: a deployment that sets the file may still have the
+    old variable in its environment, and should start rather than be told off
+    for a setting it has already superseded."""
     directory = directory_from_settings("a-shared-token-long-enough-to-pass", {"alice": ALICE})
 
     assert directory is not None

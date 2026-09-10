@@ -122,6 +122,13 @@ work here: the suite was measuring the wrong things confidently.
 
 ### Changed — breaking
 
+- **`ACP_APPROVAL_OPERATOR_TOKEN` no longer starts a gateway.** A single shared
+  credential means an approval names nobody, and recording it as `shared` with a
+  warning made the fix opt-in — which ADR 0061, three commits earlier, argues
+  against for the same shape of problem. Configure
+  `ACP_APPROVAL_OPERATORS_FILE` with one credential per person; the startup
+  error carries the file format. A gateway whose policy never holds a call for a
+  human needs neither.
 - Operator credentials must be at least 32 characters. The shipped
   `dev-only-operator-token` was 23, on a channel that shows every argument of
   every held call. Compose now mounts `config/operators.compose.yaml`.

@@ -193,6 +193,14 @@ jobs:
           # attacker with push access changes.
           digest="$(docker inspect --format='{{index .RepoDigests 0}}' \
             "${IMAGE}:${version}" | cut -d@ -f2)"
+          # Fail here, not three steps later. An empty digest makes the cosign
+          # step run `sign IMAGE@`, which errors obscurely *after* the image is
+          # already pushed and public — leaving a published unsigned artifact
+          # and a message nobody can read backwards to this line.
+          if [ -z "$digest" ]; then
+            echo "::error::could not resolve the pushed digest for ${IMAGE}:${version}; refusing to sign"
+            exit 1
+          fi
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
       # ------------------------------------------------------------------

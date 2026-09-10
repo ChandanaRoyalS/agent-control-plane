@@ -165,7 +165,7 @@ def _rule_matches(
     """
     if not matches_without_arguments(rule, subject, actor, tool):
         return False
-    outcome = check_all(rule.args, arguments)
+    outcome = check_all(rule.args, arguments, restrictive=rule.effect in RESTRICTIVE)
     if outcome is Outcome.UNDECIDABLE:
         return rule.effect in RESTRICTIVE
     return outcome is Outcome.MATCH

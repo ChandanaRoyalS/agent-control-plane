@@ -158,6 +158,17 @@ work here: the suite was measuring the wrong things confidently.
   re-measured here
   ([ADR 0067](docs/decisions/0067-record-the-dispatch-before-the-dispatch.md)).
 
+- **A deny rule was bypassable by pressing shift.** ADR 0060 fixed argument
+  *type* confusion and left strings compared with `==`, so `'Production'` and
+  `'production '` walked past a rule denying `production`. Strings are now
+  normalised (NFKC, strip, casefold) — but **only where a looser match is the
+  safer one**: loose when matching denies, strict when matching permits.
+  Normalising everywhere would have traded this bypass for a worse one, since an
+  `allow` on `doc_id: [public]` that also matched `PUBLIC` grants a document
+  nobody named. `not_equals` inverts, because its inner comparison is negated
+  before it decides anything
+  ([ADR 0068](docs/decisions/0068-a-guard-matches-loosely-a-grant-matches-exactly.md)).
+
 ### Changed — breaking
 
 - **`ACP_APPROVAL_OPERATOR_TOKEN` no longer starts a gateway.** A single shared

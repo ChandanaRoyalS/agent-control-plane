@@ -4,7 +4,7 @@
 return-per-minute artifact in the repository when someone asks 'why that
 way.'"*
 
-Sixty-seven of them is past the point where a reader can find the right one by
+Sixty-eight of them is past the point where a reader can find the right one by
 listing a directory, so there is an index. And **an index is a hand-maintained
 list, which is a list somebody forgets to extend** — the exact failure that
 shipped six times as an unwired control (ADR 0055) and once as fourteen broken

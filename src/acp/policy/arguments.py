@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import operator
 import re
+import unicodedata
 from collections.abc import Callable
 from enum import StrEnum
 from typing import Any, Final, Self
@@ -74,6 +75,44 @@ is the arrangement that makes catastrophic backtracking the caller's choice
 rather than the operator's. Bounded, and past the bound the answer is
 ``UNDECIDABLE`` — the guard fires rather than the check being skipped.
 """
+
+
+def loosely(value: str) -> str:
+    """A string reduced to what an author plainly meant by it.
+
+    NFKC first, so a full-width `\uff30roduction` or a compatibility ligature
+    becomes the ASCII an author typed; then whitespace, because a value that
+    arrived with a trailing space from a form field is the same value; then
+    case.
+
+    **Applied only where a looser match is the safer one** — see
+    `_loose_inner`. Normalising everywhere would be a bug in the other
+    direction: an `allow` on `doc_id: [public]` that also matched `PUBLIC` would
+    grant a document the author did not name.
+    """
+    return unicodedata.normalize("NFKC", value).strip().casefold()
+
+
+def _loose_inner(*, restrictive: bool, negated: bool) -> bool:
+    """Whether the *string comparison* inside a constraint should be loose.
+
+    The rule is one sentence: **a match should be easy to make when matching
+    denies, and hard to make when matching permits.** Everything else follows,
+    including the case that is easy to get backwards.
+
+    | constraint | effect | inner comparison | why |
+    |---|---|---|---|
+    | `equals` | deny / approval | loose | matching denies, so match readily |
+    | `equals` | allow | strict | matching permits, so demand the exact value |
+    | `not_equals` | deny / approval | **strict** | the inner match *suppresses* the denial |
+    | `not_equals` | allow | **loose** | the inner match *suppresses* the grant |
+
+    `not_equals` inverts because the inner comparison is negated before it
+    decides anything: `allow ... not_equals: [production]` against a supplied
+    `"Production"` must not permit the call, which requires the inner equality to
+    be *loose* so that the negation refuses it.
+    """
+    return restrictive != negated
 
 
 class Outcome(StrEnum):
@@ -182,7 +221,7 @@ class ArgConstraint(BaseModel):
             return {"equals": tuple(value)}
         return value
 
-    def check(self, supplied: Any, *, exists: bool) -> Outcome:
+    def check(self, supplied: Any, *, exists: bool, restrictive: bool = False) -> Outcome:
         """Whether this constraint holds for the value the call supplied."""
         if self.present is not None:
             return Outcome.MATCH if exists is self.present else Outcome.NO_MATCH
@@ -192,11 +231,14 @@ class ArgConstraint(BaseModel):
             # either, so this is NO_MATCH rather than UNDECIDABLE.
             return Outcome.NO_MATCH
         if self.equals is not None:
-            return _any_of(self.equals, supplied)
+            return _any_of(
+                self.equals, supplied, _loose_inner(restrictive=restrictive, negated=False)
+            )
         if self.not_equals is not None:
-            return _negate(_any_of(self.not_equals, supplied))
+            loose = _loose_inner(restrictive=restrictive, negated=True)
+            return _negate(_any_of(self.not_equals, supplied, loose))
         if self.matches is not None:
-            return _matches(self.matches, supplied)
+            return _matches(self.matches, supplied, restrictive)
         return _in_range(self, supplied)
 
 
@@ -247,12 +289,12 @@ def _over_value(scalar: Callable[[Any], Outcome], supplied: Any, depth: int = 0)
     return scalar(supplied)
 
 
-def _any_of(allowed: tuple[Any, ...], supplied: Any) -> Outcome:
+def _any_of(allowed: tuple[Any, ...], supplied: Any, loose: bool = False) -> Outcome:
     """Whether ``supplied`` is one of ``allowed``, walking lists elementwise."""
-    return _over_value(lambda value: _combine([_equal(a, value) for a in allowed]), supplied)
+    return _over_value(lambda value: _combine([_equal(a, value, loose) for a in allowed]), supplied)
 
 
-def _equal(rule_value: Any, supplied: Any) -> Outcome:
+def _equal(rule_value: Any, supplied: Any, loose: bool = False) -> Outcome:
     """Scalar equality that knows JSON's types apart.
 
     Booleans are checked before numbers because Python says ``True == 1``, and a
@@ -267,13 +309,17 @@ def _equal(rule_value: Any, supplied: Any) -> Outcome:
         # 1000 and 1000.0 are one number in JSON, and were two strings before.
         return Outcome.MATCH if rule_value == supplied else Outcome.NO_MATCH
     if isinstance(rule_value, str) and isinstance(supplied, str):
+        if loose:
+            return Outcome.MATCH if loosely(rule_value) == loosely(supplied) else Outcome.NO_MATCH
         return Outcome.MATCH if rule_value == supplied else Outcome.NO_MATCH
     # A scalar of a different type. Definitely a different value, and any author
     # can see that it is — so this is an answer, not a puzzle.
     return Outcome.NO_MATCH
 
 
-def _matches(pattern: str, supplied: Any) -> Outcome:
+def _matches(pattern: str, supplied: Any, loose: bool = False) -> Outcome:
+    flags = re.IGNORECASE if loose else 0
+
     def against(value: Any) -> Outcome:
         if not isinstance(value, str):
             # A pattern against a number is a question about a rendering, and
@@ -281,7 +327,7 @@ def _matches(pattern: str, supplied: Any) -> Outcome:
             return Outcome.UNDECIDABLE
         if len(value) > MAX_MATCHED_CHARS:
             return Outcome.UNDECIDABLE
-        return Outcome.MATCH if re.search(pattern, value) is not None else Outcome.NO_MATCH
+        return Outcome.MATCH if re.search(pattern, value, flags) is not None else Outcome.NO_MATCH
 
     return _over_value(against, supplied)
 
@@ -309,7 +355,7 @@ ArgConstraints = dict[str, ArgConstraint]
 """A rule's whole argument section."""
 
 
-def check_all(constraints: ArgConstraints, arguments: Any) -> Outcome:
+def check_all(constraints: ArgConstraints, arguments: Any, *, restrictive: bool = False) -> Outcome:
     """Every constraint, ANDed, with the tri-state preserved.
 
     One ``NO_MATCH`` settles it: the rule does not apply. Otherwise one
@@ -320,7 +366,7 @@ def check_all(constraints: ArgConstraints, arguments: Any) -> Outcome:
         return Outcome.MATCH
     supplied = arguments if isinstance(arguments, dict) else {}
     outcomes = [
-        constraint.check(supplied.get(name), exists=name in supplied)
+        constraint.check(supplied.get(name), exists=name in supplied, restrictive=restrictive)
         for name, constraint in constraints.items()
     ]
     if Outcome.NO_MATCH in outcomes:
@@ -330,4 +376,4 @@ def check_all(constraints: ArgConstraints, arguments: Any) -> Outcome:
     return Outcome.MATCH
 
 
-__all__ = ["ArgConstraint", "ArgConstraints", "Outcome", "check_all"]
+__all__ = ["ArgConstraint", "ArgConstraints", "Outcome", "check_all", "loosely"]

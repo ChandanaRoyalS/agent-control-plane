@@ -157,3 +157,84 @@ class TestTheSchemaRefusesAmbiguity:
     def test_an_invalid_regex_is_rejected_at_load_time(self) -> None:
         with pytest.raises(ValidationError):
             ArgConstraint.model_validate({"matches": "([unclosed"})
+
+
+class TestNormalisationRunsOnlyWhereLooserIsSafer:
+    """The second half of the review's argument bypass (ADR 0068).
+
+    ADR 0060 fixed type confusion — a list, a mapping, a float. It left string
+    normalisation alone, so a deny rule was still bypassable by pressing shift.
+    """
+
+    def guard(self, supplied: Any) -> Outcome:
+        """As a `deny` or `require_approval` rule sees it."""
+        return ArgConstraint(equals=("production",)).check(supplied, exists=True, restrictive=True)
+
+    def grant(self, supplied: Any) -> Outcome:
+        """As an `allow` rule sees it."""
+        return ArgConstraint(equals=("public",)).check(supplied, exists=True, restrictive=False)
+
+    def test_a_guard_matches_through_case_and_padding(self) -> None:
+        for supplied in ("production", "Production", "PRODUCTION", "production ", " production"):
+            assert self.guard(supplied) is Outcome.MATCH, supplied
+
+    def test_a_guard_matches_through_unicode_compatibility_forms(self) -> None:
+        """A full-width capital renders as the letter an author typed and is a
+        different code point. NFKC first, before case and padding."""
+        assert self.guard("\uff30roduction") is Outcome.MATCH  # U+FF30, renders as "P"
+
+    def test_a_guard_still_does_not_match_a_different_value(self) -> None:
+        """Looser is not *loose*. Normalisation must not turn a guard into one
+        that fires on everything — that is how a control gets switched off."""
+        assert self.guard("staging") is Outcome.NO_MATCH
+        assert self.guard("production-replica") is Outcome.NO_MATCH
+
+    def test_a_grant_demands_the_exact_value(self) -> None:
+        """**Why blanket normalisation would be a bug in the other direction.**
+
+        An `allow` on `doc_id: [public]` that also matched `PUBLIC` would grant
+        a document the author never named. If the upstream treats them as
+        different documents, that is an authorization bug introduced by a
+        convenience.
+        """
+        assert self.grant("public") is Outcome.MATCH
+        for supplied in ("Public", "PUBLIC", "public "):
+            assert self.grant(supplied) is Outcome.NO_MATCH, supplied
+
+    def test_not_equals_inverts_the_looseness(self) -> None:
+        """**The case that is easy to get backwards.**
+
+        `allow ... not_equals: [production]` means "allow anything that is not
+        production". Against `"Production"` the inner equality must be *loose*,
+        so the negation refuses — otherwise the rule permits production access
+        to anybody who holds down shift.
+        """
+        permissive = ArgConstraint(not_equals=("production",))
+
+        assert permissive.check("staging", exists=True, restrictive=False) is Outcome.MATCH
+        assert permissive.check("Production", exists=True, restrictive=False) is Outcome.NO_MATCH
+
+    def test_not_equals_under_a_guard_is_strict(self) -> None:
+        """And the mirror: `deny ... not_equals: [production]` denies everything
+        that is not production, so the inner equality must be *strict* — a
+        loosely-matched `"Production"` should suppress the denial only when it
+        is really the value the author exempted."""
+        restrictive = ArgConstraint(not_equals=("production",))
+
+        assert restrictive.check("production", exists=True, restrictive=True) is Outcome.NO_MATCH
+        assert restrictive.check("staging", exists=True, restrictive=True) is Outcome.MATCH
+
+    def test_a_guard_regex_is_case_insensitive_and_a_grant_regex_is_not(self) -> None:
+        pattern = ArgConstraint(matches="^/var/")
+
+        assert pattern.check("/VAR/x", exists=True, restrictive=True) is Outcome.MATCH
+        assert pattern.check("/VAR/x", exists=True, restrictive=False) is Outcome.NO_MATCH
+
+    def test_numbers_are_untouched_by_any_of_this(self) -> None:
+        """Normalisation is a string operation. A range constraint compares
+        numbers and has no case to fold."""
+        for restrictive in (True, False):
+            assert (
+                ArgConstraint(gt=1000).check(1001, exists=True, restrictive=restrictive)
+                is Outcome.MATCH
+            )

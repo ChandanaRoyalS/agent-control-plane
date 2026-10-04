@@ -15,6 +15,23 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.1.0] - 2026-10-04
+
+### Added
+
+- **Operators can authenticate with a JWT, and the audit row names them**
+  (ADR 0059). `ACP_APPROVAL_OPERATOR_AUDIENCE` names an audience; an operator
+  presents a token from an issuer the gateway already trusts, minted for that
+  audience, verified by the same validator with the same issuer binding and
+  tenant stamping as the request path. The decision's audit row records the
+  verified subject (`detail.operator`, `operator_issuer`,
+  `operator_verified`). An agent's token is refused on the channel; an
+  operator decides and lists only within their tenant. The shared token still
+  works and records itself as `shared-token`; a gateway running on it alone
+  logs `approval.shared_token_only` at every start.
+
 ### Fixed
 
 - **The approval view and the decision's audit row now carry the acting agent
@@ -45,6 +62,7 @@ without somebody accepting the change.
   "the agent cannot address the operator channel" rests on — a loopback bind
   that configuration can widen, behind a credential — rather than calling the
   address unreachable.
+- Container image: `ghcr.io/chandanaroyals/agent-control-plane:1.1.0`.
 
 ## [1.0.1] - 2026-10-04
 
@@ -161,7 +179,8 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.1.0
 [1.0.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.0.1
 [1.0.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.0.0
 

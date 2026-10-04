@@ -17,7 +17,7 @@ import logging
 import time
 from collections.abc import Mapping
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Final, Self
 
 import httpx
 
@@ -36,6 +36,12 @@ from acp.upstream.models import PROTOCOL_VERSION, CallToolResult, ListToolsResul
 from acp.upstream.protocol import Credentials
 
 logger = logging.getLogger(__name__)
+
+_TRANSIENT_STATUSES: Final = frozenset({408, 429})
+"""The two 4xx codes that describe the upstream's state rather than this request's
+correctness: a request timeout and a rate limit. Both pass on their own."""
+
+_SERVER_ERROR_FLOOR: Final = 500
 
 CLIENT_NAME = "agent-control-plane"
 """Identity sent in every request's envelope, since there is no handshake to
@@ -342,10 +348,26 @@ class UpstreamClient:
     def _parse(self, response: httpx.Response, method: str) -> dict[str, Any]:
         """Turn an HTTP response into a JSON-RPC result, or raise."""
         if response.is_error:  # httpx: any 4xx or 5xx
-            raise UpstreamUnavailableError(
-                f"{self.config.name} returned HTTP {response.status_code}",
+            status = response.status_code
+            if status in _TRANSIENT_STATUSES or status >= _SERVER_ERROR_FLOOR:
+                # The upstream is there and is struggling — or something in
+                # front of it is. Recoverable, retried, and evidence for the
+                # breaker.
+                raise UpstreamUnavailableError(
+                    f"{self.config.name} returned HTTP {status}",
+                    upstream=self.config.name,
+                    details={"method": method, "status": status},
+                )
+            # Any other 4xx is the upstream answering, deliberately, that *this
+            # request* is wrong: a bad credential, a wrong path, a method it
+            # does not serve. Retrying sends the same request; counting it
+            # toward the breaker would let one misconfigured API key withdraw a
+            # healthy upstream from every caller's catalogue. Not recoverable,
+            # not retried, not a failure the breaker counts.
+            raise UpstreamProtocolError(
+                f"{self.config.name} returned HTTP {status}",
                 upstream=self.config.name,
-                details={"method": method, "status": response.status_code},
+                details={"method": method, "status": status},
             )
 
         try:
@@ -366,7 +388,15 @@ class UpstreamClient:
 
         if "error" in payload:
             error = payload["error"]
-            if not isinstance(error, dict) or "code" not in error:
+            # JSON-RPC requires an integer code. A missing one, or a string,
+            # null or float in its place, is a malformed error object rather than
+            # a rejection — and must not escape as a `TypeError` or `ValueError`
+            # from a cast, which would leave the taxonomy on a hostile body.
+            if (
+                not isinstance(error, dict)
+                or not isinstance(error.get("code"), int)
+                or isinstance(error.get("code"), bool)
+            ):
                 raise UpstreamProtocolError(
                     f"{self.config.name} returned a malformed JSON-RPC error object",
                     upstream=self.config.name,
@@ -375,7 +405,7 @@ class UpstreamClient:
             raise UpstreamRejectedError(
                 str(error.get("message", "upstream rejected the request")),
                 upstream=self.config.name,
-                upstream_code=int(error["code"]),
+                upstream_code=error["code"],
                 details={"method": method},
             )
 

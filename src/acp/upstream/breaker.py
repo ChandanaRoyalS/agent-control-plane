@@ -44,8 +44,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 
-import anyio
-
 from acp.exceptions import (
     ACPError,
     CredentialExchangeError,
@@ -162,10 +160,19 @@ def counts_as_failure(exc: BaseException) -> bool:
 class CircuitBreaker:
     """Tracks one upstream's health and refuses calls when it is failing.
 
-    Guards state with a lock rather than relying on the single-threaded event
-    loop. The transitions read state, decide, and write it back; each ``await``
-    in between would be a place for another task to interleave and, for example,
-    let two probes through a half-open breaker configured to allow one.
+    **No lock, deliberately.** Both transitions — admit a call, record how it
+    went — read state, decide and write it back with no ``await`` in between,
+    so on a single event loop each is already atomic. An earlier version held
+    an ``anyio.Lock`` around them anyway, and the lock was the bug: acquiring
+    it is a cancellation point, so a half-open probe whose task was cancelled
+    (an agent disconnecting mid-call is routine) raised out of ``_leave``
+    before the probe was released. The breaker then sat half-open with a
+    phantom probe in flight and refused every caller, including the health
+    monitor, forever. The release path must not be able to fail, and the way to
+    guarantee that is for it to contain nothing that can.
+
+    If a transition ever needs to await something, that is the moment to bring
+    a lock back — and to shield the release from cancellation at the same time.
     """
 
     def __init__(
@@ -178,7 +185,6 @@ class CircuitBreaker:
         self._upstream = upstream
         self._policy = policy or BreakerPolicy()
         self._clock = clock or time.monotonic
-        self._lock = anyio.Lock()
         self._state = BreakerState.CLOSED
         self._consecutive_failures = 0
         self._opened_at: float | None = None
@@ -188,11 +194,10 @@ class CircuitBreaker:
 
     @property
     def state(self) -> BreakerState:
-        """The current state, without the lock.
+        """The current state.
 
-        Safe because a state read is a single attribute load and callers use it
-        for reporting, never to decide whether a call may proceed — that
-        decision belongs to :meth:`guard`, which does hold the lock.
+        For reporting only; callers never use it to decide whether a call may
+        proceed — that decision belongs to :meth:`guard`.
         """
         return self._state
 
@@ -215,92 +220,105 @@ class CircuitBreaker:
         ``record_failure`` methods, because those can be called in the wrong
         order or forgotten on an exception path, and a half-open probe that is
         never released leaves the breaker permanently refusing everyone.
+
+        The release runs in a ``finally`` and is synchronous, so there is no
+        exception path — cancellation included — on which a probe stays
+        counted as in flight. A cancelled call is recorded as neutral: it says
+        nothing about the upstream.
         """
-        await self._enter()
+        self._enter()
+        outcome: BaseException | None = None
         try:
             yield
         except BaseException as exc:
-            await self._leave(exc)
+            outcome = exc
             raise
-        await self._leave(None)
+        finally:
+            self._leave(outcome)
 
-    async def _enter(self) -> None:
-        async with self._lock:
+    def _enter(self) -> None:
+        if self._state is BreakerState.OPEN:
+            remaining = self._seconds_until_reset() or 0.0
+            if remaining > 0:
+                raise self._rejected(remaining)
+            # The timeout has elapsed: this caller becomes the probe.
+            self._state = BreakerState.HALF_OPEN
+            self._probes_in_flight = 0
+            self._log("breaker.half_open")
+
+        if (
+            self._state is BreakerState.HALF_OPEN
+            and self._probes_in_flight >= self._policy.half_open_max_calls
+        ):
+            # Somebody else is already testing the water. Everyone else
+            # keeps failing fast until that probe reports back.
+            raise self._rejected(self._policy.reset_timeout)
+
+        if self._state is BreakerState.HALF_OPEN:
+            self._probes_in_flight += 1
+
+    def _leave(self, exc: BaseException | None) -> None:
+        if self._state is BreakerState.HALF_OPEN:
+            self._probes_in_flight = max(0, self._probes_in_flight - 1)
+
+        if exc is None:
             if self._state is BreakerState.OPEN:
-                remaining = self._seconds_until_reset() or 0.0
-                if remaining > 0:
-                    raise self._rejected(remaining)
-                # The timeout has elapsed: this caller becomes the probe.
-                self._state = BreakerState.HALF_OPEN
-                self._probes_in_flight = 0
-                self._log("breaker.half_open")
-
-            if (
-                self._state is BreakerState.HALF_OPEN
-                and self._probes_in_flight >= self._policy.half_open_max_calls
-            ):
-                # Somebody else is already testing the water. Everyone else
-                # keeps failing fast until that probe reports back.
-                raise self._rejected(self._policy.reset_timeout)
-
-            if self._state is BreakerState.HALF_OPEN:
-                self._probes_in_flight += 1
-
-    async def _leave(self, exc: BaseException | None) -> None:
-        async with self._lock:
-            if self._state is BreakerState.HALF_OPEN:
-                self._probes_in_flight = max(0, self._probes_in_flight - 1)
-
-            if exc is None:
-                recovered = self._state is not BreakerState.CLOSED
-                self._consecutive_failures = 0
-                self._state = BreakerState.CLOSED
-                self._opened_at = None
-                if recovered:
-                    # Logged *after* the reset, so the line announcing recovery
-                    # reports zero consecutive failures rather than the count
-                    # that caused the outage. Logging it first read as though
-                    # the upstream were still failing at the moment it
-                    # recovered — how many failures preceded this is already on
-                    # the `breaker.opened` line.
-                    #
-                    # Only transitions are logged, not every success: a line per
-                    # healthy call would bury the three events that matter under
-                    # the traffic they are meant to describe.
-                    self._log("breaker.closed")
+                # A straggler: this call was admitted while the breaker was
+                # closed and happened to succeed after it tripped. It is not a
+                # probe — nobody admitted it to measure recovery — and closing
+                # on it would skip the measurement the half-open state exists
+                # to make. The same reasoning as the straggler *failure* below:
+                # a call that predates the trip is not new information.
                 return
+            recovered = self._state is not BreakerState.CLOSED
+            self._consecutive_failures = 0
+            self._state = BreakerState.CLOSED
+            self._opened_at = None
+            if recovered:
+                # Logged *after* the reset, so the line announcing recovery
+                # reports zero consecutive failures rather than the count
+                # that caused the outage. Logging it first read as though
+                # the upstream were still failing at the moment it
+                # recovered — how many failures preceded this is already on
+                # the `breaker.opened` line.
+                #
+                # Only transitions are logged, not every success: a line per
+                # healthy call would bury the three events that matter under
+                # the traffic they are meant to describe.
+                self._log("breaker.closed")
+            return
 
-            if not counts_as_failure(exc):
-                # Neutral. Notably this leaves a half-open breaker half-open
-                # rather than closing it: the upstream answering with an error
-                # proves it is alive, but the breaker tracks whether calls
-                # *succeed*, and a stream of bad-argument calls should not be
-                # able to hold the circuit closed over an upstream that never
-                # actually serves anything.
-                return
+        if not counts_as_failure(exc):
+            # Neutral. Notably this leaves a half-open breaker half-open
+            # rather than closing it: the upstream answering with an error
+            # proves it is alive, but the breaker tracks whether calls
+            # *succeed*, and a stream of bad-argument calls should not be
+            # able to hold the circuit closed over an upstream that never
+            # actually serves anything.
+            return
 
-            self._consecutive_failures += 1
+        self._consecutive_failures += 1
 
-            if self._state is BreakerState.OPEN:
-                # Already open, and this is a call that was in flight when it
-                # tripped. Its failure is not new information, and re-opening
-                # here would restart the reset timer. With a read timeout close
-                # to the reset timeout, a trickle of stragglers landing one
-                # after another would push recovery back indefinitely and the
-                # breaker would never get as far as a probe.
-                return
+        if self._state is BreakerState.OPEN:
+            # Already open, and this is a call that was in flight when it
+            # tripped. Its failure is not new information, and re-opening
+            # here would restart the reset timer. With a read timeout close
+            # to the reset timeout, a trickle of stragglers landing one
+            # after another would push recovery back indefinitely and the
+            # breaker would never get as far as a probe.
+            return
 
-            if (
-                self._state is BreakerState.HALF_OPEN
-                or self._consecutive_failures >= self._policy.failure_threshold
-            ):
-                # A failed probe re-opens immediately, without waiting to
-                # accumulate another full threshold. The threshold's job is to
-                # decide whether a *healthy* upstream has gone bad; a half-open
-                # breaker has already made that call.
-                self._state = BreakerState.OPEN
-                self._opened_at = self._clock()
-                self._log("breaker.opened", level=logging.ERROR, error=type(exc).__name__)
+        if (
+            self._state is BreakerState.HALF_OPEN
+            or self._consecutive_failures >= self._policy.failure_threshold
+        ):
+            # A failed probe re-opens immediately, without waiting to
+            # accumulate another full threshold. The threshold's job is to
+            # decide whether a *healthy* upstream has gone bad; a half-open
+            # breaker has already made that call.
+            self._state = BreakerState.OPEN
+            self._opened_at = self._clock()
+            self._log("breaker.opened", level=logging.ERROR, error=type(exc).__name__)
 
     # -- internals ---------------------------------------------------------
 

@@ -15,7 +15,43 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **A cancelled half-open probe no longer wedges the circuit breaker.** The
+  breaker's transitions were serialised with an `anyio.Lock`; acquiring it is a
+  cancellation point, so a probe whose task was cancelled mid-call (an agent
+  disconnecting) raised out of the release path before the probe was counted
+  as finished. The breaker then sat half-open with a phantom probe in flight
+  and refused every caller — the health monitor included — with nothing that
+  would ever let it out. The transitions contain no awaits and are now plain
+  synchronous methods, run from a `finally`, so the release cannot be
+  interrupted. A cancelled call is recorded as neutral evidence.
+- **A straggler succeeding after the breaker opened no longer closes it.** Only
+  a half-open probe's success closes the circuit; a call admitted before the
+  trip is not a measurement of recovery, exactly as its failure was already
+  not treated as new information.
+- **An HTTP 4xx from an upstream is no longer treated as an outage.** A 401
+  from a misconfigured credential, a 404 at the URL, a 405: each was mapped to
+  `UpstreamUnavailableError`, retried `max_attempts` times and counted toward
+  opening the breaker — so one bad API key withdrew a healthy upstream from
+  every caller's catalogue. Those now raise `UpstreamProtocolError`: not
+  recoverable, not retried, not a breaker failure. 408 and 429 still count as
+  transient, as does every 5xx.
+- **A JSON-RPC error object with a non-integer `code`** raised a bare
+  `TypeError`/`ValueError` from the cast, outside the error taxonomy. It is now
+  a malformed-response `UpstreamProtocolError`.
+
+- **The identity smoke test no longer races the health prober.** The mock
+  upstreams' `/debug/credential` recorded every request, probes included, and
+  the smoke test's repeated `search` calls were answered from the result cache
+  without reaching the upstream — so a probe landing mid-run blanked the record
+  and four checks failed on an unrelated change. The mocks now record only
+  `tools/call`, and the smoke test sends a distinct query per call.
+
+### Changed
+
+- Removed the author's internal task-plan numbering and one-shot patch scripts
+  from the repository; corrected every URL to the repository's current home.
 
 ## [1.0.0] - 2026-08-14
 

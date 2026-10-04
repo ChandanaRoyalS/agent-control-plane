@@ -25,6 +25,7 @@ from acp.exceptions import (
 from acp.mocks import mock_a, mock_b
 from acp.mocks.chaos import CHAOS_MODE_HEADER, CHAOS_PARAM_HEADER
 from acp.upstream import UpstreamClient, UpstreamConfig
+from acp.upstream.breaker import counts_as_failure
 from acp.upstream.envelope import (
     CLIENT_CAPABILITIES_META_KEY,
     CLIENT_INFO_META_KEY,
@@ -445,6 +446,76 @@ def test_http_error_status_raises_unavailable() -> None:
 
     assert exc_info.value.details["status"] == 503
     assert exc_info.value.recoverable is True
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504, 408, 429])
+def test_server_errors_and_transient_4xx_are_recoverable(status: int) -> None:
+    """These describe the upstream's state, not this request: retried, counted."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, text="not now")
+
+    async def _run() -> None:
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        async with UpstreamClient(UpstreamConfig(name="mock-a", url="http://mock/mcp"), http) as c:
+            await c.list_tools()
+
+    with pytest.raises(UpstreamUnavailableError) as exc_info:
+        run(_run)
+
+    assert exc_info.value.details["status"] == status
+    assert exc_info.value.recoverable is True
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 405, 410, 422])
+def test_other_4xx_is_the_upstream_refusing_this_request_not_an_outage(status: int) -> None:
+    """A 401 from a bad API key is not evidence the upstream is down.
+
+    Classifying it as unavailable made the client retry it ``max_attempts``
+    times and the breaker count every attempt — so one misconfigured
+    credential withdrew a perfectly healthy upstream from everyone's catalogue.
+    The upstream answered; it said no to *this* request. Not recoverable, not
+    retried, and ``counts_as_failure`` is false for it.
+    """
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, text="no")
+
+    async def _run() -> None:
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        async with UpstreamClient(UpstreamConfig(name="mock-a", url="http://mock/mcp"), http) as c:
+            await c.list_tools()
+
+    with pytest.raises(UpstreamProtocolError) as exc_info:
+        run(_run)
+
+    assert exc_info.value.details["status"] == status
+    assert exc_info.value.recoverable is False
+    assert counts_as_failure(exc_info.value) is False
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        pytest.param("oops", id="string"),
+        pytest.param(None, id="null"),
+        pytest.param(1.5, id="float"),
+    ],
+)
+def test_a_non_integer_jsonrpc_error_code_is_a_protocol_error(code: Any) -> None:
+    """``int(error["code"])`` used to raise ``TypeError``/``ValueError`` here —
+    an exception outside the taxonomy, produced by a body the upstream chose."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "error": {"code": code}})
+
+    async def _run() -> None:
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        async with UpstreamClient(UpstreamConfig(name="mock-a", url="http://mock/mcp"), http) as c:
+            await c.list_tools()
+
+    with pytest.raises(UpstreamProtocolError):
+        run(_run)
 
 
 def test_tools_list_without_a_tools_array_raises_protocol_error() -> None:

@@ -141,7 +141,15 @@ def unverified_claims(token: str) -> dict[str, Any]:
 
 
 class SeenCredential:
-    """What the last request carried, so a test outside the process can look.
+    """What the last ``tools/call`` carried, so a test outside the process can look.
+
+    ``tools/call`` only, because the gateway's health prober issues a
+    credential-less ``tools/list`` against every upstream every few seconds. If
+    probes were recorded too, a smoke test that calls a tool and then reads this
+    would race the prober — and lose whenever the tool call was answered from
+    the gateway's result cache, which never reaches this process at all. The
+    question this answers is "what did the last *call* arrive with", and a probe
+    is not a call.
 
     Deliberately holds the decoded claims and a *fingerprint* rather than the
     token. A demo that prints a working bearer token to a terminal, into a log,
@@ -196,7 +204,8 @@ def build_mock_app(server_name: str, tools: list[MockTool]) -> Starlette:
     seen = SeenCredential()
 
     async def handle(request: Request) -> Response:  # noqa: PLR0911
-        seen.record(request.headers.get("authorization"))
+        if request.headers.get("mcp-method") == "tools/call":
+            seen.record(request.headers.get("authorization"))
         mode = resolve_mode(request.headers.get(CHAOS_MODE_HEADER))
 
         if mode is ChaosMode.DISCONNECT:
@@ -259,7 +268,7 @@ def build_mock_app(server_name: str, tools: list[MockTool]) -> Starlette:
         return _json_response(result)
 
     async def credential(_request: Request) -> Response:
-        """What credential the last MCP request carried.
+        """What credential the last ``tools/call`` carried.
 
         The only vantage point from which the no-passthrough invariant is
         observable from *outside* the gateway process: everything else in this

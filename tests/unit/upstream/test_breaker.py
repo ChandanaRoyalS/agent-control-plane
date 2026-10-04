@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 import anyio
+import anyio.lowlevel
 import pytest
 
 from acp.exceptions import (
@@ -209,9 +210,106 @@ def test_a_straggler_failing_after_it_opened_does_not_restart_the_clock() -> Non
     assert run(_run) == pytest.approx(1.0), "the reset timer must not have moved"
 
 
+def test_a_straggler_succeeding_after_it_opened_does_not_close_the_circuit() -> None:
+    """The mirror of the failing-straggler case.
+
+    A call admitted while the breaker was closed comes back *successful* after
+    the breaker has tripped. It was never a probe — nothing admitted it to
+    measure recovery — and letting it close the circuit would skip the half-open
+    measurement entirely: the next burst goes straight at an upstream the
+    breaker has just decided is down.
+    """
+    clock = FakeClock()
+    cb = breaker(clock, failure_threshold=1, reset_timeout=30.0)
+
+    async def _run() -> BreakerState:
+        entered = anyio.Event()
+        release = anyio.Event()
+
+        async def straggler() -> None:
+            async with cb.guard():
+                entered.set()
+                await release.wait()
+                # ...and returns normally, late.
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(straggler)
+            await entered.wait()
+            await fail(cb)  # opens underneath the straggler
+            clock.advance(5.0)
+            release.set()
+
+        return cb.state
+
+    assert run(_run) is BreakerState.OPEN, "a straggler's success is not a probe's success"
+    assert cb.snapshot().seconds_until_reset == pytest.approx(25.0)
+
+
 # ---------------------------------------------------------------------------
 # Half-open: measuring recovery instead of assuming it
 # ---------------------------------------------------------------------------
+
+
+def test_a_cancelled_probe_releases_its_slot() -> None:
+    """The wedge.
+
+    The half-open probe's task is cancelled mid-call — an agent disconnecting
+    is the everyday way this happens. If the release path can be interrupted
+    by that cancellation, the breaker stays half-open with a probe it believes
+    is still in flight and refuses every caller, including the health monitor,
+    with no timeout that would ever let it out.
+    """
+    clock = FakeClock()
+    cb = breaker(clock, failure_threshold=1, reset_timeout=1.0)
+
+    async def _run() -> None:
+        await fail(cb)
+        clock.advance(2.0)  # the next caller becomes the probe
+
+        started = anyio.Event()
+
+        async def probe() -> None:
+            async with cb.guard():
+                started.set()
+                await anyio.sleep_forever()
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(probe)
+            await started.wait()
+            assert cb.state is BreakerState.HALF_OPEN
+            tg.cancel_scope.cancel()
+
+        # Still half-open — a cancelled call said nothing about the upstream —
+        # but the slot is free, so the next caller is admitted as the probe
+        # rather than refused.
+        assert cb.state is BreakerState.HALF_OPEN
+        await succeed(cb)
+
+    run(_run)
+
+    assert cb.state is BreakerState.CLOSED
+
+
+def test_cancellation_is_neutral_evidence() -> None:
+    """A cancelled call is neither a success nor a failure for the count."""
+    cb = breaker(failure_threshold=2)
+
+    async def _run() -> None:
+        await fail(cb)
+
+        async def cancelled() -> None:
+            async with cb.guard():
+                await anyio.sleep_forever()
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(cancelled)
+            await anyio.lowlevel.checkpoint()
+            tg.cancel_scope.cancel()
+
+    run(_run)
+
+    assert cb.state is BreakerState.CLOSED
+    assert cb.snapshot().consecutive_failures == 1
 
 
 def test_after_the_reset_timeout_one_call_is_let_through() -> None:

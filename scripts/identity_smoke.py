@@ -64,6 +64,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+import uuid
 from typing import Any
 
 from keycloak_token import access_token, claims, untrusted_token
@@ -298,6 +299,14 @@ def call_a_tool(token: str, name: str) -> tuple[int, str]:
 
     Returns the body alongside the status, because a 400 that does not say why
     is a check that turns one bug into an afternoon.
+
+    **The query is unique per call.** `search` is result-cached in the composed
+    stack (`config/cache.yaml`), so a repeated call with identical arguments is
+    answered from the gateway's memory and never reaches the upstream — and
+    every check below reads what the upstream saw. A fresh argument each time
+    makes every call a real one. The *credential* cache is unaffected: it is
+    keyed on the caller's token and the audience, not on the arguments, which is
+    exactly what lets the repeat-call check below still observe a cache hit.
     """
     body = {
         "jsonrpc": "2.0",
@@ -305,7 +314,7 @@ def call_a_tool(token: str, name: str) -> tuple[int, str]:
         "method": "tools/call",
         "params": {
             "name": name,
-            "arguments": {"query": "retention"},
+            "arguments": {"query": f"retention {uuid.uuid4().hex[:8]}"},
             "_meta": {
                 "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
                 "io.modelcontextprotocol/clientCapabilities": {},

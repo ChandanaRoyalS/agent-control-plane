@@ -209,14 +209,25 @@ class ApprovalRequest:
     """
 
     arguments_bytes: int = 0
+    """Size of the canonical form, recorded even when it is withheld — so a
+    withheld call reports *how* large rather than merely that it was too big."""
 
     tenant: str | None = None
     """Shown to the operator. "alice wants to delete the dataset" and
     "acme's alice wants to delete the dataset" are different sentences, and the
     person deciding is entitled to the one that is true. Defaulted so the
     single-tenant gateway constructs records exactly as before."""
-    """Size of the canonical form, recorded even when it is withheld — so a
-    withheld call reports *how* large rather than merely that it was too big."""
+
+    actor: str | None = None
+    """The agent acting for ``subject`` — RFC 8693's ``act`` claim (ADR 0015).
+
+    Shown to the operator and written to the audit row. It was always *in the
+    fingerprint*, so an approval could never be spent by a different agent; but
+    a person asked to approve "alice wants to delete the dataset" was not told
+    *which of alice's agents* was asking, and an auditor reading the row could
+    not tell either. Both identities, always — the view and the record now say
+    what the binding already enforced.
+    """
 
     def expired(self, now: float) -> bool:
         return now >= self.expires_at
@@ -259,6 +270,7 @@ def request_for(
         fingerprint=digest,
         subject=subject,
         tenant=tenant,
+        actor=actor,
         tool=tool,
         rule=rule,
         created_at=now,

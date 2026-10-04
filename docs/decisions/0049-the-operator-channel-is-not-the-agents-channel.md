@@ -35,6 +35,18 @@ bound to loopback by default, which ADR 0010 stood up for the metrics endpoint
 and which has never been reachable from the request path. **An agent cannot
 approve its own call because it cannot address the thing that approves calls.**
 
+**What "cannot address" rests on, stated exactly.** It is a loopback bind,
+and a bind is configuration, not topology: `ACP_ADMIN_HOST` can be widened, and
+the compose stack widens it, because a published port forwards to a container
+address and `127.0.0.1` inside a container is reachable from nowhere. In that
+stack the mock upstreams — an adversary the threat model names — can reach
+`:9090` on the compose network, and the admin port is published to the host's
+loopback only so the rest of the machine's network cannot. Wherever the bind is
+wider than loopback, the separation is a second port plus a credential, not an
+unreachable address, and §2 is carrying the weight. The honest version of the
+sentence above is: an agent cannot approve its own call *on the default
+configuration*, and on any other it needs the operator's credential to try.
+
 That is the same argument `_await_approval` already makes about MRTR's
 `input_responses` — the client may answer the questions the server asked, and
 here the client is the agent, so nobody reads it. This makes the argument a

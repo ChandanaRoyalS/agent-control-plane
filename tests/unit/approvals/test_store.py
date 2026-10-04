@@ -108,3 +108,67 @@ def test_the_in_memory_store_satisfies_the_protocol() -> None:
     store: ApprovalStore = InMemoryApprovalStore()
 
     assert store.get("nothing") is None
+
+
+# ---------------------------------------------------------------------------
+# Eviction cannot be aimed at somebody else
+# ---------------------------------------------------------------------------
+
+
+def a_request_from(subject: str, index: int, *, now: float = NOW) -> ApprovalRequest:
+    request = request_for(
+        tenant=None,
+        subject=subject,
+        actor=None,
+        tool="crm__delete_record",
+        arguments={"n": index},
+        rule="approve-deletes",
+        now=now,
+    )
+    assert request is not None
+    return request
+
+
+def test_a_flood_from_one_principal_evicts_that_principals_own_requests_first() -> None:
+    """Oldest-first eviction let any caller with one gated tool push a
+    colleague's pending request out of the store by asking `max_pending` times.
+    A flood now costs the flooder, not the person waiting beside them."""
+    store = InMemoryApprovalStore(max_pending=3)
+    bobs = a_request_from("bob", 0)
+    store.create(bobs)
+    for index in range(1, 6):
+        store.create(a_request_from("mallory", index))
+
+    assert len(store) == 3
+    assert store.get(bobs.token) is bobs, "bob's older request must survive mallory's flood"
+    assert sum(1 for r in store.pending() if r.subject == "mallory") == 2
+
+
+def test_finished_requests_are_evicted_before_anyone_still_waiting() -> None:
+    """A decided or consumed record is kept only so a late retry reads
+    "already decided" rather than "no such request". That courtesy is the first
+    thing to go when space is short — never a live pending request."""
+    store = InMemoryApprovalStore(max_pending=3)
+    waiting = a_request_from("bob", 0)  # the oldest, and still pending
+    done = a_request_from("alice", 1)
+    store.create(waiting)
+    store.create(done)
+    store.decide(done.token, approved=True)
+    store.consume(done.token)
+    store.create(a_request_from("carol", 2))
+    store.create(a_request_from("dave", 3))  # full: something has to go
+
+    assert store.get(done.token) is None, "the consumed record is the victim, not the oldest"
+    assert store.get(waiting.token) is waiting
+
+
+def test_expired_requests_are_evicted_before_live_ones() -> None:
+    store = InMemoryApprovalStore(max_pending=2)
+    live = a_request_from("bob", 0)  # the oldest entry, and still live
+    stale = a_request_from("alice", 1, now=NOW - 10_000)  # long expired by NOW
+    store.create(live)
+    store.create(stale)
+    store.create(a_request_from("carol", 2))
+
+    assert store.get(stale.token) is None
+    assert store.get(live.token) is live

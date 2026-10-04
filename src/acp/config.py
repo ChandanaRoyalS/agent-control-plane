@@ -28,6 +28,7 @@ import yaml
 from pydantic import Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from acp.approvals.operator import MIN_OPERATOR_TOKEN_LENGTH
 from acp.approvals.record import DEFAULT_TTL_SECONDS
 from acp.approvals.store import DEFAULT_MAX_PENDING
 from acp.exceptions import ConfigurationError
@@ -584,6 +585,27 @@ class GatewaySettings(BaseSettings):
     def exchange_configured(self) -> bool:
         """Whether the gateway will mint per-upstream credentials."""
         return bool(self.auth_client_id and self.auth_client_secret)
+
+    @model_validator(mode="after")
+    def _operator_token_is_a_credential(self) -> GatewaySettings:
+        """An operator token that is set must be long enough to be one.
+
+        Empty means "no channel" and is fine. Anything else authorises a write
+        that grants permissions, on a listener the compose stack publishes, and
+        a four-character value there is not a weak credential but a guessable
+        one. Sixteen characters is the floor `secrets.token_urlsafe(12)`
+        produces and well under what `acp secrets` would store; it exists to
+        catch `changeme`, not to grade entropy.
+        """
+        token = self.approval_operator_token
+        if token and len(token) < MIN_OPERATOR_TOKEN_LENGTH:
+            msg = (
+                f"ACP_APPROVAL_OPERATOR_TOKEN is {len(token)} characters; a value this "
+                f"short is guessable, and the floor is {MIN_OPERATOR_TOKEN_LENGTH}. "
+                "Generate one with `python -c 'import secrets; print(secrets.token_urlsafe(32))'`."
+            )
+            raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def _identity_settings_are_coherent(self) -> GatewaySettings:

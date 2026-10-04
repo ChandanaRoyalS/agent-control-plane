@@ -238,7 +238,14 @@ services:
       - ./audit:/app/audit
     ports:
       - "8080:8080"
-      - "9090:9090"
+      # Host loopback only. This is the listener that approves calls, streams
+      # every decision and serves metrics; publishing it on every host interface
+      # handed the approval channel of a development stack to the whole LAN,
+      # protected by a token that is committed to this file. The gateway still
+      # binds 0.0.0.0 *inside* the container, because that is what a published
+      # port forwards to — so on the compose network the mock upstreams can
+      # address it, and the credential is what protects it there (ADR 0049 §4).
+      - "127.0.0.1:9090:9090"
 
   # -------------------------------------------------------------------------
   # Mock upstreams — ADR 0004

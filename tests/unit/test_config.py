@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from acp.approvals.operator import MIN_OPERATOR_TOKEN_LENGTH
 from acp.config import (
     GatewaySettings,
     allowed_hosts_for,
@@ -416,3 +417,24 @@ def test_a_malformed_issuers_file_is_a_startup_failure(
 def test_a_missing_issuers_file_names_itself(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match=r"issuers\.yaml"):
         load_issuers(tmp_path / "issuers.yaml")
+
+
+# ---------------------------------------------------------------------------
+# The operator token is a credential, and a short one is refused
+# ---------------------------------------------------------------------------
+
+
+def test_a_short_operator_token_is_refused_at_load() -> None:
+    """`changeme` as the credential for the one write on the admin listener
+    should not start a gateway; the floor catches it where it is set."""
+    with pytest.raises(ValidationError, match="ACP_APPROVAL_OPERATOR_TOKEN"):
+        settings(approval_operator_token="changeme")
+
+
+def test_an_empty_operator_token_still_means_no_channel() -> None:
+    assert settings(approval_operator_token="").approval_operator_token == ""
+
+
+def test_an_operator_token_at_the_floor_is_accepted() -> None:
+    token = "x" * MIN_OPERATOR_TOKEN_LENGTH
+    assert settings(approval_operator_token=token).approval_operator_token == token

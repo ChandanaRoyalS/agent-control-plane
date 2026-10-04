@@ -88,3 +88,42 @@ def test_cost_greater_than_one_is_debited() -> None:
     assert rl.check("alice", T0, cost=3.0)
     assert rl.check("alice", T0, cost=3.0) is False  # only 2 left
     assert rl.check("alice", T0, cost=2.0)
+
+
+# ---------------------------------------------------------------------------
+# Per-principal state is bounded, and asking creates nothing
+# ---------------------------------------------------------------------------
+
+
+def test_the_limiter_forgets_the_least_recently_charged_principal() -> None:
+    """An authenticated caller chooses the keys: a tenant's IdP minting
+    per-session subjects would grow the dict without limit. The result cache
+    was bounded for exactly this reason; the budgets were not."""
+    limiter = RateLimiter(capacity=5, refill_per_second=0, max_principals=3)
+    for principal in ("a", "b", "c"):
+        assert limiter.check(principal, now=0.0)
+    assert limiter.check("a", now=1.0)  # a is now the most recent
+    assert limiter.check("d", now=2.0)  # evicts b, the least recent
+
+    assert limiter.remaining("b") == 5, "forgotten: a fresh, full bucket on return"
+    assert limiter.remaining("a") == 3
+    assert limiter.remaining("d") == 4
+
+
+def test_asking_about_a_stranger_creates_no_bucket() -> None:
+    """`retry_after` and `remaining` used to create a bucket for a principal
+    never charged — so a stream of distinct names in refusals' detail fields
+    could fill the table without a single successful call."""
+    limiter = RateLimiter(capacity=5, refill_per_second=1, max_principals=3)
+
+    assert limiter.retry_after("nobody") == 0.0
+    assert limiter.remaining("nobody") == 5
+    assert len(limiter._buckets) == 0
+
+
+def test_affords_does_not_debit() -> None:
+    limiter = RateLimiter(capacity=2, refill_per_second=0)
+    assert limiter.affords("a", now=0.0, cost=2)
+    assert limiter.affords("a", now=0.0, cost=2), "still affordable: nothing was spent"
+    assert not limiter.affords("a", now=0.0, cost=3)
+    assert limiter.remaining("a") == 2

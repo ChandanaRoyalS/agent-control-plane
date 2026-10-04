@@ -146,8 +146,10 @@ services:
       ACP_QUOTA_ENABLED: "${ACP_QUOTA_ENABLED:-true}"
       ACP_QUOTA_LIMIT: "${ACP_QUOTA_LIMIT:-500000}"
       # Interpolated so a demo can make either bind for one run:
-      #   ACP_RATE_LIMIT_CAPACITY=5 ACP_RATE_LIMIT_REFILL_PER_SECOND=1 \
+      #   ACP_RATE_LIMIT_CAPACITY=10 ACP_RATE_LIMIT_REFILL_PER_SECOND=1 \
       #       docker compose up -d --wait gateway
+      # Not lower than 10: the gateway refuses to start with a cost table
+      # naming a tool (mock-b__summarize, 10) nobody could ever afford.
       # Two more content blocks than the upstream sent, which is a visible
       # change to the wire and therefore a deliberate one (ADR 0037). On here
       # because the firewall below is on: with framing enabled an unfenced block

@@ -149,6 +149,15 @@ class TokenValidator:
             )
         except jwt.InvalidTokenError as exc:
             raise _rejected(type(exc).__name__) from exc
+        except (TypeError, ValueError) as exc:
+            # Not every way a token can be wrong is an `InvalidTokenError`. A
+            # key set holding both EC and RSA keys plus an unauthenticated token
+            # whose header names an EC `kid` with `alg: RS256` makes the library
+            # raise `TypeError` from the key's PEM handling — which escaped the
+            # middleware as a 500 with a traceback, on every such request,
+            # before any credential was presented. Fail-closed is preserved;
+            # the status and the noise were not. Same rejection, same message.
+            raise _rejected(type(exc).__name__) from exc
 
         try:
             principal = from_claims(claims)

@@ -1,6 +1,7 @@
 # ADR 0044 — What the rate limiter does not do, and why each cut was made
 
-**Status:** accepted
+**Status:** accepted — §4 superseded by [ADR 0051](0051-a-tenant-is-an-issuer-not-a-claim.md);
+§3's debit rule was found violated and fixed (amendment below)
 **Date:** 2026-08-12
 
 ## Context
@@ -107,6 +108,29 @@ the system knows about.
 
 So: **per-tenant is out of scope until the identity model has a tenant**, and
 naming that dependency is more useful than an unexplained gap.
+
+## Amendment — 2026-10-04
+
+Two things this record said were not true of the code when it was checked.
+
+**§4 is superseded.** Tenancy arrived with ADR 0051: budget accounts are
+tenant-qualified (`acp.budget.account`), so budgets are *isolated* per tenant.
+They still share one capacity and refill rate — isolation, not differentiation —
+which the threat model's §6.6 records.
+
+**§3's rule — check both, then debit both — was stated here and not followed.**
+`_charge` debited the token bucket and then asked the quota, so a call the quota
+refused had already spent its rate-limit tokens on the way to the refusal; a
+caller at their quota ceiling was also drained of burst allowance for calls that
+never ran. Both budgets now expose `affords` (check without spending), the
+request path checks both before debiting either, and a test holds the bucket
+still after three quota refusals.
+
+Two cuts this record did not make and should have: per-principal state was
+unbounded (an authenticated caller chooses the keys; now LRU-bounded at 10,000
+principals, like the result cache), and a tool costing more than the bucket's
+capacity was a permanent refusal with a finite `retry_after` (now a
+configuration error at startup).
 
 ## Alternatives considered
 

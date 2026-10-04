@@ -133,7 +133,11 @@ class CredentialCache:
         if token.expired():
             # Dropped rather than returned-and-refreshed. A caller that receives
             # an expired credential has no way to tell it apart from a live one.
+            # The lock goes with it: locks were only ever released on LRU
+            # eviction, so a long-running gateway accumulated one `anyio.Lock`
+            # per distinct subject token it had ever seen.
             del self._entries[key]
+            self._locks.pop(key, None)
             return None
         self._entries.move_to_end(key)
         return token

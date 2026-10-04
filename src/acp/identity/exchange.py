@@ -54,6 +54,7 @@ import logging
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -66,6 +67,7 @@ from acp.exceptions import (
     CredentialProviderUnavailableError,
 )
 from acp.identity.cache import CredentialCache, CredentialKey
+from acp.identity.discovery import plaintext_permitted
 from acp.identity.issuers import IssuerRegistry
 from acp.identity.principal import current_principal, current_subject_token
 from acp.observability import metrics
@@ -489,21 +491,38 @@ def _audiences_of(token: str) -> frozenset[str] | None:
     return frozenset()
 
 
-def require_token_endpoints(issuers: IssuerRegistry) -> None:
+def require_token_endpoints(issuers: IssuerRegistry, insecure_hosts: Iterable[str] = ()) -> None:
     """Refuse to start when exchange is configured and an issuer cannot do it.
 
     At startup, before a port is bound, because the alternative is a gateway
     that serves happily and fails the first request from whichever authorization
     server happens to be the one without an endpoint. With several issuers that
     could be the tenant nobody tested.
+
+    **And refuse a plaintext endpoint.** The exchange POSTs the gateway's
+    client secret and the caller's own token to this URL (RFC 8693 sends the
+    inbound token as `subject_token`). The https rule was applied to the issuer
+    and to the key set, and not to the one URL that receives both credentials —
+    the same control present on two of three paths into one decision. Exempt
+    hosts (`ACP_AUTH_INSECURE_ISSUER_HOSTS`) stay exempt here too, which is what
+    lets the compose stack talk to `http://keycloak:8080`.
     """
     missing = [r.issuer for r in issuers if not r.token_endpoint]
-    if not missing:
-        return
-    msg = (
-        f"token exchange is configured, but no token endpoint is known for: "
-        f"{', '.join(sorted(missing))}. It is normally discovered from the issuer's "
-        f"metadata — an explicit ACP_AUTH_JWKS_URL skips that discovery, in which "
-        f"case set ACP_AUTH_TOKEN_ENDPOINT as well."
-    )
-    raise ConfigurationError(msg)
+    if missing:
+        msg = (
+            f"token exchange is configured, but no token endpoint is known for: "
+            f"{', '.join(sorted(missing))}. It is normally discovered from the issuer's "
+            f"metadata — an explicit ACP_AUTH_JWKS_URL skips that discovery, in which "
+            f"case set ACP_AUTH_TOKEN_ENDPOINT as well."
+        )
+        raise ConfigurationError(msg)
+    for registration in issuers:
+        parts = urlsplit(registration.token_endpoint)
+        if parts.scheme == "https" or plaintext_permitted(parts.hostname, insecure_hosts):
+            continue
+        msg = (
+            f"issuer {registration.issuer!r}: token endpoint {registration.token_endpoint!r} "
+            f"must use https. The exchange sends the client secret and the caller's token "
+            f"to it, and over plain HTTP anything on the path reads both."
+        )
+        raise ConfigurationError(msg)

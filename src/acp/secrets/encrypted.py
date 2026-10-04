@@ -113,17 +113,14 @@ class EncryptedFileStore:
             raise ConfigurationError(msg) from exc
 
         secrets = cls._decrypt(payload, key, path)
-        logger.info(
-            "secrets.loaded",
-            extra={
-                "path": str(path),
-                "count": len(secrets),
-                # Names, never values. An operator needs to see that the store
-                # holds what the config references; nobody needs the contents in
-                # a log, and a log is exactly where a secret survives longest.
-                "names": sorted(secrets),
-            },
-        )
+        # A count at INFO; the names only at DEBUG. The module docstring's own
+        # argument for one ciphertext is that *names* are the useful half of a
+        # reconnaissance find — and the first version then wrote the complete
+        # inventory to the log aggregator at every boot. Whether the store
+        # holds what the config references is answered by `resolve_upstream_
+        # secrets` failing loudly at startup, which names only the missing one.
+        logger.info("secrets.loaded", extra={"path": str(path), "count": len(secrets)})
+        logger.debug("secrets.inventory", extra={"names": sorted(secrets)})
         return cls(secrets)
 
     @staticmethod
@@ -173,13 +170,13 @@ class EncryptedFileStore:
         try:
             return self._secrets[name]
         except KeyError as exc:
-            # Names the store's contents, which is safe and is the only thing
-            # that makes this message useful: "no secret named `mock-c-key`;
-            # this store has mock-a-key, mock-b-key" is a typo found in one
-            # reading.
+            # Names the one that is missing and how many the store holds — not
+            # what they are called. This message reaches the log, and the
+            # inventory is the thing the one-ciphertext design exists to keep
+            # out of it. `acp secrets list` is the authenticated way to read it.
             msg = (
-                f"no secret named {name!r} in the store. It holds: "
-                f"{', '.join(sorted(self._secrets)) or '(nothing)'}"
+                f"no secret named {name!r} in the store, which holds "
+                f"{len(self._secrets)} secret(s). `acp secrets list` names them."
             )
             raise SecretNotFoundError(msg) from exc
 

@@ -153,15 +153,24 @@ def _charge(
     if payer is None or (limiter is None and quota is None):
         return
     cost = costs.cost_of(tool) if costs is not None else 1.0
+    # A monotonic clock for the rate: a wall-clock jump must not hand out or
+    # withhold burst allowance. Wall-clock time for the window: a daily quota
+    # aligns to real calendar time, not to how long the process has been running.
+    mono, wall = time.monotonic(), time.time()
     try:
+        # **Check both, then debit both** (ADR 0044 §3). Debit-then-check let a
+        # call the quota refused spend its rate-limit tokens on the way to
+        # being refused, so a caller at their quota ceiling was also being
+        # drained of burst allowance for calls that never ran. Nothing awaits
+        # between the checks and the debits, so the two cannot disagree.
         if limiter is not None:
-            # A monotonic clock for the rate: a wall-clock jump must not hand
-            # out or withhold burst allowance.
-            enforce_rate_limit(limiter, payer, time.monotonic(), cost)
+            enforce_rate_limit(limiter, payer, mono, cost, debit=False)
         if quota is not None:
-            # Wall-clock time for the window: a daily quota aligns to real
-            # calendar time, not to how long the process has been running.
-            enforce_quota(quota, payer, time.time(), cost)
+            enforce_quota(quota, payer, wall, cost, debit=False)
+        if limiter is not None:
+            enforce_rate_limit(limiter, payer, mono, cost)
+        if quota is not None:
+            enforce_quota(quota, payer, wall, cost)
     except ACPError as exc:
         raise to_mcp_error(exc) from exc
 

@@ -13,7 +13,9 @@ from acp.budget.quota import QuotaCounter
 from acp.exceptions import QuotaExceededError
 
 
-def enforce_quota(quota: QuotaCounter, principal: str, now: float, cost: float = 1.0) -> None:
+def enforce_quota(
+    quota: QuotaCounter, principal: str, now: float, cost: float = 1.0, *, debit: bool = True
+) -> None:
     """Spend ``cost`` of ``principal``'s quota, or raise.
 
     Returns ``None`` when the spend fits within the window's limit. Raises
@@ -29,7 +31,7 @@ def enforce_quota(quota: QuotaCounter, principal: str, now: float, cost: float =
     the agent can spend the two on something cheaper instead of waiting out the
     window.
     """
-    if quota.check(principal, now, cost):
+    if (quota.check if debit else quota.affords)(principal, now, cost):
         return
     raise QuotaExceededError(
         "quota exceeded for the current window",

@@ -726,7 +726,7 @@ def build_token_exchanger(
     if validator is None:  # pragma: no cover — config refuses this combination
         return None
 
-    require_token_endpoints(validator.issuers)
+    require_token_endpoints(validator.issuers, settings.auth_insecure_issuer_hosts)
     logger.info(
         "auth.exchange_enabled",
         extra={
@@ -880,6 +880,40 @@ async def _with_keys(document: dict[str, Any], settings: GatewaySettings) -> dic
     return {**document, **discovered}
 
 
+def check_costs_are_payable(costs: CostTable | None, settings: GatewaySettings) -> None:
+    """Refuse a cost no budget could ever cover.
+
+    A tool whose cost exceeds the rate limiter's capacity can never be called
+    by anyone: the bucket is never that full. The refusal it earned reported a
+    finite `retry_after` — the shortfall at the refill rate — which told the
+    agent to wait for a moment that would not arrive. The same for a cost above
+    the quota limit. Both are configuration errors, and like every
+    configuration error in this project they are fatal at startup rather than
+    discovered by the first caller of the one tool nobody tested.
+    """
+    if costs is None:
+        return
+    priced = {**costs.costs, "(default)": costs.default}
+    if settings.rate_limit_enabled:
+        over = sorted(t for t, c in priced.items() if c > settings.rate_limit_capacity)
+        if over:
+            msg = (
+                f"cost table: {', '.join(over)} cost more than ACP_RATE_LIMIT_CAPACITY "
+                f"({settings.rate_limit_capacity:g}), so no caller could ever afford them. "
+                f"Raise the capacity or lower the cost."
+            )
+            raise ConfigurationError(msg)
+    if settings.quota_enabled:
+        over = sorted(t for t, c in priced.items() if c > settings.quota_limit)
+        if over:
+            msg = (
+                f"cost table: {', '.join(over)} cost more than ACP_QUOTA_LIMIT "
+                f"({settings.quota_limit:g}), so no caller could ever afford them in a "
+                f"window. Raise the limit or lower the cost."
+            )
+            raise ConfigurationError(msg)
+
+
 @asynccontextmanager
 async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Starlette]:
     """Build the gateway described by ``settings``.
@@ -912,6 +946,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         else None
     )
     costs = load_costs(settings.cost_file) if settings.cost_file is not None else None
+    check_costs_are_payable(costs, settings)
     cacheable = load_cacheable(settings.cache_file) if settings.cache_file is not None else None
     # The cache is built only when something is actually cacheable. A table that
     # names no tools produces no cache at all, so "configured but empty" and

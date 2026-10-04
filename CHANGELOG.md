@@ -17,6 +17,27 @@ without somebody accepting the change.
 
 ### Fixed
 
+- **Identity.** A key set holding both EC and RSA keys plus a token naming the
+  EC `kid` with `alg: RS256` made the validator raise `TypeError`, which
+  escaped as a 500 with a traceback on every such unauthenticated request; it
+  is a 401. Keys marked `use: enc` are no longer offered for signature
+  verification. The token endpoint must be https (or an exempt host), the same
+  rule the issuer and key set already had — it receives the client secret and
+  the caller's token. The credential cache released a per-token lock only on
+  LRU eviction, never on expiry; it releases it with the entry.
+- **Budgets.** The request path debited the rate limit and then checked the
+  quota, so a quota-refused call had spent its tokens on the way to being
+  refused (ADR 0044 §3 said otherwise). Both budgets are now checked before
+  either is debited. Per-principal state is bounded (10,000, LRU), and asking
+  about a principal never charged no longer creates state for them. A cost
+  table naming a tool that costs more than the rate-limit capacity or the quota
+  limit — a tool nobody could ever call — is refused at startup.
+- **Secrets.** The store logged its full inventory of secret names at INFO on
+  every boot, and listed them in the "no such secret" error — the names the
+  one-ciphertext design exists to keep out of a log. The log carries a count;
+  the error names the missing secret and a count; `acp secrets list` names
+  them. ADR 0021 now says Kubernetes and Docker secret mounts need an explicit
+  `0400` mode, since both default to a readable file the gateway refuses.
 - **The optional model classifier no longer blocks the event loop.** Its
   transport is a synchronous HTTP call with a five-second timeout and it was
   invoked from the request handler with no thread hop, so with the classifier

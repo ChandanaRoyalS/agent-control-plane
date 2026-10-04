@@ -131,7 +131,12 @@ What the gateway costs, generated from the newest committed run in
 and a test fails if these rows and that file disagree:
 
 <!-- overhead:begin -->
-Not yet recorded: `make up && make overhead-record`.
+| gateway overhead | p50 | added at p95 | recorded |
+|---|---|---|---|
+| cache miss | 2.5x a direct call (+2 ms) | +2 ms | [2026-10-04, Darwin arm64](perf/results/overhead-2026-10-04-4af760c.json) |
+| cache hit | 1.8x a direct call (+1 ms) | +1 ms | [2026-10-04, Darwin arm64](perf/results/overhead-2026-10-04-4af760c.json) |
+
+Sequential, one request in flight, mock upstreams; commit `4af760c`; switches `auth=on exchange=on cache=on costs=on ratelimit=on quota=on screening=on framing=on tracing=on fsync=on probing=on`.
 <!-- overhead:end -->
 
 Every number comes from a harness in this repository, and two of them gate CI:

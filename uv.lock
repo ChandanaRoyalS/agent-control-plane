@@ -9,7 +9,7 @@ resolution-markers = [
 
 [[package]]
 name = "agent-control-plane"
-version = "1.1.1"
+version = "1.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },

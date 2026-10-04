@@ -6,7 +6,7 @@ and the systems they are allowed to touch.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~1,900 tests · 94% coverage · 64 architecture decisions · 4 mutation harnesses
+**~2,000 tests · 95% coverage · 64 architecture decisions · 4 mutation harnesses
 proving 18 deliberate breakages are caught**
 
 ## The problem
@@ -165,9 +165,9 @@ and is the one the release workflow verified before it pushed -- built without
 the mock upstreams and asserted to be, running as uid 10001:
 
 ```bash
-docker pull ghcr.io/chandanaroyals/agent-control-plane:1.1.1
+docker pull ghcr.io/chandanaroyals/agent-control-plane:1.2.0
 docker run --rm --entrypoint python \
-  ghcr.io/chandanaroyals/agent-control-plane:1.1.1 \
+  ghcr.io/chandanaroyals/agent-control-plane:1.2.0 \
   -c "import acp; print(acp.__version__)"
 ```
 
@@ -247,7 +247,7 @@ where the measurement disagreed with the plan:
 | 7 · Audit | **complete** | Hash-chained log with external anchoring, multi-tenancy, threat model |
 | 8 · Performance | **complete** | Load harness, a head-of-line defect found and fixed, published overhead with its switch settings |
 | 9 · Demo | **complete** | Live trace console over SSE, scripted attack demo |
-| 10 · Release | **v1.1.1 released** | Tagged and published to ghcr; architecture map, an index of all 59 decisions, and a machine-checked release surface |
+| 10 · Release | **v1.2.0 released** | Tagged and published to ghcr; architecture map, an index of all 64 decisions, and a machine-checked release surface |
 
 ## What this does not do
 

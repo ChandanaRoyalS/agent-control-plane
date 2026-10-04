@@ -52,6 +52,11 @@ without somebody accepting the change.
 
 ### Changed
 
+- Held-out v2 (35 InjecAgent instructions) was scored once and is marked spent
+  (ADR 0064): pattern firewall 0/595 polite, 595/595 announced, 0 withheld;
+  least-privilege policy 35/35 attack chains blocked; reads-allowed,
+  writes-held policy 35/35 held; no task tool affected. The importer emits the
+  `unsealed:` line so a re-import cannot re-seal it.
 - Held-out split v1 was scored once and is marked spent (ADR 0060): patterns
   only, 3 of 7 attacks produced a finding, none was withheld, every outcome as
   the corpus recorded. ADR 0060 also records the classifier measured alone.

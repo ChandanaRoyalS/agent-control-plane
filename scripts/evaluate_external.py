@@ -107,7 +107,12 @@ def main() -> int:
     else:
         print(f"\n  {notice}NOT SCORED (pass --unseal to score it)")
 
-    if args.unseal:
+    if args.unseal and split.manifest.unsealed:
+        version, when = split.manifest.version, split.manifest.unsealed
+        print(f"\n{RULE}\n  HELD-OUT v{version} WAS ALREADY UNSEALED ({when}).")
+        print("  These instructions are no longer unseen; what follows is not a")
+        print(f"  generalisation estimate. Quote the recorded result.\n{RULE}")
+    elif args.unseal:
         print(f"\n{RULE}\n  UNSEALING HELD-OUT v{split.manifest.version}.")
         print("  Record the result; do not tune against it. Then add")
         print(f"  `unsealed: <date>, <ADR>` to corpus/external/injecagent/heldout.txt.\n{RULE}")

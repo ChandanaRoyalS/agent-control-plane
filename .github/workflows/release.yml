@@ -21,7 +21,10 @@ permissions:
 
 env:
   UV_FROZEN: "1"
-  IMAGE: ghcr.io/${{ github.repository }}
+  # IMAGE is set by the first step of the job, not here: `github.repository`
+  # keeps the owner's capitalisation (ChandanaRoyalS) and a Docker repository
+  # name must be lowercase. The previous owner happened to be all-lowercase,
+  # which is why this only failed after the repository moved.
 
 jobs:
   release:
@@ -31,6 +34,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Name the image, in lowercase
+        run: |
+          image="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "image: $image"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5

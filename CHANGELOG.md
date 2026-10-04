@@ -15,6 +15,10 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.1.1] - 2026-10-04
+
 ### Fixed
 
 - **Identity.** A key set holding both EC and RSA keys plus a token naming the
@@ -64,6 +68,7 @@ without somebody accepting the change.
   it, with a loud fallback where it cannot.
 - Remaining references to the author's internal plan numbering were removed
   from compose, Makefile, CI, config and docs comments.
+- Container image: `ghcr.io/chandanaroyals/agent-control-plane:1.1.1`.
 
 ## [1.1.0] - 2026-10-04
 
@@ -227,7 +232,8 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.1.1
 [1.1.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.1.0
 [1.0.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.0.1
 [1.0.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.0.0

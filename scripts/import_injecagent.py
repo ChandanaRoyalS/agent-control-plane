@@ -15,6 +15,12 @@ firewall screens, so its text is the document. The user's instruction, the
 agent's "thought" and the expected achievement are not imported: the firewall
 never sees them, and importing them would invite a detector built on them.
 
+`actions.json` holds the other half of each case — not text, but the *action*
+the attack is after: the tools the attacker wants called (`Attacker Tools`), the
+tool the user's own task used (`User Tool`), and the full 330-tool catalogue,
+all in this gateway's `upstream__tool` naming. The firewall never sees these;
+the policy engine does, and ADR 0063 measures what it does with them.
+
 `planted` records the exact span the source inserted (prefix included, for the
 enhanced form). It is not shown to the firewall. It exists for one control: the
 same response with that span removed. A finding the control also produces came
@@ -59,6 +65,13 @@ ENHANCED_PREFIX = (
 OUT = Path(__file__).resolve().parents[1] / "corpus" / "external" / "injecagent"
 
 
+def qualified(tool: str, toolkit_of: dict[str, str]) -> str:
+    """InjecAgent's `GmailSendEmail` as this gateway names it: `gmail__SendEmail`
+    (``upstream__tool``, ADR 0003), with the toolkit as the upstream."""
+    toolkit = toolkit_of[tool]
+    return f"{toolkit.lower()}__{tool.removeprefix(toolkit)}"
+
+
 def fetch(name: str, local: Path | None) -> list[dict[str, object]]:
     if local is not None:
         raw = (local / name).read_bytes()
@@ -78,6 +91,13 @@ def main() -> int:
     parser.add_argument("--from", dest="local", type=Path, help="directory with the JSON files")
     args = parser.parse_args()
 
+    toolkit_of = {
+        str(kit["toolkit"]) + str(tool["name"]): str(kit["toolkit"])
+        for kit in fetch("tools.json", args.local)
+        for tool in kit["tools"]  # type: ignore[attr-defined]
+    }
+    attacker_tools: dict[str, list[str]] = {}
+    user_tools: set[str] = set()
     rows: list[dict[str, str]] = []
     groups: set[str] = set()
     for (subset, variant), name in FILES.items():
@@ -93,6 +113,11 @@ def main() -> int:
                 raise SystemExit(msg)
             group = group_id(subset, instruction)
             groups.add(group)
+            chain = [qualified(str(t), toolkit_of) for t in case["Attacker Tools"]]  # type: ignore[attr-defined]
+            if attacker_tools.setdefault(group, chain) != chain:
+                msg = f"{name}[{index}]: one instruction, two different attacker tool chains"
+                raise SystemExit(msg)
+            user_tools.add(qualified(str(case["User Tool"]), toolkit_of))
             rows.append(
                 {
                     "id": f"injecagent/{subset}-{variant}-{index:04d}",
@@ -109,6 +134,15 @@ def main() -> int:
     with (OUT / "documents.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
+    actions = {
+        "catalogue": sorted(qualified(t, toolkit_of) for t in toolkit_of),
+        "user_tools": sorted(user_tools),
+        "attacker_tools": dict(sorted(attacker_tools.items())),
+    }
+    (OUT / "actions.json").write_text(
+        json.dumps(actions, indent=1, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     sealed = sorted(g for g in groups if held_out(g))
     lines = [

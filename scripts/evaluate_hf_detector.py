@@ -27,6 +27,7 @@ import argparse
 import logging
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 from acp.corpus.detector_eval import DetectorReport, evaluate_detector
 from acp.corpus.external import load_external_split
@@ -37,6 +38,22 @@ from acp.corpus.metrics import DEFAULT_RESAMPLES
 
 DEFAULT_MODEL = "protectai/deberta-v3-base-prompt-injection-v2"
 RULE = "=" * 78
+
+
+def resolved_revision(model_id: str) -> str:
+    """The commit of the snapshot that actually loaded, from the local cache.
+
+    `config._commit_hash` is not set by every transformers version (the first
+    real run printed "unknown"), and a detector result without the exact
+    weights it came from cannot be reproduced. The cache directory is named by
+    the commit, so it is read from there, offline.
+    """
+    try:
+        from huggingface_hub import snapshot_download  # noqa: PLC0415
+
+        return Path(snapshot_download(model_id, local_files_only=True)).name
+    except Exception:  # a missing revision must not lose the run
+        return "unknown"
 
 
 def load_detector(model_id: str, threshold: float) -> tuple[Callable[[str], bool], str, str]:
@@ -80,7 +97,7 @@ def load_detector(model_id: str, threshold: float) -> tuple[Callable[[str], bool
         return bool(probability >= threshold)
 
     detect("warm-up")
-    revision = getattr(model.config, "_commit_hash", None) or "unknown"
+    revision = resolved_revision(model_id)
     return detect, revision, labels[injection]
 
 

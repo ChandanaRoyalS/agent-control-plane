@@ -97,8 +97,8 @@ EXPOSE 8080 9090
 # Docker restarts unhealthy containers. `/readyz` reports 503 when every
 # upstream is down — which is somebody else's outage — so wiring it here would
 # turn one broken upstream into a crash loop of a gateway that is working
-# perfectly. That is the exact distinction task 18 drew when the two endpoints
-# were split, and this is where getting it wrong would cost something.
+# perfectly. That is the exact distinction the health prober drew when the two
+# endpoints were split, and this is where getting it wrong would cost something.
 #
 # urllib rather than curl: the image has no curl, and adding one so the
 # healthcheck can run would mean shipping an HTTP client to a container that

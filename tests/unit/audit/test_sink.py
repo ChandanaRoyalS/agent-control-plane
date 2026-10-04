@@ -15,7 +15,7 @@ import pytest
 
 from acp.audit.chain import GENESIS, verify
 from acp.audit.record import AuditRecord, Category, Outcome
-from acp.audit.sink import FileAuditSink, MemoryAuditSink, recover
+from acp.audit.sink import AuditSerialisationError, FileAuditSink, MemoryAuditSink, recover
 from acp.exceptions import ConfigurationError
 
 
@@ -217,3 +217,53 @@ def test_the_memory_sink_chains_for_real() -> None:
 
     assert verify(sink.lines()).intact
     assert sink.length == 4
+
+
+# ---------------------------------------------------------------------------
+# A record that cannot be encoded must not move the head
+# ---------------------------------------------------------------------------
+
+
+def unencodable(index: int) -> AuditRecord:
+    """A `detail` value `str()` accepts and JSON does not."""
+    return AuditRecord(
+        category=Category.TOOL_CALL,
+        event="tool.called",
+        at=1786600000.0 + index,
+        subject="alice",
+        tool="mock-a__search",
+        outcome=Outcome.COMPLETED,
+        detail={"ids": {1, 2}},
+    )
+
+
+def test_an_unencodable_record_is_refused_before_the_chain_advances(tmp_path: Path) -> None:
+    """The latent corruption. The hash used to be taken with a `str()`
+    fallback and the line written strictly, so a `set` in `detail` hashed,
+    advanced the head, and then failed to serialise — leaving a `prev` nothing
+    on disk had. Every later entry then failed verification on a file nobody
+    had touched, which is the worst thing an audit log can do: look tampered
+    when it was not."""
+    path = tmp_path / "audit.jsonl"
+    sink = sink_at(path)
+    sink.append(record(0))
+    head_before, length_before = sink.head, sink.length
+
+    with pytest.raises(AuditSerialisationError):
+        sink.append(unencodable(1))
+
+    assert (sink.head, sink.length) == (head_before, length_before), "the head must not move"
+    sink.append(record(2))
+    sink.close()
+
+    verification = verify(path.read_text().splitlines())
+    assert verification.intact, verification
+    assert len(path.read_text().splitlines()) == 2
+
+
+def test_the_memory_sink_refuses_the_same_record() -> None:
+    sink = MemoryAuditSink()
+    sink.append(record(0))
+    with pytest.raises(AuditSerialisationError):
+        sink.append(unencodable(1))
+    assert sink.length == 1

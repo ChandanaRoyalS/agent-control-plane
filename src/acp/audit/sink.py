@@ -45,6 +45,16 @@ from acp.exceptions import ConfigurationError
 logger = logging.getLogger(__name__)
 
 
+class AuditSerialisationError(OSError):
+    """A record that cannot be encoded as strict JSON.
+
+    An `OSError` on purpose: to the writer it is indistinguishable from a disk
+    that refused the write — the record did not land, the head did not move,
+    and the call is refused when the log is required. It is raised *before*
+    the chain advances, which is the whole point (see `FileAuditSink.append`).
+    """
+
+
 class AuditSink(Protocol):
     """The three operations an audit writer needs.
 
@@ -111,7 +121,12 @@ class MemoryAuditSink:
     """Nothing to wait for: a list append. Offloading it would be pure cost."""
 
     def append(self, record: AuditRecord) -> Entry:
-        entry = self._chain.append(record)
+        try:
+            entry = self._chain.append(record)
+        except (TypeError, ValueError) as exc:
+            # The same refusal the file sink makes, so a test against this sink
+            # sees the behaviour the real one has.
+            raise AuditSerialisationError(f"audit record is not JSON-encodable: {exc}") from exc
         self.entries.append(entry)
         return entry
 
@@ -229,9 +244,20 @@ class FileAuditSink:
         was rather than skipping a sequence number that nothing will ever fill.
         A gap is indistinguishable from a deletion to anybody reading later.
         """
-        entry = self._chain.append(record)
+        # Serialise BEFORE chaining. `Chain.append` hashes the record with the
+        # same strict encoder that produces the line below, so a value JSON
+        # cannot represent fails here, with the head exactly where it was,
+        # rather than after the head has moved and nothing has landed on disk
+        # — which left a `prev` no entry had and made an untampered file verify
+        # as tampered. Raised as `AuditSerialisationError`, an `OSError`, so
+        # the writer treats it exactly like a disk that refused the write.
         try:
-            self._handle.write(json.dumps(entry.as_dict(), separators=(",", ":")) + "\n")
+            entry = self._chain.append(record)
+            line = json.dumps(entry.as_dict(), separators=(",", ":"), allow_nan=False) + "\n"
+        except (TypeError, ValueError) as exc:
+            raise AuditSerialisationError(f"audit record is not JSON-encodable: {exc}") from exc
+        try:
+            self._handle.write(line)
             self._handle.flush()
             if self._fsync:
                 os.fsync(self._handle.fileno())

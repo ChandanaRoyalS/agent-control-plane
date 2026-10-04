@@ -13,12 +13,19 @@ mechanism than the attack had on its own.
 from __future__ import annotations
 
 import base64
+import threading
+import time
+from typing import Any
+from unittest import mock
 
+import anyio
 import pytest
 
+from acp.firewall.classifier import OllamaClassifier
 from acp.firewall.decision import (
     ENFORCEABLE,
     Firewall,
+    Inspection,
     Mode,
     firewall_for,
     triggers_for,
@@ -455,3 +462,70 @@ def test_every_enforceable_detector_can_actually_produce_a_high_finding(detector
     fired = [f for f in inspection.triggers if f.detector == detector]
     assert fired, f"{detector} is enforceable but did not produce a trigger"
     assert fired[0].confidence is Confidence.HIGH
+
+
+# ---------------------------------------------------------------------------
+# The model never parks the event loop
+# ---------------------------------------------------------------------------
+
+
+def _slow_model(_text: str) -> str:
+    time.sleep(0.3)  # blocking, on purpose: this is what an HTTP client does
+    return '{"attack": false, "family": null}'
+
+
+def test_a_slow_classifier_does_not_block_the_event_loop() -> None:
+    """With a classifier attached, `inspect` was called from the request
+    handler with no thread hop — a synchronous HTTP call to a local model, so
+    every tool call parked the whole gateway for the model's latency (five
+    seconds on a timeout). `ainspect` runs the screening on a worker thread
+    when a model is attached; while it waits, other tasks on the loop keep
+    running. The heartbeat below is those other tasks."""
+    worker_thread: list[int] = []
+
+    def noting_thread(text: str) -> str:
+        worker_thread.append(threading.get_ident())
+        return _slow_model(text)
+
+    firewall = Firewall(enforce=True, classifier=OllamaClassifier(classify_fn=noting_thread))
+    beats = 0
+
+    async def heartbeat(stop: anyio.Event) -> None:
+        nonlocal beats
+        while not stop.is_set():
+            beats += 1
+            await anyio.sleep(0.02)
+
+    async def _run() -> None:
+        stop = anyio.Event()
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(heartbeat, stop)
+            inspection = await firewall.ainspect(result("quarterly notes"), tool="crm__search")
+            stop.set()
+            assert not inspection.refused
+
+    anyio.run(_run)
+
+    assert beats >= 5, f"the loop was blocked: only {beats} heartbeats during a 300 ms model call"
+    assert worker_thread
+    assert worker_thread[0] != threading.main_thread().ident
+
+
+def test_without_a_classifier_ainspect_runs_inline() -> None:
+    """No model, no thread: the pattern pass is microseconds and a hop would
+    be pure cost. Asserted by thread identity."""
+    seen: list[int] = []
+    original = Firewall.inspect
+
+    def spy(self: Firewall, *args: Any, **kwargs: Any) -> Inspection:
+        seen.append(threading.get_ident())
+        return original(self, *args, **kwargs)
+
+    firewall = Firewall(enforce=True)
+
+    async def _run() -> None:
+        with mock.patch.object(Firewall, "inspect", spy):
+            await firewall.ainspect(result("hello"), tool="crm__search")
+
+    anyio.run(_run)
+    assert seen == [threading.main_thread().ident]

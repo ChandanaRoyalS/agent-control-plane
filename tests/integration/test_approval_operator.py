@@ -708,3 +708,46 @@ def test_with_neither_token_nor_validator_the_routes_are_absent() -> None:
             return (await client.get(APPROVALS_PATH)).status_code
 
     assert anyio.run(_run) == 404
+
+
+# ---------------------------------------------------------------------------
+# A decision the gateway cannot record is not made
+# ---------------------------------------------------------------------------
+
+
+class _FullDisk:
+    """An audit sink that cannot write — declared blocking, so the write would
+    have gone through the threaded `arecord` path a real file sink uses."""
+
+    head = "0" * 64
+    length = 0
+    blocking = True
+
+    def append(self, _record: Any) -> Any:
+        raise OSError("no space left on device")
+
+
+def test_a_decision_the_audit_log_refuses_is_not_made() -> None:
+    """Fail-closed, on the one human write in the system. The row is chained
+    *before* the store changes state, so a log that refuses leaves the request
+    pending — answerable again later — rather than approved and unrecorded.
+    Previously the store was updated first and the write was a synchronous
+    `record` on the event loop, which both bypassed the writer's serialisation
+    and, on failure, left an approval nobody could account for."""
+    audit = AuditLog(_FullDisk(), required=True)  # type: ignore[arg-type]
+    store, token = held_store_for_agent("agent-7", "acme")
+
+    async def _run() -> httpx.Response:
+        app = build_admin_app(None, None, store, CREDENTIAL, audit)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://admin") as client:
+            return await client.post(
+                approval_path(token),
+                headers={"authorization": f"Bearer {CREDENTIAL}"},
+                json={"approved": True},
+            )
+
+    response: httpx.Response = anyio.run(_run)
+
+    assert response.status_code == 503
+    assert store.get(token).state is State.PENDING  # type: ignore[union-attr]

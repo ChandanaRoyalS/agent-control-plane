@@ -15,7 +15,34 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The optional model classifier no longer blocks the event loop.** Its
+  transport is a synchronous HTTP call with a five-second timeout and it was
+  invoked from the request handler with no thread hop, so with the classifier
+  enabled every tool call parked the whole gateway for the model's latency.
+  `Firewall.ainspect` runs the screening on a worker thread, bounded to four
+  concurrent model calls, when a classifier is attached (ADR 0042, amended).
+- **An audit record that cannot be encoded no longer corrupts the chain.** The
+  hash was taken with a `str()` fallback and the line written strictly, so a
+  `detail` value JSON could not represent advanced the chain head and then
+  failed to write — leaving a `prev` nothing on disk had, and making an
+  untampered file verify as tampered. Records are now encoded strictly before
+  anything is chained; one that cannot be is refused with the head unmoved.
+- **The approval decision is chained before the store changes state, and
+  through the writer's serialised path.** The operator channel called the
+  synchronous `record` on the event loop after deciding, which bypassed the
+  audit writer's serialisation (and ran the `fsync` on the loop), and on
+  failure left an approval nobody could account for. It now awaits `arecord`
+  first; a log that refuses leaves the request pending and answers 503.
+
+### Changed
+
+- The compose stack's `audit/` directory is no longer made world-writable
+  (`chmod 777`); it is owned by the gateway's uid where the host can arrange
+  it, with a loud fallback where it cannot.
+- Remaining references to the author's internal plan numbering were removed
+  from compose, Makefile, CI, config and docs comments.
 
 ## [1.1.0] - 2026-10-04
 

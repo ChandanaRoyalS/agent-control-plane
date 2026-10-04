@@ -175,7 +175,7 @@ make token              # an access token for alice (USER=bob for the other one)
 make identity-smoke     # sixteen assertions against the real server
 ```
 
-That last command is the point of having it. Everything in tasks 22–24 is tested
+That last command is the point of having it. Everything in the identity layer is tested
 against fakes written in this repository, and a mock that agrees with your
 client proves only that you wrote both. `identity_smoke.py` asks the questions
 only a real server can answer — including the one worth more than the rest put

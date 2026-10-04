@@ -1,8 +1,8 @@
 # The gateway's rulebook: which principals may call which tools.
 #
-# Task 32 loads and validates this file at startup; nothing evaluates it yet —
-# the engine that turns a policy plus a request into an allow/deny decision is
-# task 33. What this file already commits to is the shape of a rule and the one
+# The policy engine loads and validates this file at startup and evaluates it
+# on every call, turning a policy plus a request into an allow/deny decision.
+# What this file commits to is the shape of a rule and the one
 # behaviour that is not written here because it cannot be turned off: the
 # default is deny. A request matching no rule below is refused. There is no
 # `default: allow` to set, by design — see ADR 0025.

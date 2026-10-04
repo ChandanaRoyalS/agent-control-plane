@@ -1,4 +1,4 @@
-# Per-tool call costs (Phase 4, task 39). Optional: without this file, every
+# Per-tool call costs for the rate limiter. Optional: without this file, every
 # call costs one token and rate limiting behaves exactly as it did before.
 #
 # Each entry weights how much of a principal's budget a call to that tool draws.

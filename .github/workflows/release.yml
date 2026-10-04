@@ -1,6 +1,6 @@
 name: Release
 
-# Task 67. A tag is the one event in this repository that produces an artifact
+# A tag is the one event in this repository that produces an artifact
 # somebody else runs, so it is the one place where "the checks passed on some
 # commit" is not good enough. Everything here re-verifies the tagged commit
 # itself, and every assertion runs BEFORE anything is pushed.
@@ -107,7 +107,7 @@ jobs:
 
       - name: Prove the security tests can fail
         # All four run whatever the others do, so one failure does not hide
-        # three answers (lesson 54). `rc` is what makes the step fail if any of
+        # three answers. `rc` is what makes the step fail if any of
         # them did -- `;` alone would report success on the last one.
         run: |
           rc=0

@@ -7,12 +7,12 @@
 # No secrets here. Credentials are read from the secrets directory
 # (/run/secrets by default), the way container runtimes mount them.
 #
-# `audience` (task 27) names an upstream to the authorization server. It is what
-# the gateway sends as RFC 8693's `audience` when exchanging the caller's token,
-# and what the minted credential carries in `aud` — which is what makes a token
-# for one upstream useless against another. Required on every upstream once
-# ACP_AUTH_CLIENT_ID is set; omitted here because the local development setup
-# runs without exchange.
+# `audience` names an upstream to the authorization server for token exchange.
+# It is what the gateway sends as RFC 8693's `audience` when exchanging the
+# caller's token, and what the minted credential carries in `aud` — which is
+# what makes a token for one upstream useless against another. Required on
+# every upstream once ACP_AUTH_CLIENT_ID is set; omitted here because the local
+# development setup runs without exchange.
 #
 #   - name: mock-a
 #     url: http://127.0.0.1:9101/mcp
@@ -20,9 +20,9 @@
 #
 # An upstream that *cannot* take part in token exchange — an API key issued out
 # of band, an appliance that will never speak RFC 8693 — uses the other door
-# (task 29). `credential_ref` names a secret in the encrypted store; the value
-# never appears here, because a credential in this file is a credential in git,
-# in every backup of it, and in the diff of whoever added it.
+# of static credentials. `credential_ref` names a secret in the encrypted
+# store; the value never appears here, because a credential in this file is a
+# credential in git, in every backup of it, and in the diff of whoever added it.
 #
 # `audience` and `credential_ref` are alternatives, not a pair. Setting both is
 # refused: two mechanisms each wanting to own the same header, resolved by

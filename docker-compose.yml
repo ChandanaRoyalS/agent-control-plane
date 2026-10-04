@@ -61,14 +61,14 @@ services:
       ACP_ADMIN_PORT: "9090"
       ACP_LOG_FORMAT: json
       # DNS-rebinding protection rejects any Host it has not been told about,
-      # and a browser or client reaching this on :8080 sends the port too — the
-      # bug found in task 9. JSON because pydantic-settings parses list-typed
-      # settings as JSON, not as comma-separated text.
+      # and a browser or client reaching this on :8080 sends the port too — a
+      # bug the first compose run found. JSON because pydantic-settings parses
+      # list-typed settings as JSON, not as comma-separated text.
       ACP_ALLOWED_HOSTS: '["localhost","127.0.0.1","gateway","acp-gateway"]'
       ACP_UPSTREAMS_FILE: /app/config/upstreams.compose.yaml
       ACP_POLICY_FILE: /app/config/policy.compose.yaml
       ACP_SCHEMA_BASELINE_FILE: /app/config/schema-baseline.json
-      # -- human-in-the-loop approvals (task 55) ---------------------------
+      # -- human-in-the-loop approvals -------------------------------------
       #
       # `policy.compose.yaml` holds `mock-a__create_ticket` for a person. This
       # is what makes answering possible: with no operator credential the
@@ -91,7 +91,7 @@ services:
       # window in which one person's yes can still be spent.
       ACP_APPROVAL_TTL_SECONDS: "300"
       ACP_APPROVAL_MAX_PENDING: "256"
-      # -- the tamper-evident audit chain (tasks 56, 57) -------------------
+      # -- the tamper-evident audit chain (ADR 0050) -------------------------
       #
       # Presence of the path is what enables it; there is deliberately no
       # default, because an evidentiary artifact appearing in somebody's working
@@ -109,9 +109,9 @@ services:
       # during the window somebody will eventually ask about.
       ACP_AUDIT_REQUIRED: "true"
       # Switchable, so ADR 0050 §8's declared cost can be measured rather than
-      # asserted (task 60). `make load` runs with it on; `make load-nofsync`
-      # runs the identical mix with it off, and the difference is what
-      # durability costs on this machine's disk.
+      # asserted by the perf harness. `make load` runs with it on;
+      # `make load-nofsync` runs the identical mix with it off, and the
+      # difference is what durability costs on this machine's disk.
       #
       # Defaulted to true, so the honest setting is the one you get without
       # asking for it. A record buffered in the kernel when the machine loses
@@ -129,8 +129,9 @@ services:
       #
       # Without these two, ACP_COST_FILE above is parsed at every start and
       # never read: `_charge` returns immediately when there is no limiter and
-      # no quota. Tasks 39, 41 and 42, inert in the only deployment anybody
-      # runs, until task 62's configuration register printed them as OFF.
+      # no quota. The cost table, limiter and quota were inert in the only
+      # deployment anybody runs, until the configuration register printed them
+      # as OFF.
       #
       # NOT the shipped defaults (burst 60, 1/second). Those are right for a
       # real deployment and would make `make load` report ninety percent
@@ -171,12 +172,12 @@ services:
       # Interpolated so probing can be turned off from the shell without
       # editing this file. Worth having beyond the demo: with the prober
       # running, it invalidates and refetches every catalogue every five
-      # seconds, so the cache (task 19) is permanently warm and *no*
+      # seconds, so the tool-list cache is permanently warm and *no*
       # `tools/list` request ever reaches an upstream. That is correct, and
       # it means the request path's upstream fan-out is invisible until
       # something lets the cache actually expire.
       ACP_HEALTH_PROBING_ENABLED: "${ACP_HEALTH_PROBING_ENABLED:-true}"
-      # -- identity, against the real thing (task 26) ----------------------
+      # -- identity, against the real thing --------------------------------
       #
       # The issuer is `keycloak:8080` and not `localhost:8081` because the
       # gateway resolves it from inside this network, and because `iss` is
@@ -196,7 +197,7 @@ services:
       # And the price of a demo identity provider that speaks plain HTTP.
       # Narrow, named, and logged at every start — ADR 0018.
       ACP_AUTH_INSECURE_ISSUER_HOSTS: '["keycloak"]'
-      # -- token exchange (task 27) ----------------------------------------
+      # -- token exchange --------------------------------------------------
       #
       # Who the gateway *is* when it asks the authorization server for a
       # credential. Distinct from ACP_AUTH_AUDIENCE above, which is what the
@@ -271,7 +272,7 @@ services:
     # A TCP connect, and worth being precise about what that does and does not
     # prove: that the listener is bound, not that the protocol works. MCP has
     # no health method and inventing one for the mocks would test the invention.
-    # Proving the protocol works is the gateway's health prober's job (task 18),
+    # Proving the protocol works is the gateway's health prober's job,
     # which is the layer that should be doing it — so this check stays honest
     # about being a liveness check and leaves readiness to the thing that can
     # actually judge it.
@@ -307,12 +308,13 @@ services:
 
 
   # -------------------------------------------------------------------------
-  # The identity provider — task 26
+  # The identity provider — Keycloak
   # -------------------------------------------------------------------------
   #
-  # Everything in tasks 22 to 24 was tested against fakes written in this
-  # repository, and a mock that agrees with your client proves only that you
-  # wrote both. This is the first thing in the stack that can disagree with us.
+  # The auth layer (token validation, scopes, the OIDC client) was tested
+  # against fakes written in this repository, and a mock that agrees with
+  # your client proves only that you wrote both. This is the first thing in
+  # the stack that can disagree with us.
   #
   # `start-dev` and not `start`: this is a demo realm on a laptop, HTTP-only,
   # with an in-container database. Running it in production mode would mean

@@ -1,4 +1,4 @@
-# Which tool results may be served from memory, and for how long (task 43).
+# Which tool results may be served from memory, and for how long.
 #
 # OPT-IN, PER TOOL. A tool that is not listed here is never cached — there is no
 # `default`, deliberately. A default ttl would make every tool in the estate

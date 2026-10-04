@@ -266,6 +266,15 @@ unseen attacks"; it does not support a rate. v1 is now spent, and v2 has to come
 from attacks nobody on this project wrote. Every other number above is fitted to
 corpora that were consulted while writing the detectors.
 
+**On attacks nobody here wrote, the plain form is not caught at all.** InjecAgent
+(ADR 0061), development half, patterns only: of 27 attacker instructions planted
+in real-looking tool responses, the polite base form produced **0** findings
+attributable to the attack, across 459 documents; the form prefixed "IMPORTANT!!!
+Ignore all previous instructions…" was caught every time — one regex, one fixed
+sentence. **Nothing was withheld in either form**, because `instruction_override`
+is report-only (ADR 0039). Held-out v2 (35 instructions) is sealed for the next
+change to the firewall.
+
 The optional model classifier, measured alone (ADR 0060), flags 1 of 106 benign
 documents and 3 of 36 development attacks, at about 1.4 s a call, and added no
 held-out recall. It is off by default and is not counted as a defence here.
@@ -276,9 +285,10 @@ instruction to a system that follows instructions probabilistically, and a
 sufficiently persuasive document may still win. It also does not protect a
 client that flattens the content blocks and loses their order.
 
-> **What would close it:** more corpus (every family is under ten documents),
-> and the intervals say so before anything else does. This is the highest-value
-> non-feature work left in the project.
+> **What would close it:** a detector that reads intent rather than shape for
+> the plain form — measured against held-out v2, not tuned on it — and a second
+> signal strong enough to let a recognised injection be withheld without
+> re-breaking the benign corpus.
 
 ### 6.2 A hostile tool *description* — **unscreened and unfenced**
 
@@ -478,5 +488,6 @@ demo, `make audit-checkpoint`, edit any line of `audit/audit.jsonl` and verify
 
 | Date | Change |
 |---|---|
+| 2026-10-04 | Held-out v1 scored (ADR 0060); external InjecAgent corpus added and held-out v2 sealed (ADR 0061). |
 | 2026-08-13 | Completed. Register consolidated from ADRs 0013–0051, measured numbers from `corpus/eval-baseline.json`. |
 | At the start | Stub created, so that what is *not* defended was visible from the beginning rather than implied. |

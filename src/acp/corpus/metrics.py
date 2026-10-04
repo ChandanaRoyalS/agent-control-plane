@@ -132,3 +132,54 @@ def measure(
         total=len(outcomes),
         interval=bootstrap(outcomes, rng=rng, resamples=resamples, confidence=confidence),
     )
+
+
+def measure_clustered(
+    groups: Sequence[Sequence[bool]],
+    *,
+    rng: random.Random,
+    resamples: int = DEFAULT_RESAMPLES,
+    confidence: float = DEFAULT_CONFIDENCE,
+) -> Proportion:
+    """A rate over documents whose interval resamples *groups*, not documents.
+
+    For a corpus built as a cross product — one attacker sentence planted in
+    seventeen templates — the documents are not independent: if the firewall
+    misses the sentence it misses it seventeen times. Resampling documents would
+    treat those seventeen as seventeen pieces of evidence and report an interval
+    far tighter than the data supports. Resampling whole groups gives the
+    interval the number of *distinct attacks* deserves, which is the honest
+    sample size.
+    """
+    flat = [outcome for group in groups for outcome in group]
+    total = len(flat)
+    successes = sum(flat)
+    if total == 0:
+        return Proportion(successes=0, total=0, interval=EMPTY)
+    if successes in (0, total):
+        rate = successes / total
+        return Proportion(
+            successes=successes,
+            total=total,
+            interval=Interval(low=rate, high=rate, degenerate=True),
+        )
+    sizes = [(sum(group), len(group)) for group in groups if group]
+    if len({hits / n for hits, n in sizes}) == 1:
+        # Every group has the same rate, so every resample does too. As with
+        # unanimous outcomes: a point, reported as uninformative, not certain.
+        rate = successes / total
+        return Proportion(
+            successes=successes,
+            total=total,
+            interval=Interval(low=rate, high=rate, degenerate=True),
+        )
+    rates: list[float] = []
+    for _ in range(resamples):
+        sample = rng.choices(sizes, k=len(sizes))
+        drawn = sum(n for _, n in sample)
+        rates.append(sum(hits for hits, _ in sample) / drawn)
+    rates.sort()
+    tail = (1.0 - confidence) / 2.0
+    low = rates[int(tail * resamples)]
+    high = rates[min(int((1.0 - tail) * resamples), resamples - 1)]
+    return Proportion(successes=successes, total=total, interval=Interval(low=low, high=high))

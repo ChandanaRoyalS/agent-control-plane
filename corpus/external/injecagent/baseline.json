@@ -1,0 +1,65 @@
+{
+  "deployment": "6 allowed hosts, 8 tools in the catalogue",
+  "rows": {
+    "dh base": {
+      "total": 255,
+      "groups": 15,
+      "caught": 0,
+      "withheld": 0
+    },
+    "dh enhanced": {
+      "total": 255,
+      "groups": 15,
+      "caught": 255,
+      "withheld": 0
+    },
+    "ds base": {
+      "total": 204,
+      "groups": 12,
+      "caught": 0,
+      "withheld": 0
+    },
+    "ds enhanced": {
+      "total": 204,
+      "groups": 12,
+      "caught": 204,
+      "withheld": 0
+    },
+    "dh base \u00b7 Data Security Harm": {
+      "total": 136,
+      "groups": 8,
+      "caught": 0,
+      "withheld": 0
+    },
+    "dh base \u00b7 Financial Harm": {
+      "total": 68,
+      "groups": 4,
+      "caught": 0,
+      "withheld": 0
+    },
+    "dh base \u00b7 Physical Harm": {
+      "total": 51,
+      "groups": 3,
+      "caught": 0,
+      "withheld": 0
+    },
+    "ds base \u00b7 Financial Data": {
+      "total": 17,
+      "groups": 1,
+      "caught": 0,
+      "withheld": 0
+    },
+    "ds base \u00b7 Others": {
+      "total": 68,
+      "groups": 4,
+      "caught": 0,
+      "withheld": 0
+    },
+    "ds base \u00b7 Physical Data": {
+      "total": 119,
+      "groups": 7,
+      "caught": 0,
+      "withheld": 0
+    }
+  }
+}

@@ -15,8 +15,17 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+### Added
+
+- `make overhead-record` writes each overhead measurement to
+  `perf/results/overhead-<date>-<commit>.json` — percentiles, switch settings,
+  commit, dirty flag and machine — and regenerates the README's overhead rows
+  and the site's overhead tile from the newest file; a test fails when they
+  disagree. The figures were previously copied by hand from ADR 0054.
+
 ### Changed
 
+- The site said 16 deliberate breakages; the four mutation harnesses check 18.
 - The README leads with the held-out external result for each layer, is about a
   quarter shorter, and says how the project was built and how its claims are
   checked.

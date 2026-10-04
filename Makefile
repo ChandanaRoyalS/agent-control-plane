@@ -88,6 +88,10 @@ overhead-ab:  ## Attribute that overhead: fsync and the catalogue prober, on and
 	@echo "Restoring the defaults (fsync on, probing on) ..."
 	@docker compose up -d --wait gateway >/dev/null 2>&1
 
+overhead-record:  ## Measure overhead, commit-ready: writes perf/results/, regenerates the README rows and the site
+	uv run python scripts/record_overhead.py
+	uv run python scripts/build_site.py
+
 overhead:  ## What the gateway adds versus calling the upstream directly
 	@echo "Sequential, one request in flight. About a minute. Do not use the machine."
 	uv run python scripts/measure_overhead.py

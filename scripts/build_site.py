@@ -180,6 +180,26 @@ def find_beats(lines: list[str]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+def overhead_tile() -> tuple[str, str, int]:
+    """The cache-miss overhead, from the newest committed run in perf/results/.
+
+    It was hand-typed here, like the README row, and the two had already been
+    copied from an ADR rather than from a file anyone could check.
+    """
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from perf.record import latest, rows  # noqa: PLC0415
+
+    _, record = latest()
+    miss = rows(record)["cache miss"]
+    when = str(record.get("recorded", "?"))[:10]
+    return (
+        f"{miss.multiple:.1f}&times;",
+        f"a direct call on a cache miss, recorded {when} with its switch settings",
+        54,
+    )
+
+
 def measured() -> str:
     rows = (
         ("0 of 106", "benign documents withheld by the injection firewall", 39),
@@ -190,12 +210,8 @@ def measured() -> str:
             "p95 on a path with no disk write &mdash; a defect a load harness found",
             53,
         ),
-        (
-            "6.7&ndash;7.2&times;",
-            "a direct call, on a cache miss, with the switch settings printed",
-            54,
-        ),
-        ("16", "deliberate breakages, caught by the tests written to catch them", 23),
+        overhead_tile(),
+        ("18", "deliberate breakages, caught by the tests written to catch them", 23),
     )
     return "\n".join(
         f'      <a class="tile" href="{adr(number)}">'

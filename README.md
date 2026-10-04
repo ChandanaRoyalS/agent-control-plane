@@ -7,7 +7,7 @@ calls for a human, and records every decision in a tamper-evident log.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~2,000 tests · 95% coverage · 64 architecture decisions · 4 mutation harnesses
+**~2,000 tests · 95% coverage · 65 architecture decisions · 4 mutation harnesses
 proving 18 deliberate breakages are caught**
 
 ## Why
@@ -204,8 +204,9 @@ somebody looking for gaps.
   one result at a time.
 - **The hash chain cannot detect tail truncation or a wholesale rewrite** without
   an external anchor; both are asserted as passing tests.
-- **Tool descriptions are not screened**, so a hostile upstream can address the
-  model through its own catalogue.
+- **Tool descriptions are screened but cannot be fenced.** A description with
+  a detectable payload is withheld from the catalogue; a politely worded one
+  reaches the model, and only the policy stands between it and the call.
 - **Pending approvals live in memory**; a restart loses them.
 
 ## Roadmap

@@ -17,6 +17,14 @@ without somebody accepting the change.
 
 ### Added
 
+- Tool descriptions are screened (ADR 0065). Every description, and every
+  `description` string in a tool's input schema, passes the same detectors and
+  the same bar as a tool result; in enforce mode a tool that crosses it is
+  withheld from `tools/list`, in report mode it is served and logged. Flagged
+  tools are chained to the audit log as `firewall.catalogue`. Measured first
+  on 1,102 descriptions from InjecAgent's catalogue: zero findings.
+  `make eval-descriptions` reproduces that. No new setting.
+
 - `make overhead-record` writes each overhead measurement to
   `perf/results/overhead-<date>-<commit>.json` — percentiles, switch settings,
   commit, dirty flag and machine — and regenerates the README's overhead rows
@@ -25,6 +33,8 @@ without somebody accepting the change.
 
 ### Changed
 
+- `firewall_decisions_total` carries a new `surface` label (`result` or
+  `catalogue`); dashboards summing the metric should sum over it.
 - The site said 16 deliberate breakages; the four mutation harnesses check 18.
 - The README leads with the held-out external result for each layer, is about a
   quarter shorter, and says how the project was built and how its claims are

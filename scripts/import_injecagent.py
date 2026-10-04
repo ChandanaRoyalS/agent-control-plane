@@ -138,6 +138,38 @@ def main() -> int:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
+    # The tool catalogue itself, as a *benign tool-description* population: 38
+    # toolkit descriptions, 330 tool summaries and every parameter description,
+    # as written by the source's authors with no attack in them. This is what
+    # `scripts/evaluate_descriptions.py` screens for false positives (ADR 0065).
+    descriptions: list[dict[str, str]] = []
+    for kit in fetch("tools.json", args.local):
+        kit_name = str(kit["toolkit"])
+        descriptions.append(
+            {
+                "id": f"injecagent/{kit_name.lower()}",
+                "kind": "toolkit",
+                "text": str(kit["description_for_model"]),
+            }
+        )
+        for tool in kit["tools"]:  # type: ignore[attr-defined]
+            qualified_name = qualified(kit_name + str(tool["name"]), toolkit_of)
+            descriptions.append(
+                {"id": f"injecagent/{qualified_name}", "kind": "tool", "text": str(tool["summary"])}
+            )
+            for parameter in tool.get("parameters") or ():
+                descriptions.append(
+                    {
+                        "id": f"injecagent/{qualified_name}/{parameter['name']}",
+                        "kind": "parameter",
+                        "text": str(parameter.get("description", "")),
+                    }
+                )
+    with (OUT / "descriptions.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
+        for row in descriptions:
+            if row["text"]:
+                handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
     actions = {
         "catalogue": sorted(qualified(t, toolkit_of) for t in toolkit_of),
         "user_tools": sorted(user_tools),

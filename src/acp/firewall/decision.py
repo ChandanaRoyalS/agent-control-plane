@@ -27,6 +27,7 @@ from __future__ import annotations
 import functools
 import logging
 import secrets
+from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from enum import StrEnum
@@ -34,11 +35,19 @@ from typing import Final
 
 from anyio import CapacityLimiter, to_thread
 
+from acp.firewall.catalogue import (
+    CatalogueInspection,
+    ToolInspection,
+    description_texts,
+    names_of,
+    others,
+    serve,
+)
 from acp.firewall.classifier import OllamaClassifier
 from acp.firewall.findings import Confidence, Finding
 from acp.firewall.screen import MAX_SCREENED_CHARS, Screener, Screening, ScreenPolicy
 from acp.observability import metrics
-from acp.upstream.models import CallToolResult, ContentBlock
+from acp.upstream.models import CallToolResult, ContentBlock, ToolDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +236,13 @@ def refusal(tool: str, triggers: tuple[Finding, ...], incident: str) -> CallTool
     )
 
 
+RESULT: Final = "result"
+CATALOGUE: Final = "catalogue"
+"""Which model-visible surface a decision was about: a tool's output, or the
+description of the tool itself. Separate series, because a deployment that sees
+`would_refuse` climb needs to know whether a document or an upstream's
+catalogue is doing it."""
+
 MAX_CONCURRENT_CLASSIFIER_CALLS: Final = 4
 """How many screenings may be waiting on the model at once.
 
@@ -346,6 +362,65 @@ class Firewall:
             triggers=triggers,
         )
 
+    # -- the catalogue -------------------------------------------------------
+
+    def inspect_tool(
+        self, tool: ToolDefinition, *, tools: AbstractSet[str] = frozenset()
+    ) -> ToolInspection:
+        """Screen one tool's description; decide whether the caller may see it.
+
+        Same screener, same bar as a result (see `acp.firewall.catalogue`). The
+        tool-mention detector is told the catalogue *minus this tool*, so a
+        tool is never flagged for naming itself.
+        """
+        screener = Screener(
+            ScreenPolicy(
+                allowed_hosts=self._allowed_hosts,
+                tools=others(tool, tools),
+                max_chars=self._max_chars,
+            ),
+            classifier=self._classifier,
+        )
+        screening = screener.screen_all(description_texts(tool))
+        triggers = triggers_for(screening)
+        if not (triggers and self._enforce):
+            self._record(
+                tool.name,
+                screening,
+                decision=_verdict(screening, triggers),
+                triggers=triggers,
+                surface=CATALOGUE,
+            )
+            return ToolInspection(tool=tool, screening=screening, withheld=False, triggers=triggers)
+
+        incident = secrets.token_hex(INCIDENT_BYTES)
+        self._record(
+            tool.name,
+            screening,
+            decision="withheld",
+            incident=incident,
+            triggers=triggers,
+            surface=CATALOGUE,
+        )
+        return ToolInspection(
+            tool=tool, screening=screening, withheld=True, triggers=triggers, incident=incident
+        )
+
+    def inspect_catalogue(self, tools: Sequence[ToolDefinition]) -> CatalogueInspection:
+        """Screen every tool in a catalogue against the rest of it."""
+        catalogue = names_of(tools)
+        inspections = tuple(self.inspect_tool(tool, tools=catalogue) for tool in tools)
+        return CatalogueInspection(served=serve(inspections), inspections=inspections)
+
+    async def ainspect_catalogue(self, tools: Sequence[ToolDefinition]) -> CatalogueInspection:
+        """`inspect_catalogue`, off the event loop when a model is attached —
+        for the same reason as `ainspect`, multiplied by the catalogue's size."""
+        if self._classifier is None:
+            return self.inspect_catalogue(tools)
+        return await to_thread.run_sync(
+            functools.partial(self.inspect_catalogue, tools), limiter=_classifier_limiter()
+        )
+
     def _record(
         self,
         tool: str,
@@ -354,6 +429,7 @@ class Firewall:
         decision: str,
         incident: str = "",
         triggers: tuple[Finding, ...] = (),
+        surface: str = RESULT,
     ) -> None:
         """The decision record: which tool, what the gateway did, and why.
 
@@ -368,7 +444,7 @@ class Firewall:
         *log line* is not: a line per successful call saying "nothing happened"
         is how a security log becomes unreadable.
         """
-        metrics.record_firewall_decision(decision=decision)
+        metrics.record_firewall_decision(decision=decision, surface=surface)
         for finding in screening.findings:
             metrics.record_firewall_finding(
                 family=str(finding.family), confidence=str(finding.confidence)
@@ -381,6 +457,7 @@ class Firewall:
             "firewall.decision",
             extra={
                 "tool": tool,
+                "surface": surface,
                 "decision": decision,
                 "incident": incident,
                 "findings": len(screening.findings),

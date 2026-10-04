@@ -21,6 +21,10 @@ case's `User Tool`, and the tool names from `data/tools.json`, renamed to this
 gateway's `upstream__tool` form (`GmailSendEmail` → `gmail__SendEmail`). These
 are the actions the attacks aim for; the firewall never sees them (ADR 0063).
 
+**Also taken, into `descriptions.jsonl`:** every toolkit description, tool
+summary and parameter description from `data/tools.json`, as a benign
+tool-description population for the catalogue screen (ADR 0065).
+
 **What was added:** an `id` (`injecagent/<subset>-<variant>-<index>`, the index
 into the source file) and a `group` (`<subset>/<sha256(attacker instruction)[:10]>`).
 

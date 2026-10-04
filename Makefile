@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install check fmt lint types test cov clean image up down logs smoke \
-        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check eval-external eval-classifier
+        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check eval-external eval-hf-detector eval-classifier
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -195,6 +195,10 @@ eval-check:  ## Fail if any measured count got worse than corpus/eval-baseline.j
 
 eval-external:  ## Score the firewall on InjecAgent's development half (ADR 0061)
 	uv run python scripts/evaluate_external.py
+
+eval-hf-detector:  ## Score a Hugging Face injection detector (adds torch for this run only, ~2 GB once)
+	uv run --with 'transformers>=4.46' --with 'torch>=2.5' --with sentencepiece --with protobuf \
+		python scripts/evaluate_hf_detector.py
 
 eval-classifier:  ## Score the Ollama classifier on its own (needs a local Ollama)
 	uv run python scripts/evaluate_classifier.py

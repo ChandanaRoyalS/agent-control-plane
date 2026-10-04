@@ -39,6 +39,11 @@ without somebody accepting the change.
   recall against a template-only control with intervals over instructions, and
   `--check` runs in CI against a committed baseline (ADR 0061).
 
+- `scripts/evaluate_hf_detector.py` (`make eval-hf-detector`) scores a
+  purpose-built yes/no injection detector from Hugging Face on every
+  development corpus, against the same template control. torch is pulled in for
+  that run only (`uv run --with`), never into the project's dependencies.
+
 ### Changed
 
 - Held-out split v1 was scored once and is marked spent (ADR 0060): patterns

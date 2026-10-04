@@ -120,6 +120,16 @@ The consequence that still stands: the classifier has never been measured with
 the perf harness, so the "what it costs" row in ADR 0054's register is absent.
 That measurement belongs with the evaluation work that scores it.
 
+## Amendment — 2026-10-04: measured
+
+ADR 0060 scored it alone. As shipped (`llama3.2`, this prompt) it produced a
+finding on 1 of 106 benign documents and 3 of 36 development attacks, at a
+median 1.43 s per call, and added nothing on the held-out split. It also showed
+that the prompt names two families `parse_verdict` cannot map, so a correct
+`plain_assertion` verdict is discarded. The decision above stands — a detector,
+never a decider, off by default — and the "natural next detector" framing in the
+context is, on this evidence, a hypothesis rather than a result.
+
 ## References
 
 - ADR 0036 — detect before deciding (why a detector must not refuse)

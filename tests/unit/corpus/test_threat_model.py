@@ -30,6 +30,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from acp.corpus.heldout import load_split
+
 ROOT = Path(__file__).resolve().parents[3]
 THREAT_MODEL = ROOT / "docs" / "THREAT_MODEL.md"
 BASELINE = ROOT / "corpus" / "eval-baseline.json"
@@ -146,17 +148,28 @@ def test_the_benign_numbers_are_the_measured_ones() -> None:
     assert f"{benign['total']} benign" in text
 
 
-def test_the_held_out_split_is_described_as_unscored() -> None:
+def test_the_held_out_split_is_described_as_the_manifest_records_it() -> None:
     """The most easily-lost caveat in the document.
 
     Every rate quoted is fitted to corpora consulted while writing the
-    detectors. The held-out split exists precisely to answer whether that
-    fitting generalises, and it has never been run — so the threat model must
-    keep saying so until somebody scores it.
+    detectors; the held-out split is what answers whether that generalises.
+    While it was sealed, the threat model had to say it had never been scored.
+    Once it is scored, the document has to say *that*, and cite where the
+    result is recorded — the reference the manifest's `unsealed:` line names.
+    Both directions are tied to `corpus/heldout.txt`, so neither the claim "never
+    scored" nor the claim "scored" can outlive the fact.
     """
     text = document()
-    assert "has never been scored" in text
-    assert "--unseal" in text
+    split = load_split()
+    if split.unsealed is None:
+        assert "has never been scored" in text
+        assert "--unseal" in text
+    else:
+        assert "has never been scored" not in text
+        assert f"Held-out v{split.version}" in text
+        assert "scored once" in text
+        reference = split.unsealed.split(",", 1)[-1].strip()
+        assert reference in text, f"the threat model does not cite {reference}"
 
 
 def test_the_out_of_scope_list_is_not_empty() -> None:

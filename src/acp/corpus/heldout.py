@@ -24,6 +24,7 @@ from acp.corpus.loader import AttackCorpus, default_root, load_attacks
 from acp.exceptions import ConfigurationError
 
 _VERSION_PREFIX = "version:"
+_UNSEALED_PREFIX = "unsealed:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +33,12 @@ class HeldoutManifest:
 
     version: int
     ids: frozenset[str]
+    unsealed: str | None = None
+    """When and where this version was scored, if it has been — e.g.
+    ``2026-10-04, ADR 0060``. A split is unseen exactly once: after its number
+    has been read, it is a third development set that happens to be excluded
+    from tuning, and every later run must say so rather than present the same
+    documents as unseen again."""
 
     def __len__(self) -> int:
         return len(self.ids)
@@ -51,6 +58,7 @@ def load_heldout_manifest(path: Path) -> HeldoutManifest:
         raise ConfigurationError(msg) from exc
 
     version: int | None = None
+    unsealed: str | None = None
     ids: set[str] = set()
     for lineno, line in enumerate(raw.splitlines(), start=1):
         stripped = line.strip()
@@ -66,6 +74,15 @@ def load_heldout_manifest(path: Path) -> HeldoutManifest:
                     f"version must be an integer, got {value!r}"
                 )
                 raise ConfigurationError(msg) from exc
+            continue
+        if stripped.startswith(_UNSEALED_PREFIX):
+            unsealed = stripped[len(_UNSEALED_PREFIX) :].strip()
+            if not unsealed:
+                msg = (
+                    f"held-out manifest {str(path)!r} line {lineno}: `unsealed:` needs "
+                    f"a date and a reference, e.g. `unsealed: 2026-10-04, ADR 0060`"
+                )
+                raise ConfigurationError(msg)
             continue
         # Anything else is an attack id. It must look like <family>/<slug> — a
         # bare word here is a typo that would silently hold nothing out.
@@ -90,7 +107,7 @@ def load_heldout_manifest(path: Path) -> HeldoutManifest:
         )
         raise ConfigurationError(msg)
 
-    return HeldoutManifest(version=version, ids=frozenset(ids))
+    return HeldoutManifest(version=version, ids=frozenset(ids), unsealed=unsealed)
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +117,7 @@ class Split:
     development: AttackCorpus
     heldout: AttackCorpus
     version: int
+    unsealed: str | None = None
 
 
 def split_attacks(corpus: AttackCorpus, manifest: HeldoutManifest) -> Split:
@@ -128,6 +146,7 @@ def split_attacks(corpus: AttackCorpus, manifest: HeldoutManifest) -> Split:
         development=AttackCorpus(attacks=tuple(development)),
         heldout=AttackCorpus(attacks=tuple(heldout)),
         version=manifest.version,
+        unsealed=manifest.unsealed,
     )
 
 

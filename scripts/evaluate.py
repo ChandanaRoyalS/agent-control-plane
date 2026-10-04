@@ -171,10 +171,16 @@ def main() -> int:
     split = load_split()
     firewall, detectors = build_firewall()
 
-    sealed_notice = (
-        f"held-out split v{split.version}: {len(split.heldout)} attacks, "
-        f"NOT SCORED (pass --unseal to score it)"
-    )
+    if split.unsealed:
+        sealed_notice = (
+            f"held-out split v{split.version}: {len(split.heldout)} attacks, ALREADY "
+            f"UNSEALED ({split.unsealed}) — no longer unseen, not scored here"
+        )
+    else:
+        sealed_notice = (
+            f"held-out split v{split.version}: {len(split.heldout)} attacks, "
+            f"NOT SCORED (pass --unseal to score it)"
+        )
     report = evaluate_firewall(
         firewall,
         benign=benign,
@@ -191,10 +197,17 @@ def main() -> int:
 
     if args.unseal:
         print(f"\n{RULE}")
-        print("  UNSEALING THE HELD-OUT SPLIT.")
-        print("  These attacks have not shaped any detector. That is what makes")
-        print("  the number below worth more than the one above — and it is also")
-        print("  what reading it costs. Record the result; do not tune against it.")
+        if split.unsealed:
+            print(f"  HELD-OUT SPLIT v{split.version} WAS ALREADY UNSEALED ({split.unsealed}).")
+            print("  Its number has been read, so these attacks are no longer unseen.")
+            print("  What follows is a third development set, not a generalisation")
+            print("  estimate. Quote the recorded result, not this one.")
+        else:
+            print("  UNSEALING THE HELD-OUT SPLIT.")
+            print("  These attacks have not shaped any detector. That is what makes")
+            print("  the number below worth more than the one above — and it is also")
+            print("  what reading it costs. Record the result; do not tune against it.")
+            print("  Then add `unsealed: <date>, <ADR>` to corpus/heldout.txt.")
         print(RULE)
         heldout = evaluate_firewall(
             firewall,

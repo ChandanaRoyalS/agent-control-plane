@@ -130,3 +130,33 @@ def test_development_and_heldout_together_lose_nothing() -> None:
     split = load_split()
     total = len(split.development) + len(split.heldout)
     assert total == len(load_attacks())
+
+
+# -- a split is unseen exactly once -----------------------------------------
+
+
+def test_an_unsealed_line_is_parsed_and_carried_into_the_split(tmp_path: Path) -> None:
+    path = _write(tmp_path, "version: 2\nunsealed: 2027-01-01, ADR 0099\nfoo/bar\n")
+    manifest = load_heldout_manifest(path)
+    assert manifest.unsealed == "2027-01-01, ADR 0099"
+
+
+def test_a_manifest_without_the_line_is_still_sealed(tmp_path: Path) -> None:
+    assert load_heldout_manifest(_write(tmp_path, "version: 1\nfoo/bar\n")).unsealed is None
+
+
+def test_an_empty_unsealed_line_is_rejected(tmp_path: Path) -> None:
+    """A bare `unsealed:` records that the seal broke without saying where the
+    number went — the one piece of information the line exists to carry."""
+    with pytest.raises(ConfigurationError, match="needs a date and a reference"):
+        load_heldout_manifest(_write(tmp_path, "version: 1\nunsealed:\nfoo/bar\n"))
+
+
+def test_the_committed_v1_split_records_that_it_was_unsealed() -> None:
+    """v1 was scored once (ADR 0060). Removing the line would let the next run
+    present those seven attacks as unseen again — the exact claim the split can
+    no longer support."""
+    split = load_split()
+    if split.version == 1:
+        assert split.unsealed is not None
+        assert "ADR 0060" in split.unsealed

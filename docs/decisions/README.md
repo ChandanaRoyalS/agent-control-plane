@@ -100,6 +100,7 @@ If you have ten minutes and want the ones that carry the most weight:
 | [0042](0042-the-optional-model-classifier.md) | a model may raise confidence and may never be required |
 | [0046](0046-the-harness-that-reports-false-positives-first.md) | the harness prints what it got wrong before what it got right |
 | [0047](0047-a-baseline-not-a-threshold.md) | a baseline beats a threshold, and the interval matters more than the point estimate |
+| [0060](0060-the-held-out-split-scored-once-and-what-the-model-adds.md) | held-out v1 scored once (3/7 detected, 0/7 withheld, all as recorded) and marked spent; the model classifier, measured alone, adds no held-out recall for ~1.4 s a call |
 
 ## Approvals, audit, tenancy
 

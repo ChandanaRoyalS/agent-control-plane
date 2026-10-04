@@ -244,8 +244,8 @@ def _build() -> _Collectors | None:
         firewall_findings=Counter(
             "firewall_findings_total",
             "Individual detector findings, by attack family and confidence.",
-            # Both labels are StrEnums: five families, three confidences,
-            # fifteen series, fixed forever. Deliberately not labelled by
+            # Both labels are StrEnums: six families, three confidences,
+            # eighteen series, fixed forever. Deliberately not labelled by
             # detector *or* tool — the first would grow with the codebase and
             # the second is chosen by the caller.
             #

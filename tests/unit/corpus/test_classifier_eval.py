@@ -29,7 +29,9 @@ from acp.firewall.classifier import MAX_CLASSIFIED_CHARS, OllamaClassifier
 
 ATTACK = json.dumps({"attack": True, "family": "direct_override"})
 CLEAN = json.dumps({"attack": False, "family": None})
-UNREPORTABLE = json.dumps({"attack": True, "family": "plain_assertion"})
+UNREPORTABLE = json.dumps({"attack": True, "family": "prompt-injection"})
+"""A family the model invented — the one real DISCARDED case ADR 0060 saw."""
+PLAIN = json.dumps({"attack": True, "family": "plain_assertion"})
 UNNAMED = json.dumps({"attack": True, "family": None})
 
 
@@ -71,7 +73,8 @@ def ticking() -> Callable[[], float]:
     [
         (ATTACK, Outcome.FLAGGED, "direct_override"),
         (CLEAN, Outcome.CLEAN, None),
-        (UNREPORTABLE, Outcome.DISCARDED, "plain_assertion"),
+        (UNREPORTABLE, Outcome.DISCARDED, "prompt-injection"),
+        (PLAIN, Outcome.FLAGGED, "plain_assertion"),
         (UNNAMED, Outcome.DISCARDED, None),
         ("I think this is fine", Outcome.MALFORMED, None),
         ("[true]", Outcome.MALFORMED, None),
@@ -84,7 +87,7 @@ def test_judge_keeps_the_four_kinds_of_nothing_apart(
     assert judge(raw) == (outcome, family)
 
 
-@pytest.mark.parametrize("raw", [ATTACK, CLEAN, UNREPORTABLE, UNNAMED, "nonsense", "{}"])
+@pytest.mark.parametrize("raw", [ATTACK, CLEAN, UNREPORTABLE, PLAIN, UNNAMED, "nonsense", "{}"])
 def test_flagged_means_exactly_what_the_firewall_turns_into_a_finding(raw: str) -> None:
     """If these two ever disagreed, the 'became a finding' column would be
     describing a firewall that does not exist."""
@@ -139,8 +142,8 @@ def test_benign_false_positives_count_only_findings_but_report_opinions() -> Non
 
 
 def test_an_attack_the_firewall_would_discard_is_named() -> None:
-    caught = attack(AttackFamily.PLAIN_ASSERTION, "refund", "refund")
-    missed = attack(AttackFamily.PLAIN_ASSERTION, "skip", "skip")
+    caught = attack(AttackFamily.DELAYED_MULTI_STEP, "refund", "refund")
+    missed = attack(AttackFamily.DELAYED_MULTI_STEP, "skip", "skip")
     model = by_text({"refund": UNREPORTABLE, "skip": CLEAN})
 
     report = evaluate_classifier(model, benign=[], attacks=[caught, missed], repeats=1)
@@ -148,9 +151,9 @@ def test_an_attack_the_firewall_would_discard_is_named() -> None:
     (row,) = report.recall
     assert row.flagged.successes == 0
     assert row.said_attack.successes == 1
-    assert report.attack_discarded_ids == ("plain_assertion/refund",)
-    assert report.discarded_families == {"plain_assertion": 1}
-    assert any("cannot report plain_assertion" in w for w in report.warnings)
+    assert report.attack_discarded_ids == ("delayed_multi_step/refund",)
+    assert report.discarded_families == {"prompt-injection": 1}
+    assert any("cannot report delayed_multi_step" in w for w in report.warnings)
 
 
 def test_rates_come_from_the_first_run_and_disagreement_is_listed() -> None:

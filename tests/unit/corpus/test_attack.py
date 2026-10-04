@@ -42,13 +42,14 @@ def test_every_detector_family_is_an_attack_family() -> None:
     assert detector_families <= attack_families
 
 
-def test_the_extra_families_are_the_uncatchable_ones() -> None:
-    """And they are named, not smuggled in. The two attack families with no
-    detector are the point of ADR 0040 — a taxonomy that only contains what you
-    can catch is one that flatters you."""
+def test_the_extra_family_is_the_one_per_result_screening_cannot_see() -> None:
+    """Named, not smuggled in. ADR 0040 had two families no detector claims;
+    ADR 0062 let the model report `plain_assertion`, which leaves the one that
+    is structurally out of reach: a payload split across two retrievals, when
+    the firewall only ever sees one."""
     extra = {family.value for family in AttackFamily} - {family.value for family in Family}
 
-    assert extra == {"plain_assertion", "delayed_multi_step"}
+    assert extra == {"delayed_multi_step"}
 
 
 def test_an_attack_parses_into_family_expectation_and_text(tmp_path: Path) -> None:

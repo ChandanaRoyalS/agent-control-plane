@@ -47,6 +47,11 @@ without somebody accepting the change.
 
 ### Fixed
 
+- The classifier's prompt offered seven families and the parser accepted five,
+  so a model verdict of `plain_assertion` — the family the classifier exists
+  for — was discarded. `plain_assertion` is now a reportable family (the model's
+  alone) and the prompt's list is derived from `Family` (ADR 0062). Pattern-only
+  numbers do not change.
 - The site footer counted 58 architecture decisions after the 59th landed; the
   count is now read from `docs/decisions/` when the site is built.
 

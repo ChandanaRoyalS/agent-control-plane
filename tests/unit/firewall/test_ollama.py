@@ -11,7 +11,24 @@ import json
 
 import httpx
 
-from acp.firewall.ollama import DEFAULT_MODEL, _build_prompt, ollama_classify
+from acp.firewall.classifier import parse_verdict
+from acp.firewall.findings import Family
+from acp.firewall.ollama import DEFAULT_MODEL, FAMILIES, _build_prompt, ollama_classify
+
+
+def test_the_prompt_offers_exactly_the_families_the_parser_accepts() -> None:
+    """ADR 0060's defect, pinned: the prompt listed seven families and the parser
+    mapped five, so two of the model's possible answers were discarded. Every
+    family the prompt offers must survive `parse_verdict`, and every family the
+    firewall can report must be offered."""
+    offered = [name.strip() for name in FAMILIES.split(",")]
+    assert offered == [family.value for family in Family]
+    prompt = _build_prompt("x")
+    for name in offered:
+        assert name in prompt
+        verdict = parse_verdict(f'{{"attack": true, "family": "{name}"}}')
+        assert verdict.family is Family(name)
+    assert "delayed_multi_step" not in prompt
 
 
 def test_the_prompt_fences_the_document_and_forbids_following_it() -> None:

@@ -130,6 +130,12 @@ that the prompt names two families `parse_verdict` cannot map, so a correct
 never a decider, off by default — and the "natural next detector" framing in the
 context is, on this evidence, a hypothesis rather than a result.
 
+## Amendment — 2026-10-04: the discarded family, fixed
+
+ADR 0062 makes `plain_assertion` a reportable family (the model's alone) and
+derives the prompt's family list from `Family`, so a verdict naming the one
+family this classifier exists for is no longer dropped by the parser.
+
 ## References
 
 - ADR 0036 — detect before deciding (why a detector must not refuse)

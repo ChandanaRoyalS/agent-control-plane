@@ -32,6 +32,8 @@ from acp.approvals import (
     State,
     request_for,
 )
+from acp.audit import AuditLog
+from acp.audit.sink import MemoryAuditSink
 from acp.policy import Effect, Policy, Rule
 
 from ..tokens import Keypair, claims
@@ -460,3 +462,88 @@ def test_a_denial_on_the_admin_port_stops_the_call(keypair: Keypair) -> None:
 
     assert payload["error"]["code"] == -32040
     assert "production dataset" not in str(payload)
+
+
+# ---------------------------------------------------------------------------
+# Both identities, in the view and in the record
+# ---------------------------------------------------------------------------
+
+
+def held_store_for_agent(actor: str, tenant: str) -> tuple[InMemoryApprovalStore, str]:
+    store = InMemoryApprovalStore()
+    request = request_for(
+        tenant=tenant,
+        subject=ALICE,
+        actor=actor,
+        tool=TOOL,
+        arguments={"query": "x"},
+        rule="approve-searches",
+        now=time.time(),
+    )
+    assert request is not None
+    store.create(request)
+    return store, request.token
+
+
+def test_the_operator_is_shown_which_agent_is_asking() -> None:
+    """The actor was always in the fingerprint — an approval could never be
+    spent by a different agent — but the person deciding was never told which
+    of alice's agents was asking. Both identities, always (ADR 0015)."""
+    store, _ = held_store_for_agent("agent-ticket-bot", "acme")
+
+    body = admin("GET", APPROVALS_PATH, store=store).json()
+
+    (shown,) = body["pending"]
+    assert shown["subject"] == ALICE
+    assert shown["actor"] == "agent-ticket-bot"
+    assert shown["tenant"] == "acme"
+
+
+def test_the_decision_row_names_the_agent_and_tenant_and_never_the_token() -> None:
+    """The audit row is the one record of a human's decision. It must say who
+    asked — subject, acting agent, tenant — and must not carry `request_state`,
+    which is a live handle for five minutes in a file that is durable and
+    widely readable (ADR 0045)."""
+    sink = MemoryAuditSink()
+    audit = AuditLog(sink, required=True)
+    store, token = held_store_for_agent("agent-ticket-bot", "acme")
+
+    async def _run() -> httpx.Response:
+        app = build_admin_app(None, None, store, CREDENTIAL, audit)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://admin") as client:
+            return await client.post(
+                approval_path(token),
+                headers={"authorization": f"Bearer {CREDENTIAL}"},
+                json={"approved": True, "reason": "checked with the data team"},
+            )
+
+    response: httpx.Response = anyio.run(_run)
+    assert response.status_code == 200
+
+    (row,) = [json.loads(line)["record"] for line in sink.lines()]
+    assert row["event"] == "approval.decided"
+    assert row["subject"] == ALICE
+    assert row["actor"] == "agent-ticket-bot"
+    assert row["tenant"] == "acme"
+    assert row["detail"] == {"fingerprint": store.get(token).fingerprint}  # type: ignore[union-attr]
+    assert token not in json.dumps(row), "the live request_state must not reach the chain"
+
+
+def test_a_non_ascii_bearer_is_a_401_not_a_500() -> None:
+    """`compare_digest` over `str` raises `TypeError` for non-ASCII input, which
+    made an unauthenticated request carrying one a 500 on the admin listener."""
+    store = held_store(arguments={"query": "x"})
+
+    async def _run() -> httpx.Response:
+        app = build_admin_app(None, None, store, CREDENTIAL)
+        transport = httpx.ASGITransport(app=app)
+        # Header values are bytes on the wire; latin-1 is what the ASGI server
+        # decodes them with, so this arrives as the `str` "Bearer pässwörd".
+        headers = {b"authorization": "Bearer pässwörd".encode("latin-1")}
+        async with httpx.AsyncClient(transport=transport, base_url="http://admin") as client:
+            return await client.get(APPROVALS_PATH, headers=headers)
+
+    response: httpx.Response = anyio.run(_run)
+
+    assert response.status_code == 401

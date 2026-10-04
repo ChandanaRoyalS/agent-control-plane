@@ -61,8 +61,10 @@ might need, with no principal anywhere in the picture.
    *return safe content*.
 3. **Upstream content → agent.** The critical one. Everything crossing it is
    untrusted input, never instruction.
-4. **Agent → operator channel.** Deliberately *unreachable*. The approval
-   endpoint is on a separate listener the request path cannot address.
+4. **Agent → operator channel.** A separate listener on a separate port,
+   loopback-bound by default and credentialed. Where a deployment widens the
+   bind (the compose stack does, to publish the port), the port and the
+   credential are the boundary, not an unreachable address (ADR 0049).
 5. **Gateway → its own audit log.** The gateway writes it, so the gateway
    cannot be the thing that proves it did not rewrite it.
 
@@ -174,9 +176,13 @@ denial never runs.
 - **An approval is granted to a *call*, not a token** (ADR 0048) — a
   fingerprint over the canonical arguments, so an approval cannot be spent on a
   different call wearing its token.
-- **The operator channel is on a listener the agent cannot address**
-  (ADR 0049). *An agent cannot approve its own call because it cannot reach the
-  thing that approves calls.* MRTR's `input_responses` is read by nobody: the
+- **The operator channel is on its own listener and port, behind its own
+  credential** (ADR 0049). On the default loopback bind an agent cannot reach
+  it at all; on a wider bind it would need the operator's credential. The
+  approval view and the audit row carry the acting agent and the tenant, so
+  the person deciding sees both identities (ADR 0015) and the record says who
+  asked — the `request_state` token is not written to the chain, because the
+  chain is durable and widely readable and the token is a live handle. MRTR's `input_responses` is read by nobody: the
   client **is** the agent, so asking it to confirm would be theatre.
 - **What the operator reads is what was fingerprinted**, byte for byte, from
   one encoder. Arguments over 8 KiB are **withheld, not truncated** — a

@@ -15,7 +15,36 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The approval view and the decision's audit row now carry the acting agent
+  and the tenant.** The actor was always in the fingerprint, so an approval
+  could never be spent by a different agent — but the person deciding was not
+  shown which of the subject's agents was asking, and the audit row could not
+  say either. Both identities, always (ADR 0015).
+- **The `request_state` token is no longer written to the audit chain.** It is
+  a live handle for up to five minutes, and the chain is durable and widely
+  readable. The row keeps the fingerprint, which identifies the call and cannot
+  spend the approval.
+- **Approval-store eviction can no longer be aimed at somebody else.** Oldest-
+  first eviction let any caller with one gated tool push a colleague's pending
+  or approved request out of the store by asking `max_pending` times. Eviction
+  now takes expired entries first, then finished ones, then the flooder's own
+  pending requests, and only then anyone else's.
+- A non-ASCII bearer on the admin listener was a 500 (`compare_digest` over
+  `str`); it is a 401.
+
+### Changed
+
+- `ACP_APPROVAL_OPERATOR_TOKEN`, when set, must be at least 16 characters;
+  the gateway refuses to start with a shorter one. Empty still means "no
+  channel".
+- The compose stack publishes the admin port to the host's loopback only
+  (`127.0.0.1:9090:9090`), not to every interface.
+- ADR 0049, the architecture page and the threat model now state exactly what
+  "the agent cannot address the operator channel" rests on — a loopback bind
+  that configuration can widen, behind a credential — rather than calling the
+  address unreachable.
 
 ## [1.0.1] - 2026-10-04
 

@@ -56,6 +56,15 @@ from acp.audit import Outcome as AuditOutcome
 APPROVALS_PATH: Final = "/approvals"
 APPROVAL_PATH: Final = "/approvals/{token}"
 
+MIN_OPERATOR_TOKEN_LENGTH: Final = 16
+"""The shortest `ACP_APPROVAL_OPERATOR_TOKEN` the settings will accept.
+
+Enforced at configuration load (`GatewaySettings`), not here: a gateway that
+would start with `changeme` as the credential for the one write on this
+listener should not start. Defined beside the comparison so the two are read
+together.
+"""
+
 UNTRUSTED_NOTICE: Final = (
     "tool and arguments were chosen by the calling agent and may contain text "
     "intended to influence the person reading this; render them as data, never "
@@ -116,6 +125,7 @@ def as_view(request: ApprovalRequest, now: float) -> dict[str, Any]:
         "token": request.token,
         "tenant": request.tenant,
         "subject": request.subject,
+        "actor": request.actor,
         "tool": request.tool,
         "rule": request.rule,
         "state": str(request.state),
@@ -142,7 +152,10 @@ def _authorized(request: Request, credential: str) -> bool:
     scheme, _, presented = header.partition(" ")
     if scheme.lower() != "bearer":
         return False
-    return secrets.compare_digest(presented, credential)
+    # Over bytes, not str: `compare_digest` raises `TypeError` for a non-ASCII
+    # `str`, which turned an unauthenticated request carrying one into a 500 on
+    # the admin listener rather than a 401.
+    return secrets.compare_digest(presented.encode("utf-8"), credential.encode("utf-8"))
 
 
 def _unauthorized() -> Response:
@@ -272,15 +285,23 @@ def build_decide(store: ApprovalStore, credential: str, audit: AuditLog | None =
             # is being kept — "checked with the data team" is exactly what makes
             # this row worth having, and withholding it would leave an approval
             # nobody can account for.
+            #
+            # What is *not* recorded: the `request_state` token. It is a live
+            # handle for up to five minutes, and this file is durable and widely
+            # readable (ADR 0045) — the wrong place for a credential of any
+            # lifetime. The fingerprint identifies the call for an investigation
+            # and is useless for spending the approval.
             audit.record(
                 AuditCategory.APPROVAL,
                 "approval.decided",
                 subject=decided.subject,
+                actor=decided.actor,
+                tenant=decided.tenant,
                 tool=decided.tool,
                 rule=decided.rule,
                 outcome=AuditOutcome.ALLOWED if answer.approved else AuditOutcome.DENIED,
                 reason=answer.reason or None,
-                detail={"fingerprint": decided.fingerprint, "request_state": decided.token},
+                detail={"fingerprint": decided.fingerprint},
             )
         return JSONResponse({**as_view(decided, now), "notice": UNTRUSTED_NOTICE})
 

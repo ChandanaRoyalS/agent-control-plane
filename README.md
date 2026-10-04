@@ -54,7 +54,7 @@ it is *unexplainable* — nobody could reconstruct afterwards what left the
 building.
 
 **Through the gateway**, the same call is **held for a human**, who sees the real
-arguments on a listener the agent cannot address, and refuses.
+arguments on a separate, credentialed listener, and refuses.
 
 The interesting part is what the run reported rather than what it asserted,
 because it asserts nothing:
@@ -135,9 +135,9 @@ flowchart LR
     CH --> V["acp audit verify"]
 ```
 
-The agent addresses `:8080`. A person addresses `:9090`. **An agent cannot
-approve its own call, or watch anyone's, because it cannot address the thing
-that does** — [ADR 0049](docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md).
+The agent addresses `:8080`. A person addresses `:9090` — loopback-bound by
+default, behind an operator credential the request path never sees. **An agent
+cannot approve its own call, or watch anyone's** — [ADR 0049](docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md).
 
 Deeper walkthroughs, with real output: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -243,7 +243,7 @@ where the measurement disagreed with the plan:
 | 3 · Policy | **complete** | Deny-by-default engine, argument-level rules, catalogue filtering, simulator |
 | 4 · Budgets | **complete** | Quotas, rate limits, cost accounting, per-principal result caching |
 | 5 · Firewall | **complete** | Detectors, framing, structured refusal, benign + adversarial corpora, held-out split, optional classifier, measured per-family rates |
-| 6 · Approvals | **complete** | Human-in-the-loop over MRTR, on a listener the agent cannot address |
+| 6 · Approvals | **complete** | Human-in-the-loop over MRTR, on a separate credentialed listener |
 | 7 · Audit | **complete** | Hash-chained log with external anchoring, multi-tenancy, threat model |
 | 8 · Performance | **complete** | Load harness, a head-of-line defect found and fixed, published overhead with its switch settings |
 | 9 · Demo | **complete** | Live trace console over SSE, scripted attack demo |

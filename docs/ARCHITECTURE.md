@@ -37,9 +37,12 @@ agent  ──▶  :8080   gateway     tools/list · tools/call
 person ──▶  :9090   admin       approvals · trace console · metrics · health
 ```
 
-An agent **cannot approve its own call, and cannot watch anyone's**, because it
-cannot address the thing that does. That is a structural property rather than a
-permission check — there is no rule to misconfigure and no role to escalate into
+An agent **cannot approve its own call, and cannot watch anyone's**: the thing
+that does is on a separate port, bound to loopback by default, behind a
+credential the request path never sees. The loopback bind is configuration —
+the compose stack widens it so the port can be published — so where it is
+widened, the port and the credential are the control, and the docs say so
+rather than calling an address unreachable
 ([0049](decisions/0049-the-operator-channel-is-not-the-agents-channel.md),
 [0056](decisions/0056-the-console-is-a-view-of-the-record-not-a-second-account.md)).
 

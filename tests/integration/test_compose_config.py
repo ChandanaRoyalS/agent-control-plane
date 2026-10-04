@@ -278,3 +278,15 @@ def test_the_excuses_are_for_settings_that_exist() -> None:
     excusing nothing, and the real setting would go unchecked."""
     unknown = sorted(set(DELIBERATELY_OFF) - set(off_by_default()))
     assert not unknown, f"excused but not an off-by-default setting: {unknown}"
+
+
+def test_the_admin_port_is_published_to_the_hosts_loopback_only() -> None:
+    """`9090:9090` published the approval channel of the development stack on
+    every host interface, protected by a token committed to this file. The
+    gateway binds 0.0.0.0 inside the container because that is what a published
+    port forwards to; what the *host* exposes is the part this file controls."""
+    compose = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
+    ports = [str(p) for p in compose["services"]["gateway"]["ports"]]
+
+    admin = [p for p in ports if p.endswith(":9090")]
+    assert admin == ["127.0.0.1:9090:9090"], ports

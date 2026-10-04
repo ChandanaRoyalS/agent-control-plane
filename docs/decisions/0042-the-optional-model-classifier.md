@@ -95,8 +95,30 @@ floor and the model a bonus.
   `build_firewall` constructs one when `ACP_FIREWALL_CLASSIFIER_ENABLED` is set.
 - `detector_names` grows the classifier's name only when one is attached, so the
   coverage alarm (a bare screener equals `DETECTOR_NAMES`) is unchanged.
-- Task 52's harness is the first thing to measure the classifier, against the
-  development split, with the held-out split named and sealed.
+- The evaluation harness is the first thing to measure the classifier, against
+  the development split, with the held-out split named and sealed.
+
+## Amendment — 2026-10-04: the model call was on the event loop
+
+The transport is a synchronous `httpx.Client` with a five-second timeout, and
+`Firewall.inspect` was called from the request handler with no thread hop. With
+the classifier enabled, every tool call therefore parked the entire gateway for
+the model's latency — every other request in the process waited — and on a
+timeout that was five seconds. This decision did not mention the event loop at
+all. It is the same bug class ADR 0053 found and fixed for a 5.8 ms `fsync`,
+three orders of magnitude longer, in the one component that is also the
+project's only model.
+
+Fixed by `Firewall.ainspect`: when a classifier is attached, the screening runs
+on a worker thread under a `CapacityLimiter(4)` that bounds concurrent model
+calls; without one, the pattern pass runs inline, because it takes microseconds
+and a hop would be pure cost. `inspect` stays synchronous and pure for the
+harness, the corpus scripts and the unit tests. A test asserts the loop keeps
+running while a 300 ms model call is in flight.
+
+The consequence that still stands: the classifier has never been measured with
+the perf harness, so the "what it costs" row in ADR 0054's register is absent.
+That measurement belongs with the evaluation work that scores it.
 
 ## References
 

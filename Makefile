@@ -39,7 +39,15 @@ up:  ## Build, bring up the whole stack, and wait until it is ready
 	@# creating the bind-mount source itself makes it root-owned, which the
 	@# container (uid 10001) cannot write to. The sink then fails to open,
 	@# which is fatal by design, and the symptom is an unhealthy gateway.
-	@mkdir -p audit && chmod 777 audit
+	@# Owned by the container's uid where the host can arrange it, never
+	@# world-writable: an audit directory anyone on the host can write to is a
+	@# tamper-evidence log anyone on the host can append to. Docker Desktop
+	@# maps bind mounts to the host user, so a plain mkdir is enough there;
+	@# on Linux the directory is handed to uid 10001 (sudo if needed). The
+	@# last resort is the old 777, and it says so out loud.
+	@mkdir -p audit && chmod 770 audit && ( [ "$$(uname)" = Darwin ] \
+	  || chown 10001 audit 2>/dev/null || sudo -n chown 10001 audit 2>/dev/null \
+	  || { chmod 777 audit; echo "warning: audit/ is world-writable (could not chown to uid 10001)"; } )
 	@# --build is not optional. Compose builds only when the image is absent, so
 	@# without it `make up` serves whatever was last built — which is how a stack
 	@# ends up running the code from before the merge you are trying to
@@ -80,7 +88,7 @@ overhead-ab:  ## Attribute that overhead: fsync and the catalogue prober, on and
 	@echo "Restoring the defaults (fsync on, probing on) ..."
 	@docker compose up -d --wait gateway >/dev/null 2>&1
 
-overhead:  ## What the gateway adds versus calling the upstream directly (task 62)
+overhead:  ## What the gateway adds versus calling the upstream directly
 	@echo "Sequential, one request in flight. About a minute. Do not use the machine."
 	uv run python scripts/measure_overhead.py
 
@@ -109,11 +117,11 @@ load:  ## Load-test the composed stack for 30s and report latency by outcome
 	uv run locust -f perf/locustfile.py --host http://127.0.0.1:8080 \
 		--headless --users 20 --spawn-rate 10 --run-time 30s
 
-load-long:  ## The same, for 5 minutes at 100 users — for profiling (task 61)
+load-long:  ## The same, for 5 minutes at 100 users — for profiling
 	uv run locust -f perf/locustfile.py --host http://127.0.0.1:8080 \
 		--headless --users 100 --spawn-rate 20 --run-time 5m
 
-console:  ## Where to watch the live trace, and the token to paste (task 63)
+console:  ## Where to watch the live trace, and the token to paste
 	@echo "Open      http://127.0.0.1:9090/console"
 	@token=$$(grep -E 'ACP_APPROVAL_OPERATOR_TOKEN' docker-compose.yml | sed 's/.*: *//'); \
 		echo "Paste     $${token:-<ACP_APPROVAL_OPERATOR_TOKEN is not set in docker-compose.yml>}"
@@ -122,7 +130,7 @@ console:  ## Where to watch the live trace, and the token to paste (task 63)
 	@echo "principal's activity, so an agent must not be able to address it."
 	@echo "Drive some traffic with 'make smoke' and watch it arrive."
 
-attack-demo:  ## The same agent twice: direct, then through the gateway (task 64)
+attack-demo:  ## The same agent twice: direct, then through the gateway
 	uv run python scripts/attack_demo.py
 
 attack-demo-enforce:  ## The same demo with the firewall withholding, not just logging
@@ -134,7 +142,7 @@ attack-demo-enforce:  ## The same demo with the firewall withholding, not just l
 
 .PHONY: surface surface-capture release-notes
 
-surface:  ## Check the public surface still matches docs/surface.json (task 67)
+surface:  ## Check the public surface still matches docs/surface.json
 	uv run python scripts/capture_surface.py
 
 surface-capture:  ## Accept the current public surface as the snapshot

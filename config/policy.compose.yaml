@@ -20,9 +20,10 @@
 # upstreams.yaml vs upstreams.compose.yaml.
 
 rules:
-  # Task 55's demo, and the reason it sits *above* the broad allow: first match
-  # wins (ADR 0026), so a narrow `require_approval` in front of a broad `allow`
-  # is how an operator expresses "everything is fine except this one thing".
+  # The approvals demo, and the reason it sits *above* the broad allow: first
+  # match wins (ADR 0026), so a narrow `require_approval` in front of a broad
+  # `allow` is how an operator expresses "everything is fine except this one
+  # thing".
   #
   # `mock-a__create_ticket` is the destructive-ish tool in the mock fleet, so it
   # is the one that stops and waits for a person. **The underscore is not a

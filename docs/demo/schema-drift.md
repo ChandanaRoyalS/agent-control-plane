@@ -70,7 +70,7 @@ curl -s localhost:9090/metrics | grep 'outcome="ok"' # every call succeeded
 curl -s localhost:9090/metrics | grep breaker_state  # still closed
 ```
 
-The upstream is healthy by every measure this gateway had before task 20. It is
+The upstream is healthy by every measure this gateway had before drift detection. It is
 also now instructing every agent that reads its catalogue to fetch a document and
 paste the contents into its next call.
 

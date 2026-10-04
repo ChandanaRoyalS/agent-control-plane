@@ -30,7 +30,7 @@ Anything that lets a caller do something the gateway is supposed to prevent:
 - Crossing credentials between authorization servers — a token issued by one
   server being judged by another's rules ([ADR 0016](docs/decisions/0016-bind-every-credential-to-its-issuer.md)).
 - Reaching an upstream, tool or resource the resolved principal is not entitled
-  to (from Phase 3 onward, when there is a policy engine to bypass).
+  to — bypassing the policy engine.
 - Causing the gateway to forward an inbound token upstream. This invariant is
   asserted by a suite rather than claimed by a comment — every wrapper
   composition, every protocol method and every credential shape, with each
@@ -40,8 +40,7 @@ Anything that lets a caller do something the gateway is supposed to prevent:
   build if the suite does not notice. Breaking it is still the most serious
   finding this project could receive, and a report that defeats *both* the sweep
   and the static one-reader check is the most interesting one it could receive.
-- Injected instructions surviving result screening (from Phase 5, when there is
-  screening to defeat).
+- Injected instructions surviving the result firewall's screening.
 - Unauthenticated denial of service that costs the attacker meaningfully less
   than it costs the gateway — for example turning a request into an amplified
   load on the identity provider.
@@ -86,8 +85,8 @@ of how I would attack this system myself.
   [ADR 0022](docs/decisions/0022-a-cache-key-that-cannot-be-wrong.md) the
   gateway holds each minted credential until shortly before it expires, so a
   core dump or a debugger attached to the process yields live upstream
-  credentials for whoever was recently active. Task 27's stronger claim — that
-  the process holds nothing reusable — now holds only across the credential's
+  credentials for whoever was recently active. Token exchange's stronger claim —
+  that the process holds nothing reusable — now holds only across the credential's
   few minutes of lifetime. The cache is bounded, per process, never written to
   disk and never shared over a network, and background refresh was rejected
   precisely so the gateway does not hold credentials for callers who have gone
@@ -131,11 +130,11 @@ of how I would attack this system myself.
   scores the firewall per attack family — including two families,
   `plain_assertion` and `delayed_multi_step`, that no detector catches at all,
   recorded rather than omitted. Both numbers are floors fitted to corpora used
-  while developing. Since task 52 they carry bootstrap confidence intervals, and
+  while developing. They carry bootstrap confidence intervals, and
   the measured register — including the two families detected at **zero**, and a
   `tool_confusion` precision interval whose lower bound is also zero — is in
-  [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) §6.1. The held-out split
-  (task 50) exists and **has never been scored**, so whether any of this
+  [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) §6.1. The corpus's held-out
+  split exists and **has never been scored**, so whether any of this
   generalises remains an open question rather than a claim.
 
 - **A static credential shared across tenants.** Exchanged credentials — the

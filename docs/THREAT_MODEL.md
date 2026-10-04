@@ -329,8 +329,8 @@ of findings, not of screenings.
   drain a budget faster, but that is *weighting, not isolation* — it cannot
   express "anything at 100/s, but this destructive tool at 1/s". ADR 0044 §3
   calls this the one of its four cuts worth building.
-- **No per-tenant limits.** Task 58 supplied the tenant ADR 0044 §4 said was
-  missing, so budgets are now *isolated* per tenant — but every tenant still
+- **No per-tenant limits.** Multi-tenancy (ADR 0051) supplied the tenant ADR 0044 §4
+  said was missing, so budgets are now *isolated* per tenant — but every tenant still
   draws from the same capacity and refill numbers. Isolation, not
   differentiation.
 - **Rate-limit state is in memory**, so a replicated fleet multiplies every
@@ -383,8 +383,8 @@ and quieter. Every entry is logged at every start.
 
 A chain spanning rotated files needs the head carried across the boundary.
 Today the file grows without bound. `fsync` per entry also bounds write
-throughput to the disk's sync rate — a declared cost (ADR 0050 §8), measured in
-Phase 8.
+throughput to the disk's sync rate — a declared cost (ADR 0050 §8), measured by
+the perf harness (ADR 0053).
 
 ---
 
@@ -473,4 +473,4 @@ demo, `make audit-checkpoint`, edit any line of `audit/audit.jsonl` and verify
 | Date | Change |
 |---|---|
 | 2026-08-13 | Completed. Register consolidated from ADRs 0013–0051, measured numbers from `corpus/eval-baseline.json`. |
-| Phase 1 | Stub created, so that what is *not* defended was visible from the beginning rather than implied. |
+| At the start | Stub created, so that what is *not* defended was visible from the beginning rather than implied. |

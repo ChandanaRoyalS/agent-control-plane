@@ -66,19 +66,19 @@ jobs:
       - name: Prove the refusal can fail
         run: uv run python scripts/mutate_refusal.py
 
-      # The fourth harness, and it has been passing only on demand since task 35.
-      # A harness that runs when somebody remembers is a harness that stops
-      # running. This one hunts for a call the pre-dispatch fast path refuses and
-      # the policy would have allowed — a false denial of legitimate traffic,
-      # produced by an optimisation that was supposed to be invisible.
+      # The fourth harness, and until it was wired in here it passed only on
+      # demand. A harness that runs when somebody remembers is a harness that
+      # stops running. This one hunts for a call the pre-dispatch fast path
+      # refuses and the policy would have allowed — a false denial of legitimate
+      # traffic, produced by an optimisation that was supposed to be invisible.
       - name: Prove the pre-dispatch check refuses nothing legitimate
         run: uv run python scripts/prove_predispatch.py
 
-      # Task 53's gate. Diffs the measured counts against the committed
-      # baseline and fails when any of them got worse — detection down, false
-      # positives up, a benign document newly withheld. Exit 2 means the corpus
-      # or the deployment moved and the two runs are not comparable, which needs
-      # a deliberate `--capture` rather than a fix.
+      # The corpus regression gate. Diffs the measured counts against the
+      # committed baseline and fails when any of them got worse — detection
+      # down, false positives up, a benign document newly withheld. Exit 2 means
+      # the corpus or the deployment moved and the two runs are not comparable,
+      # which needs a deliberate `--capture` rather than a fix.
       #
       # Deterministic detectors only, deliberately: gating on a model's output
       # would make the build flaky in a way nobody could tell from a real
@@ -133,11 +133,11 @@ jobs:
   image:
     name: image · compose · smoke
     runs-on: ubuntu-latest
-    # Raised from 15 in task 26: the stack now boots a Keycloak, imports a realm
-    # and waits for it to serve metadata before the gateway will even bind a
-    # port. That is a minute of wall clock nobody can optimise away, and it buys
-    # the only assertions in this repository made against an authorization
-    # server it did not write.
+    # Raised from 15 when Keycloak joined the stack: it now boots a Keycloak,
+    # imports a realm and waits for it to serve metadata before the gateway
+    # will even bind a port. That is a minute of wall clock nobody can optimise
+    # away, and it buys the only assertions in this repository made against an
+    # authorization server it did not write.
     timeout-minutes: 20
     # Runs alongside `quality` rather than after it. They fail for unrelated
     # reasons — a type error and a broken Dockerfile are different problems —
@@ -213,7 +213,13 @@ jobs:
         # for the one-shot readiness gate to *complete* — while keeping a
         # container that deliberately exits out of the set compose is asked to
         # see running.
-        run: mkdir -p audit && chmod 777 audit && docker compose up -d --wait gateway
+        # Owned by the gateway's uid, not world-writable: a tamper-evident
+        # log in a directory anyone on the host can append to is a claim with a
+        # hole in it. The runner has passwordless sudo; the verifier step below
+        # reads the file, so the group needs read.
+        run: |
+          mkdir -p audit && sudo chown 10001:$(id -g) audit && chmod 770 audit
+          docker compose up -d --wait gateway
 
       - name: Keycloak's log if it did not come up
         if: failure()

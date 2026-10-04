@@ -45,22 +45,22 @@ this directory exists to prevent.
 ## What is in it, and why
 
 **Two clients.** `acp-agent` is the *workload identity* — the thing doing the
-work, as opposed to the person it is being done for. Phase 2 keeps those as two
-separate identities and neither substitutes for the other
+work, as opposed to the person it is being done for. The gateway keeps those as
+two separate identities and neither substitutes for the other
 ([ADR 0015](../../docs/decisions/0015-two-identities-not-one.md)). It is
 confidential rather than public for two reasons: Keycloak refuses standard token
-exchange from a public client, which task 27 needs, and a workload identity
-anyone can claim is not an identity.
+exchange from a public client, which token exchange needs, and a workload
+identity anyone can claim is not an identity.
 
 `acp-gateway` exists to be *named*. Keycloak's token exchange takes a client ID
 in its `audience` parameter, not an arbitrary URI, so the resource has to exist
 as a client before anything can be exchanged toward it. It has no flows enabled
 and is never logged into.
 
-Worth flagging before task 28 rather than discovering during it: taking a client
-ID there is Keycloak being narrower than RFC 8707, which lets the target be
-named by URI. Whether it also accepts a `resource` parameter is a task 28
-question, and if it does not, the deviation gets an ADR the way task 23's did.
+Worth flagging up front: taking a client ID there is Keycloak being narrower
+than RFC 8707, which lets the target be named by URI. Whether it also accepts a
+`resource` parameter is a question for the per-upstream credential minting, and
+if it does not, the deviation gets an ADR the way the issuer-binding one did.
 
 **No browser flow.** `standardFlowEnabled` is false because there is no browser
 here. An agent is not a user-facing application, and modelling it as one is how
@@ -84,11 +84,10 @@ asks for it as RFC 8707's `resource`, and the authorization server writes it
 into `aud` ([ADR 0017](../../docs/decisions/0017-let-the-gateway-tell-clients-where-to-authenticate.md)).
 
 **Two users, not one.** One user proves a token validates. Two users with
-different roles are what Phase 2 has to *end* with — the same agent, the same
+different roles are what the identity demo is about — the same agent, the same
 tool, two people, two demonstrably different upstream credentials. Alice reads;
-Bob reads and writes. They exist now so that demo has something to be about
-later, and so the difference between them is already in git before there is a
-policy engine to act on it.
+Bob reads and writes. They exist so that demo has something to be about, and so
+the difference between them is in git for the policy engine to act on.
 
 **Five-minute access tokens.** Short for a login session, about right for a
 credential an automated agent holds, and comfortably longer than the 60 seconds

@@ -194,11 +194,17 @@ def canonical(payload: Mapping[str, Any]) -> str:
     there for a reason about approvals must not silently reinterpret an archive.
     They carry separate version stamps and are allowed to evolve apart.
     """
+    # **Strict.** No `default=str`: the digest must cover exactly the bytes the
+    # sink writes, and the sink writes strict JSON. With a fallback here, a
+    # `detail` carrying a `set` or a `Decimal` hashed fine and then failed to
+    # serialise on the way to disk — after the chain head had advanced — so
+    # every later entry pointed at a `prev` nothing on disk had, and an
+    # untampered file verified as tampered. A value JSON cannot represent is
+    # refused before anything is chained (`FileAuditSink.append`).
     return json.dumps(
         payload,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
         allow_nan=False,
-        default=str,
     )

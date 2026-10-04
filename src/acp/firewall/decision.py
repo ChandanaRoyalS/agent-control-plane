@@ -24,12 +24,15 @@ See ADR 0038.
 
 from __future__ import annotations
 
+import functools
 import logging
 import secrets
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
+
+from anyio import CapacityLimiter, to_thread
 
 from acp.firewall.classifier import OllamaClassifier
 from acp.firewall.findings import Confidence, Finding
@@ -224,6 +227,33 @@ def refusal(tool: str, triggers: tuple[Finding, ...], incident: str) -> CallTool
     )
 
 
+MAX_CONCURRENT_CLASSIFIER_CALLS: Final = 4
+"""How many screenings may be waiting on the model at once.
+
+A local model answers one prompt at a time; a hundred concurrent tool results
+would queue behind it either way, and letting them all hold a worker thread
+while they wait is how a thread pool fills with calls to one slow dependency.
+Four is enough to overlap network latency with inference and small enough that
+the gateway's other threaded work (the audit `fsync`) still gets a thread.
+"""
+
+_limiter: CapacityLimiter | None = None
+
+
+def _classifier_limiter() -> CapacityLimiter:
+    """One limiter per process, created on first use.
+
+    Lazily, because an anyio `CapacityLimiter` binds to the running event loop
+    on first acquisition, and the `Firewall` is constructed at startup before
+    the loop the gateway serves on exists — the same reason the audit writer
+    creates its serialiser on demand.
+    """
+    global _limiter  # noqa: PLW0603 — one per process is the point
+    if _limiter is None:
+        _limiter = CapacityLimiter(MAX_CONCURRENT_CLASSIFIER_CALLS)
+    return _limiter
+
+
 class Firewall:
     """Screens a tool result and decides what the caller gets.
 
@@ -245,6 +275,37 @@ class Firewall:
         self._allowed_hosts = frozenset(allowed_hosts)
         self._max_chars = max_chars
         self._classifier = classifier
+
+    async def ainspect(
+        self,
+        result: CallToolResult,
+        *,
+        tool: str,
+        tools: AbstractSet[str] = frozenset(),
+    ) -> Inspection:
+        """`inspect`, off the event loop when a model is attached.
+
+        The pattern detectors take microseconds and run inline. The classifier
+        is a synchronous HTTP call to a local model with a five-second timeout,
+        and `inspect` was being called from the request handler with no thread
+        hop — so with the classifier enabled, every tool call parked the whole
+        gateway for the model's latency, for every other request in the
+        process. The same bug class ADR 0053 found for a 5.8 ms `fsync`, three
+        orders of magnitude longer, in the one component that is also the
+        project's only model. So: with a classifier, the screening runs on a
+        worker thread under a limiter that bounds concurrent model calls;
+        without one, there is nothing to wait for and the hop is pure cost.
+
+        `inspect` stays synchronous and pure — the evaluation harness, the
+        corpus scripts and the unit tests call it directly, and a decision that
+        can be reasoned about without an event loop should stay that way.
+        """
+        if self._classifier is None:
+            return self.inspect(result, tool=tool, tools=tools)
+        return await to_thread.run_sync(
+            functools.partial(self.inspect, result, tool=tool, tools=tools),
+            limiter=_classifier_limiter(),
+        )
 
     def inspect(
         self,

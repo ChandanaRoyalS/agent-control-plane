@@ -350,6 +350,56 @@ def _unanswerable(held: ApprovalRequest | None, now: float) -> Response | None:
     return None
 
 
+async def _chained(
+    audit: AuditLog, held: ApprovalRequest, operator: Operator, answer: _Answer
+) -> bool:
+    """Write the decision's audit row; ``False`` if the log refused it.
+
+    **Chained before it is decided, and awaited.** Fail-closed means a decision
+    this gateway cannot record is not made: the row is written first, and only
+    then does the store change state — so an audit log that refuses leaves the
+    request pending for a retry rather than approved-and-unrecorded. `arecord`,
+    not `record`: the file sink's write is an `fsync`, and running it on the
+    event loop from here parked every other request in the process (ADR 0053)
+    and bypassed the writer's serialisation that every other path goes through.
+
+    The operator's `reason` **is** recorded, unlike almost everything else a
+    caller supplies. It is the one free-text field in the system written by an
+    authenticated human who knows it is being kept — "checked with the data
+    team" is exactly what makes this row worth having.
+
+    What is *not* recorded: the `request_state` token. It is a live handle for
+    up to five minutes, and this file is durable and widely readable (ADR 0045)
+    — the wrong place for a credential of any lifetime. The fingerprint
+    identifies the call for an investigation and is useless for spending the
+    approval.
+    """
+    try:
+        await audit.arecord(
+            AuditCategory.APPROVAL,
+            "approval.decided",
+            subject=held.subject,
+            actor=held.actor,
+            tenant=held.tenant,
+            tool=held.tool,
+            rule=held.rule,
+            outcome=AuditOutcome.ALLOWED if answer.approved else AuditOutcome.DENIED,
+            reason=answer.reason or None,
+            detail={
+                "fingerprint": held.fingerprint,
+                # *Who answered.* A verified subject and the issuer that vouched
+                # for it, or the honest `shared-token`. This is the field the
+                # row exists for.
+                "operator": operator.subject,
+                "operator_issuer": operator.issuer,
+                "operator_verified": operator.verified,
+            },
+        )
+    except ACPError:
+        return False
+    return True
+
+
 def build_decide(
     store: ApprovalStore, auth: OperatorAuthenticator, audit: AuditLog | None = None
 ) -> Any:
@@ -375,54 +425,28 @@ def build_decide(
         now = time.time()
         held = store.get(token)
         refusal = _unanswerable(held, now)
-        if refusal is not None:
-            return refusal
-        if held is not None and not operator.may_answer(held):
+        if refusal is None and held is not None and not operator.may_answer(held):
             # After `_unanswerable`, so an operator is told "no such request"
             # for a token that does not exist and "not your tenant" only for one
             # that does — the existence of another tenant's token is still not
             # something a URL guess should confirm... except that it must be,
             # because the token is 256 random bits and was handed to the agent
             # that asked. Nobody guesses it; the 403 leaks nothing.
-            return _forbidden()
+            refusal = _forbidden()
+        if refusal is not None or held is None:
+            return refusal or JSONResponse({"error": "no such request"}, status_code=404)
+
+        if audit is not None and not await _chained(audit, held, operator, answer):
+            # The request stays PENDING. The operator can answer again once the
+            # log is writable; nothing was granted in the meantime.
+            return JSONResponse(
+                {"error": "the decision could not be recorded; nothing was decided"},
+                status_code=503,
+            )
 
         decided = store.decide(token, approved=answer.approved, reason=answer.reason)
         if decided is None:  # pragma: no cover — the lookup above already found it
             return JSONResponse({"error": "no such request"}, status_code=404)
-
-        if audit is not None:
-            # The operator's `reason` **is** recorded here, unlike almost
-            # everything else a caller supplies. It is the one free-text field in
-            # the system written by a trusted, authenticated human who knows it
-            # is being kept — "checked with the data team" is exactly what makes
-            # this row worth having, and withholding it would leave an approval
-            # nobody can account for.
-            #
-            # What is *not* recorded: the `request_state` token. It is a live
-            # handle for up to five minutes, and this file is durable and widely
-            # readable (ADR 0045) — the wrong place for a credential of any
-            # lifetime. The fingerprint identifies the call for an investigation
-            # and is useless for spending the approval.
-            audit.record(
-                AuditCategory.APPROVAL,
-                "approval.decided",
-                subject=decided.subject,
-                actor=decided.actor,
-                tenant=decided.tenant,
-                tool=decided.tool,
-                rule=decided.rule,
-                outcome=AuditOutcome.ALLOWED if answer.approved else AuditOutcome.DENIED,
-                reason=answer.reason or None,
-                detail={
-                    "fingerprint": decided.fingerprint,
-                    # *Who answered.* A verified subject and the issuer that
-                    # vouched for it, or the honest `shared-token`. This is
-                    # the field the row exists for.
-                    "operator": operator.subject,
-                    "operator_issuer": operator.issuer,
-                    "operator_verified": operator.verified,
-                },
-            )
         return JSONResponse({**as_view(decided, now), "notice": UNTRUSTED_NOTICE})
 
     return decide

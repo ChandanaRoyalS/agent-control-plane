@@ -1,8 +1,8 @@
 # Load and latency measurement
 
-Phase 8. `perf/scenarios.py` decides what to ask and how to read the answer;
+`perf/scenarios.py` decides what to ask and how to read the answer;
 `perf/locustfile.py` is the Locust wiring. `perf/overhead.py` and
-`scripts/measure_overhead.py` are task 62's separate measurement — **what the
+`scripts/measure_overhead.py` are the separate overhead measurement — **what the
 gateway costs against a direct upstream call**, which is a different question
 and is measured the opposite way.
 
@@ -24,7 +24,7 @@ make up            # the stack must be up: gateway, mocks, Keycloak
 make load          # 30 seconds, 20 users
 make load-long     # 5 minutes, 100 users
 make load-ab       # six alternating fsync on/off runs, so the numbers have a range
-make overhead      # sequential, against a direct upstream call (task 62)
+make overhead      # sequential, against a direct upstream call
 make overhead-ab   # the same, across fsync and prober on/off, to attribute it
 make overhead-ablate  # remove one thing at a time, and itemise the total
 make overhead-ablate-repeat   # the same ladder x3, for a tighter floor
@@ -64,7 +64,7 @@ Three lines in the report are warnings rather than data:
   latencies describe a queue as much as a gateway.
 - **`UNRECORDED` is non-zero** — the audit sink could not keep up, so those
   calls did not happen (fail-closed, ADR 0050). `fsync` per entry is the first
-  suspect, and this is the number Phase 8 exists to put a figure on.
+  suspect, and this is the number the perf harness exists to put a figure on.
 
 ## What these numbers are not
 
@@ -72,10 +72,10 @@ Three lines in the report are warnings rather than data:
 task mix, with everything running on the same host through Docker's network
 stack. They are useful for three things and no others:
 
-1. **Finding where time goes** — the input to task 61's profiling.
+1. **Finding where time goes** — the input to profiling (`make load-long`).
 2. **Detecting a regression** on the same machine, between two runs.
-3. **Sizing the gateway's overhead** against a direct call (task 62), which is
-   the only comparison here that means anything to somebody else.
+3. **Sizing the gateway's overhead** against a direct call (`make overhead`),
+   which is the only comparison here that means anything to somebody else.
 
 Anyone quoting a p99 from this harness as "the Agent Control Plane's latency"
 is quoting the mocks, the loopback interface and the laptop.
@@ -139,8 +139,8 @@ Same machine, same mix, same 20 users, 30 seconds. The only difference is
 | **listed p95** | **2819.4 ms** | **223.9 ms** | **12.59x** |
 | held p95 | 725.0 ms | 226.8 ms | 3.20x |
 
-ADR 0050 §8 declared this cost three tasks ago and said Phase 8 would measure
-it. **It is 2.56x of throughput.**
+ADR 0050 §8 declared this cost in advance and said the perf harness would
+measure it. **It is 2.56x of throughput.**
 
 ### And the `listed` row says something the throughput number does not
 
@@ -171,8 +171,8 @@ must not happen. The fix is to get the write off the loop while keeping it
 awaited, so the calling request still cannot proceed until its record is
 durable and every other request keeps running.
 
-**That is task 61**, and this is the measurement that tells it exactly where to
-look — before a profiler was even attached.
+**That is the audit-write fix**, and this is the measurement that tells it
+exactly where to look — before a profiler was even attached.
 
 ## The measurement: three repetitions, alternating
 
@@ -189,7 +189,7 @@ alternating on/off so machine drift hits both configurations equally
 | **listed p95** | **35.7 ms** [30.4–40.4] | 160.5 ms [149–166] |
 
 **Durability costs 2.14x of throughput** (per-rep: 2.32, 2.18, 1.91). That is
-the number ADR 0050 §8 promised Phase 8 would produce.
+the number ADR 0050 §8 promised the perf harness would produce.
 
 ### The fix, against the state before it
 
@@ -408,9 +408,9 @@ Derived from two rows of one run. An estimate, stated as one.
 
 #### 11 ms unattributed, and the ladder that itemises it
 
-A request that touches no network still costs 16 ms. Task 61 makes the audit
-`fsync` the obvious suspect, and **obvious is not measured** — which is ADR
-0053's own finding, one task old.
+A request that touches no network still costs 16 ms. The audit-write fix makes
+the audit `fsync` the obvious suspect, and **obvious is not measured** — which
+is ADR 0053's own finding.
 
 With `fsync` and probing both off, a request touching no network still costs
 11.2 ms. `make overhead-ablate` walks `perf.overhead.ABLATION`, removing one
@@ -522,9 +522,9 @@ first two and this file records the rest:
 - **wait time** — 0–50 ms per user. **This is not a saturation test.** At 20
   users with a ~30 ms round trip, that ceiling is roughly 400 req/s of offered
   load and the observed throughput is far below it — so these numbers describe
-  *latency under light load*, not capacity. Task 62 needs the latency; a
-  capacity figure needs `--users` in the hundreds and a wait time of zero, and
-  should be measured deliberately rather than inferred from this
+  *latency under light load*, not capacity. The overhead measurement needs the
+  latency; a capacity figure needs `--users` in the hundreds and a wait time of
+  zero, and should be measured deliberately rather than inferred from this
 - **users started, not users requested** — printed in the report
 - **user count and duration** — printed by Locust
 - **the mix** — `perf/scenarios.MIX`, each entry carrying the reason it is there

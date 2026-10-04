@@ -15,7 +15,22 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `scripts/evaluate_classifier.py` (`make eval-classifier`) scores the optional
+  Ollama classifier on its own. With the classifier attached, the firewall's
+  report cannot show what the model contributed — a benign document the patterns
+  already flagged is flagged either way. This asks the model directly and keeps
+  the outcomes the firewall throws away: an answer naming a family the firewall
+  cannot report (`plain_assertion`, `delayed_multi_step`), malformed JSON, and
+  timeouts are counted separately rather than as "no finding". Also reports
+  per-call latency and whether a second run gives the same answer. Development
+  split only; not a CI gate.
+
+### Fixed
+
+- The site footer counted 58 architecture decisions after the 59th landed; the
+  count is now read from `docs/decisions/` when the site is built.
 
 ## [1.1.1] - 2026-10-04
 

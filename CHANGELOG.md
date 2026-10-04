@@ -44,6 +44,12 @@ without somebody accepting the change.
   development corpus, against the same template control. torch is pulled in for
   that run only (`uv run --with`), never into the project's dependencies.
 
+- `scripts/evaluate_actions.py` (`make eval-actions`) evaluates the tool
+  chains InjecAgent's attacks need against a least-privilege policy and a
+  reads-allowed/writes-held policy, both built by rule, with the cost to the
+  users' own task tools; `actions.json` beside the corpus carries the chains
+  and the catalogue (ADR 0063).
+
 ### Changed
 
 - Held-out split v1 was scored once and is marked spent (ADR 0060): patterns
@@ -52,6 +58,8 @@ without somebody accepting the change.
 
 ### Fixed
 
+- `scripts/evaluate_hf_detector.py` printed `revision: unknown`; it now reads
+  the commit of the snapshot that loaded from the local cache.
 - The classifier's prompt offered seven families and the parser accepted five,
   so a model verdict of `plain_assertion` — the family the classifier exists
   for — was discarded. `plain_assertion` is now a reportable family (the model's

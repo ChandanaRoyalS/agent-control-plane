@@ -16,6 +16,11 @@ Response`) verbatim as `text`, the span the authors inserted into it as
 `planted`, and the case's subset, variant and attack type. Nothing else — not the
 user instruction, the agent's thought, or the expected achievement.
 
+**Also taken, into `actions.json`:** each instruction's `Attacker Tools`, each
+case's `User Tool`, and the tool names from `data/tools.json`, renamed to this
+gateway's `upstream__tool` form (`GmailSendEmail` → `gmail__SendEmail`). These
+are the actions the attacks aim for; the firewall never sees them (ADR 0063).
+
 **What was added:** an `id` (`injecagent/<subset>-<variant>-<index>`, the index
 into the source file) and a `group` (`<subset>/<sha256(attacker instruction)[:10]>`).
 

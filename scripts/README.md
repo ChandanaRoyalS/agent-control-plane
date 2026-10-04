@@ -8,6 +8,7 @@ Operational and verification scripts. None is part of the shipped package
 | `evaluate.py` | `make eval`, CI (`--check`) | Scores the firewall against the committed corpus, false positives first; `--check` fails if any count regressed against `corpus/eval-baseline.json`. |
 | `evaluate_external.py` | `make eval-external`, CI (`--check`) | Scores the firewall on InjecAgent's development half: recall against a template-only control, withholding, intervals over attacker instructions; `--check` fails on fewer caught or withheld. |
 | `import_injecagent.py` | by hand | Re-imports InjecAgent at its pinned commit and regenerates the hash-ruled held-out v2 manifest; byte-identical on every run. |
+| `evaluate_actions.py` | `make eval-actions` | Evaluates the tool chains InjecAgent's attacks need against a least-privilege policy and a reads-allowed/writes-held policy, both built by rule; per attacker instruction, with the cost to the users' own tasks. |
 | `evaluate_hf_detector.py` | `make eval-hf-detector` | Scores a Hugging Face yes/no injection detector (default ProtectAI DeBERTa v2) on the benign corpus, the internal attacks and InjecAgent's development half; torch is added for that run only. Not in CI. |
 | `evaluate_classifier.py` | `make eval-classifier` | Scores the Ollama classifier alone, with no patterns: false positives, recall, the five outcomes the firewall collapses to two, latency and run-to-run agreement. Needs a local Ollama; not in CI. |
 | `corpus_stats.py` | `make corpus` | Describes the benign corpus and what each detector does to it. |

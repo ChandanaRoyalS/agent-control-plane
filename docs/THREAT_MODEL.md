@@ -279,16 +279,31 @@ The optional model classifier, measured alone (ADR 0060), flags 1 of 106 benign
 documents and 3 of 36 development attacks, at about 1.4 s a call, and added no
 held-out recall. It is off by default and is not counted as a defence here.
 
+**No text control tested separates the polite injection from a polite request**
+(ADR 0063). On InjecAgent's base form, llama3.2 with `plain_assertion` reportable
+caught at most 7 of 459; ProtectAI's purpose-built DeBERTa detector caught 56 of
+459 — while calling 65% of the same tool responses *without* the attack an
+injection, and 23 of 106 benign documents. Neither is integrated.
+
+**What stops it is the policy, at the tool call.** Every one of the 27
+development attacks needs a tool the users' tasks do not: under a least-privilege
+policy all 27 chains are denied, and under a broad reads-allowed, writes-held
+policy all 27 are held for a person — with none of the users' own 17 task tools
+affected (ADR 0063). That is conditional on the deployment's policy being scoped
+that way, on a person refusing the held call, and on the attack needing a write:
+a chain that only reads (a URL that carries data out) would pass the broad
+policy.
+
 Provenance framing removes the *free* version of the attack — the one that works
 because nothing ever told the model the text was retrieved — but it is an
 instruction to a system that follows instructions probabilistically, and a
 sufficiently persuasive document may still win. It also does not protect a
 client that flattens the content blocks and loses their order.
 
-> **What would close it:** a detector that reads intent rather than shape for
-> the plain form — measured against held-out v2, not tuned on it — and a second
-> signal strong enough to let a recognised injection be withheld without
-> re-breaking the benign corpus.
+> **What would close it:** least-privilege policy as the default deployment
+> posture rather than an option — the measured control for the polite form — and
+> for text, a detector whose yes rate on clean tool output is low enough that
+> "caught" and "said yes" converge, measured against held-out v2, not tuned on it.
 
 ### 6.2 A hostile tool *description* — **unscreened and unfenced**
 
@@ -488,6 +503,7 @@ demo, `make audit-checkpoint`, edit any line of `audit/audit.jsonl` and verify
 
 | Date | Change |
 |---|---|
+| 2026-10-04 | Text detectors and tool-call policy measured on InjecAgent (ADR 0063). |
 | 2026-10-04 | Held-out v1 scored (ADR 0060); external InjecAgent corpus added and held-out v2 sealed (ADR 0061). |
 | 2026-08-13 | Completed. Register consolidated from ADRs 0013–0051, measured numbers from `corpus/eval-baseline.json`. |
 | At the start | Stub created, so that what is *not* defended was visible from the beginning rather than implied. |

@@ -50,6 +50,11 @@ def main() -> int:
         title="INJECAGENT ACTIONS — development half",
     )
     if args.unseal:
+        if split.manifest.unsealed:
+            print(
+                f"\n  held-out v{split.manifest.version} was already unsealed "
+                f"({split.manifest.unsealed}); the rows below are not unseen."
+            )
         render(
             evaluate_actions(actions, {d.group for d in split.heldout}),
             title=f"INJECAGENT ACTIONS — HELD-OUT v{split.manifest.version}",

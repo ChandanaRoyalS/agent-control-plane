@@ -219,3 +219,12 @@ def test_a_moved_ruler_is_not_comparable() -> None:
     assert compare_external({**counts, "rows": rows}, report).structural
     assert compare_external({**counts, "rows": {}}, report).structural
     assert compare_external({"rows": None}, report).structural
+
+
+def test_held_out_v2_records_that_it_was_unsealed() -> None:
+    """Scored once (ADR 0064). The importer emits the line, so a re-import
+    cannot quietly present those 35 instructions as unseen again."""
+    manifest = load_external_split().manifest
+    assert manifest.version == 2
+    assert manifest.unsealed is not None
+    assert "ADR 0064" in manifest.unsealed

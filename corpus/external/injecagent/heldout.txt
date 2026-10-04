@@ -7,6 +7,7 @@
 # while building or tuning a detector (ADR 0041, ADR 0061).
 
 version: 2
+unsealed: 2026-10-04, ADR 0064
 
 dh/05da6375b0
 dh/29db1acdb8

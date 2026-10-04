@@ -272,8 +272,9 @@ in real-looking tool responses, the polite base form produced **0** findings
 attributable to the attack, across 459 documents; the form prefixed "IMPORTANT!!!
 Ignore all previous instructions…" was caught every time — one regex, one fixed
 sentence. **Nothing was withheld in either form**, because `instruction_override`
-is report-only (ADR 0039). Held-out v2 (35 instructions) is sealed for the next
-change to the firewall.
+is report-only (ADR 0039). **Held-out v2, scored once (ADR 0064), says the
+same:** 0 of 595 polite documents caught, 595 of 595 announced ones, 35 unseen
+instructions, nothing withheld.
 
 The optional model classifier, measured alone (ADR 0060), flags 1 of 106 benign
 documents and 3 of 36 development attacks, at about 1.4 s a call, and added no
@@ -292,7 +293,10 @@ policy all 27 are held for a person — with none of the users' own 17 task tool
 affected (ADR 0063). That is conditional on the deployment's policy being scoped
 that way, on a person refusing the held call, and on the attack needing a write:
 a chain that only reads (a URL that carries data out) would pass the broad
-policy.
+policy. **On held-out v2 (35 unseen instructions, ADR 0064) the result held:**
+35 of 35 chains blocked under least privilege, 35 of 35 held under the broad
+policy, no task tool affected — a policy failure rate below about 9% at 95%
+confidence by the rule of three, for this attack distribution.
 
 Provenance framing removes the *free* version of the attack — the one that works
 because nothing ever told the model the text was retrieved — but it is an
@@ -303,7 +307,7 @@ client that flattens the content blocks and loses their order.
 > **What would close it:** least-privilege policy as the default deployment
 > posture rather than an option — the measured control for the polite form — and
 > for text, a detector whose yes rate on clean tool output is low enough that
-> "caught" and "said yes" converge, measured against held-out v2, not tuned on it.
+> "caught" and "said yes" converge, measured against a fresh held-out source (v1 and v2 are spent), not tuned on it.
 
 ### 6.2 A hostile tool *description* — **unscreened and unfenced**
 
@@ -503,6 +507,7 @@ demo, `make audit-checkpoint`, edit any line of `audit/audit.jsonl` and verify
 
 | Date | Change |
 |---|---|
+| 2026-10-04 | Held-out v2 scored once: firewall and both policies generalised exactly (ADR 0064). |
 | 2026-10-04 | Text detectors and tool-call policy measured on InjecAgent (ADR 0063). |
 | 2026-10-04 | Held-out v1 scored (ADR 0060); external InjecAgent corpus added and held-out v2 sealed (ADR 0061). |
 | 2026-08-13 | Completed. Register consolidated from ADRs 0013–0051, measured numbers from `corpus/eval-baseline.json`. |

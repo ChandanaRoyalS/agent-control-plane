@@ -15,7 +15,7 @@ false-positive rate near zero.
 
 **Then the attacks, sliced by family** (ADR 0040). A single detection
 rate over mixed attacks is unreadable, so every attack names its family — and
-the taxonomy deliberately includes two families no detector can catch, because a
+the taxonomy deliberately includes families no pattern can catch, because a
 taxonomy containing only what you can catch is a taxonomy that flatters you.
 Every attack also records what the firewall is expected to do with it, including
 `undetected`, and the build fails when an expectation is wrong in *either*

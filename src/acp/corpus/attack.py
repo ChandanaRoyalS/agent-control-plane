@@ -7,8 +7,9 @@ stop it flattering the thing it measures.
 **Family.** A single detection rate over mixed attacks is unreadable: 70% could
 be even coverage of everything, or perfect coverage of the easy families and
 nothing whatsoever on encoding. `AttackFamily` is a superset of
-`acp.firewall.findings.Family` — the five families a *detector* can report, plus
-two that no detector can. A test asserts the subset relation, so the corpus and
+`acp.firewall.findings.Family` — the six families a detector can report (one of
+them, `plain_assertion`, only by the model), plus `delayed_multi_step`, which no
+per-result detector can. A test asserts the subset relation, so the corpus and
 the detectors cannot drift into describing different things.
 
 **Expectation.** Every attack records what the firewall is expected to do with
@@ -50,11 +51,13 @@ UNDERSTOOD: Final = REQUIRED
 class AttackFamily(StrEnum):
     """How the corpus is sliced.
 
-    A deliberate superset of `acp.firewall.findings.Family`. The first five are
-    what a detector can report and are spelled identically, so a per-family
-    detection rate can be computed by comparing the two directly. The last two
-    are attacks no detector claims — named here because a taxonomy that only
-    contains what you can catch is a taxonomy that flatters you.
+    A deliberate superset of `acp.firewall.findings.Family`, spelled identically
+    so a per-family detection rate can be computed by comparing the two
+    directly. `delayed_multi_step` is the one no detector can claim: screening is
+    per result, so nothing ever sees the two documents together. `plain_assertion`
+    was the second, until the model classifier was allowed to report it (ADR
+    0062) — no *pattern* detector claims it, and none ever will. Named here
+    because a taxonomy that only contains what you can catch flatters you.
     """
 
     DIRECT_OVERRIDE = "direct_override"

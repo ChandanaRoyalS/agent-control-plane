@@ -11,10 +11,11 @@ document by document, and keeps everything the firewall throws away.
 model, because "nothing" covers four different events:
 
 - `CLEAN` — the model said "not an attack";
-- `DISCARDED` — the model said "attack" but named no family, or a family the
-  firewall cannot report (`plain_assertion`, `delayed_multi_step` — which the
-  prompt lists, and `parse_verdict` drops). The model was right or wrong; either
-  way the firewall never heard it;
+- `DISCARDED` — the model said "attack" but named no family, or one the
+  firewall cannot report. Until ADR 0062 the prompt itself offered two such
+  families; now it offers exactly `Family`, so this counts the model inventing
+  one (it once answered `prompt-injection`). Right or wrong, the firewall never
+  heard it;
 - `MALFORMED` — the answer was not the JSON asked for;
 - `FAILED` — the call raised: timeout, connection refused.
 

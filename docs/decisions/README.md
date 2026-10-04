@@ -102,6 +102,7 @@ If you have ten minutes and want the ones that carry the most weight:
 | [0047](0047-a-baseline-not-a-threshold.md) | a baseline beats a threshold, and the interval matters more than the point estimate |
 | [0060](0060-the-held-out-split-scored-once-and-what-the-model-adds.md) | held-out v1 scored once (3/7 detected, 0/7 withheld, all as recorded) and marked spent; the model classifier, measured alone, adds no held-out recall for ~1.4 s a call |
 | [0061](0061-attacks-nobody-here-wrote.md) | InjecAgent imported, split by attacker instruction with half sealed as held-out v2; patterns catch 100% of the "ignore previous instructions" form, 0% of the plain form, and withhold neither |
+| [0062](0062-the-model-may-name-plain-assertion.md) | `plain_assertion` is reportable by the model alone, and the prompt's families are derived from `Family`, so the classifier's one useful answer is no longer discarded |
 
 ## Approvals, audit, tenancy
 

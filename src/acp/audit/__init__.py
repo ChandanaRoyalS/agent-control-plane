@@ -1,6 +1,6 @@
 """Tamper-evident audit: what happened, in an order nobody can quietly edit.
 
-Task 56. Every authorization decision, credential exchange, tool call and
+Every authorization decision, credential exchange, tool call and
 firewall finding, chained — each entry carrying the hash of the one before it, so
 changing any record invalidates every link after it.
 

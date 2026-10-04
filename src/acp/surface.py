@@ -1,6 +1,6 @@
 """The public surface this project's version number is a promise about.
 
-Task 67. Semantic versioning is a contract, and a contract needs a subject.
+Semantic versioning is a contract, and a contract needs a subject.
 "Breaking change" is undefined until somebody says **breaking for whom** — and
 for a gateway the answer is almost never the Python API. Nobody imports
 ``acp``; they run the container.
@@ -9,7 +9,7 @@ So the surface is the four things a deployment can actually depend on:
 
 - **every ``ACP_*`` environment variable**, its type and its default, because a
   renamed variable is a gateway that starts with the old behaviour and says
-  nothing (lesson 46, and this project has hit it six times)
+  nothing (this project has hit it six times)
 - **every CLI command and option**, because they are in somebody's Makefile
 - **the audit record's shape** — its version stamp, categories, outcomes and
   fields — because a chain written by 1.0 has to still verify under 1.1
@@ -230,7 +230,7 @@ def commands(parser: argparse.ArgumentParser, path: str = "acp") -> tuple[Comman
     `getattr` so that a future argparse without it degrades to an empty list
     rather than an exception at capture time -- and the emptiness is caught,
     because the snapshot test asserts the surface is not empty before it asserts
-    anything about its contents (lesson 65).
+    anything about its contents.
     """
     actions: Sequence[argparse.Action] = getattr(parser, "_actions", ())
 

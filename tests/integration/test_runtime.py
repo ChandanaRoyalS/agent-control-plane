@@ -91,7 +91,7 @@ def test_settings_path_validates_before_opening_connections(tmp_path: Path) -> N
 
 
 # ---------------------------------------------------------------------------
-# Schema drift wiring (task 20)
+# Schema drift wiring
 # ---------------------------------------------------------------------------
 
 
@@ -146,7 +146,7 @@ def test_asking_for_drift_detection_without_probing_says_so(
 
 
 # ---------------------------------------------------------------------------
-# Identity wiring (task 22)
+# Identity wiring
 # ---------------------------------------------------------------------------
 
 ISSUER = "https://idp.test/realms/acp"
@@ -175,7 +175,7 @@ def test_no_provider_configured_builds_no_validator() -> None:
     """`None` here is what makes the gateway run unauthenticated, which is how
     every task before this one behaved and has to keep working.
 
-    `auth_required=False` since task 26. The default is now to refuse — a
+    `auth_required=False` is required to get it. The default is to refuse — a
     gateway that is a security control does not start without the thing that
     makes it one — so running unauthenticated is a thing a deployment asks for
     rather than a thing it drifts into.

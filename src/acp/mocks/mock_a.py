@@ -1,7 +1,7 @@
 """Mock upstream A — a document and ticketing service.
 
 Three tools with distinct argument shapes, so catalog-merge and argument-level
-policy tests (Phase 3) have something realistic to exercise. ``search`` is
+policy tests have something realistic to exercise. ``search`` is
 deliberately duplicated on mock B with a different implementation, to exercise
 the gateway's namespace-collision handling (ADR 0003) from day one.
 """
@@ -60,7 +60,7 @@ thing as a model would, and is reproducible without an API key. See
 _DOCUMENTS: dict[str, str] = {
     "runbooks/deploy.md": "# Deploy runbook\n\n1. Tag a release.\n2. Run the deploy workflow.",
     "policies/data-retention.md": "Logs are retained for 90 days, then deleted.",
-    # -- task 64's attack demo ------------------------------------------------
+    # -- the attack demo ------------------------------------------------------
     #
     # Two documents that exist to be stolen and to do the stealing. Invented
     # here rather than drawn from `corpus/`, and that is deliberate: the corpus

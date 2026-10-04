@@ -13,7 +13,7 @@ guarantees — as *one more detector that emits findings*, never as a decider:
   attack" is a weaker claim than a regex matching ``<system>`` literally. It is
   "unusual in ordinary text, cheap to explain" — never the HIGH that a
   deterministic match earns. On its own it should not enforce; it is the second
-  signal that can promote a demoted pattern (task 48), not a first mover.
+  signal that can promote a demoted pattern, not a first mover.
 - **Absence is a first-class path.** The model service may be missing, down, or
   slow. Every one of those yields *no findings*, never an exception into the
   screening path — a firewall that fails closed on its optional layer is a

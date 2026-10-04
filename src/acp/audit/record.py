@@ -1,6 +1,6 @@
 """What an audit record is, and what it deliberately is not.
 
-Task 56. The plan asks for "every authorization decision, credential exchange,
+The requirement is "every authorization decision, credential exchange,
 tool call and firewall finding, chained", and the chaining is the easy half. The
 hard half is deciding what a record *contains*, because an audit log is the one
 artifact in this project that outlives every argument about it.
@@ -47,7 +47,7 @@ reinterpretation would mean an archived chain quietly failing to verify.
 
 
 class Category(StrEnum):
-    """The four things the plan names, plus the one task 55 added.
+    """The four chained categories, plus the approval decisions a human makes.
 
     A category rather than a free string, because "show me every authorization
     decision for this subject" is the query an auditor actually types, and it
@@ -126,7 +126,7 @@ class AuditRecord:
     precisely when one of them is misbehaving."""
 
     tenant: str | None = None
-    """Which tenant this happened in (task 58).
+    """Which tenant this happened in.
 
     Present from the first version deliberately. Adding it later means every
     record written before the change is ambiguous rather than merely

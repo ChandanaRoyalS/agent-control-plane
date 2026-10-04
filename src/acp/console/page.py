@@ -1,4 +1,4 @@
-"""One file, no build step, no framework — task 63.
+"""One file, no build step, no framework.
 
 *"Minimal styling, no framework ceremony — it exists to be watched for thirty
 seconds."*

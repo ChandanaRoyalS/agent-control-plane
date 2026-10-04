@@ -357,8 +357,8 @@ def _dispatch(rpc_request: JsonRpcRequest, tools_by_name: dict[str, MockTool]) -
         case "tools/list":
             # `apply_drift` is a no-op unless MOCK_SCHEMA_DRIFT is set, and is
             # applied here rather than at startup so the catalogue can be
-            # changed under a running gateway — which is the situation task 20
-            # exists for and the only honest way to demonstrate it.
+            # changed under a running gateway — which is the situation drift
+            # detection exists for and the only honest way to demonstrate it.
             definitions = apply_drift([t.definition() for t in tools_by_name.values()])
             return JsonRpcResponse(
                 id=rpc_request.id,

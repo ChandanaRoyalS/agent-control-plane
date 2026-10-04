@@ -97,8 +97,8 @@ def main() -> int:
     print()
 
     # Not a false-positive rate. The corpus was used while developing, so this
-    # number is fitted to it by construction — the honest one needs task 50's
-    # held-out split and task 52's confidence intervals.
+    # number is fitted to it by construction — the honest one needs the
+    # held-out split and the evaluation's confidence intervals.
     print("This is a withheld rate over a corpus that was used while developing.")
     print("It is a floor, not a measurement. See ADR 0039.")
     print()
@@ -142,7 +142,7 @@ def attack_scoreboard() -> int:
 
     # The held-out split is DESCRIBED here, never scored here. Running the
     # firewall against it during development is exactly the contamination the
-    # split exists to prevent — the number it yields belongs to task 52's
+    # split exists to prevent — the number it yields belongs to the evaluation
     # harness, run deliberately, not to a stats script run on every change.
     split = load_split()
     held = split.heldout
@@ -155,7 +155,7 @@ def attack_scoreboard() -> int:
     print(f"  families covered          {len(held_families)} of {len(split.development.families)}")
     print()
     print("These attacks are excluded from the development corpus a detector is")
-    print("tuned against, so tasks 51-52 can measure the firewall on attacks it")
+    print("tuned against, so the harness can measure the firewall on attacks it")
     print("was never shaped by. See ADR 0041.")
     return len(board.all_mismatches)
 

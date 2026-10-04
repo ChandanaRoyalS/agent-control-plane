@@ -97,7 +97,7 @@ class GatewaySettings(BaseSettings):
     admin_enabled: bool = True
 
     audit_file: Path | None = None
-    """Where the tamper-evident audit chain is written (task 56).
+    """Where the tamper-evident audit chain is written.
 
     Unset means **no chain is written at all**. Presence-based like the secret
     store and token exchange, and for the same reason: a boolean would let a
@@ -134,11 +134,11 @@ class GatewaySettings(BaseSettings):
     A record buffered in the kernel when the machine loses power describes a call
     that really happened, and that is exactly the crash-adjacent window an
     investigation cares about. The cost is real — it bounds write throughput to
-    the disk's sync rate — and Phase 8 measures it rather than guessing.
+    the disk's sync rate — and the perf suite measures it rather than guessing.
     """
 
     approval_operator_token: str = ""
-    """Credential for the approval channel on the admin listener (task 55).
+    """Credential for the approval channel on the admin listener.
 
     Empty means the channel does not exist — not that it exists and refuses.
     Presence-based like token exchange and the secret store, for the reason
@@ -174,16 +174,16 @@ class GatewaySettings(BaseSettings):
     health_probing_enabled: bool = True
     """Background probing of upstream health.
 
-    Off means the gateway behaves exactly as it did before task 18: every
-    upstream is attempted on every request, and a breaker recovers only when
-    some agent's request happens to become its trial call.
+    Off means the gateway runs without the health monitor: every upstream is
+    attempted on every request, and a breaker recovers only when some agent's
+    request happens to become its trial call.
     """
 
     health_probe_interval: float = Field(default=15.0, gt=0)
     """Seconds between probe rounds, before jitter."""
 
     schema_drift_detection_enabled: bool = True
-    """Compare each probed catalogue against the committed baseline (task 20).
+    """Compare each probed catalogue against the committed baseline.
 
     Detection rides on the health prober, so this does nothing when
     ``health_probing_enabled`` is off — see ``acp.schema.detector`` for why that
@@ -208,7 +208,7 @@ class GatewaySettings(BaseSettings):
     policy_file: Path = Path("config/policy.yaml")
 
     tenant_policy_dir: Path | None = None
-    """Where per-tenant policy files live: ``<dir>/<tenant>.yaml`` (task 58).
+    """Where per-tenant policy files live: ``<dir>/<tenant>.yaml``.
 
     Required the moment any issuer registration declares a ``tenant`` label,
     and every declared tenant must have a file — a missing one is a startup
@@ -256,7 +256,7 @@ class GatewaySettings(BaseSettings):
 
     provenance_framing_enabled: bool = False
     """Whether every tool result is fenced as retrieved data before the model
-    reads it (task 46, ADR 0037).
+    reads it (ADR 0037).
 
     Off by default because it is a visible change to the wire — a caller
     receives two more content blocks than the upstream sent — and a deployment
@@ -269,7 +269,7 @@ class GatewaySettings(BaseSettings):
     """
 
     firewall_mode: FirewallMode = FirewallMode.OFF
-    """How much the injection firewall is allowed to do (task 47, ADR 0038).
+    """How much the injection firewall is allowed to do (ADR 0038).
 
     ``off`` screens nothing. ``report`` screens every tool result, logs every
     finding, and changes nothing the caller receives. ``enforce`` withholds
@@ -297,7 +297,7 @@ class GatewaySettings(BaseSettings):
     """
 
     firewall_classifier_enabled: bool = False
-    """Whether the optional model-based detector runs (task 51, ADR 0042).
+    """Whether the optional model-based detector runs (ADR 0042).
 
     Off by default: it needs a local Ollama, it is slower than every pattern, and
     a firewall that silently depends on a model service is one that breaks in a
@@ -329,11 +329,10 @@ class GatewaySettings(BaseSettings):
     quota_window_seconds: float = Field(default=86400.0, gt=0)
     """The window length in seconds over which ``quota_limit`` applies; the tally
     resets at each window boundary. Defaults to a day."""
-    """Path to the policy rulebook (task 32), resolved relative to the
+    """Path to the policy rulebook, resolved relative to the
     process's working directory.
 
-    Loaded and validated at startup in task 33; task 32 only defines the
-    setting and the schema it points at. A missing or malformed policy is a
+    Loaded and validated at startup. A missing or malformed policy is a
     boot failure, unlike the schema-baseline file above — policy is the
     control, not a monitor of one, so its absence is fatal rather than
     tolerated. See ADR 0025."""
@@ -343,14 +342,14 @@ class GatewaySettings(BaseSettings):
 
     Deployment behind a real hostname must set this — the defaults only cover
     local development, and the SDK rejects any ``Host`` not listed. Discovered
-    the hard way in task 9: the SDK's own allow-list has no default at all, so
-    an unconfigured server rejects every request including from localhost.
+    the hard way: the SDK's own allow-list has no default at all, so an
+    unconfigured server rejects every request including from localhost.
     """
 
     allowed_origins: list[str] = Field(default_factory=list)
     """Browser origins accepted. Empty is correct for non-browser clients."""
 
-    # -- identity (Phase 2) ------------------------------------------------
+    # -- identity ----------------------------------------------------------
     #
     # There is deliberately no `ACP_AUTH_ENABLED`. Authentication is on when an
     # identity provider is configured and off when one is not, because a boolean
@@ -417,19 +416,19 @@ class GatewaySettings(BaseSettings):
 
     It should equal the audience tokens for this gateway carry: a client passes
     this string as RFC 8707's ``resource`` parameter, the authorization server
-    copies it into ``aud``, and task 22 checks it. ``runtime`` warns when the
-    configured audiences do not include it, because that mismatch produces a
-    discovery chain where every step works and the last one fails.
+    copies it into ``aud``, and the token validator checks it. ``runtime`` warns
+    when the configured audiences do not include it, because that mismatch
+    produces a discovery chain where every step works and the last one fails.
     """
 
     auth_client_id: str = ""
-    """The gateway's own client at the authorization server (task 27).
+    """The gateway's own client at the authorization server.
 
     Two identities are in play once exchange exists and they are easy to
     conflate. ``auth_audience`` is what the gateway is *called* by tokens
     arriving at it — it is a resource server there. This is who the gateway
-    *is* when it asks for a credential, as an OAuth client. Nothing before task
-    27 needed the second, because a resource server never speaks to a token
+    *is* when it asks for a credential, as an OAuth client. Only token exchange
+    needs the second, because a resource server never speaks to a token
     endpoint.
 
     Setting this and its secret is what turns exchange on. As everywhere else in
@@ -459,7 +458,7 @@ class GatewaySettings(BaseSettings):
     """
 
     secrets_file: Path | None = None
-    """The encrypted secret store (task 29).
+    """The encrypted secret store.
 
     Holds credentials for upstreams that cannot take part in token exchange —
     an API key issued out of band, an appliance that will never speak RFC 8693.
@@ -483,7 +482,7 @@ class GatewaySettings(BaseSettings):
     """
 
     auth_credential_cache_max_entries: int = Field(default=1024, gt=0)
-    """Ceiling on cached exchanged credentials (task 30).
+    """Ceiling on cached exchanged credentials.
 
     A security limit before it is a memory one. Unbounded, this grows with every
     distinct (token, upstream) pair the gateway has seen — which an
@@ -510,12 +509,11 @@ class GatewaySettings(BaseSettings):
     can. It is an *assertion* that one is configured, and the failure mode of
     forgetting to set it is a gateway that refuses to start.
 
-    Default ``True``, which is a behaviour change: every task before 26 ran
-    unauthenticated with a warning, because there was no identity provider to
-    run against and refusing would have meant the gateway could not run at all.
-    Task 26 put Keycloak in Compose, so that excuse expired. Development still
-    gets the old behaviour by saying so out loud with
-    ``ACP_AUTH_REQUIRED=false``, which is a sentence somebody has to write.
+    Default ``True``. Running unauthenticated with a warning was defensible
+    only while there was no identity provider to run against; Keycloak in
+    Compose removed that excuse. Development still gets the old behaviour by
+    saying so out loud with ``ACP_AUTH_REQUIRED=false``, which is a sentence
+    somebody has to write.
 
     **Enforced where the gateway starts serving, not here.** The first version
     of this checked in the settings validator, which made it impossible to
@@ -584,7 +582,7 @@ class GatewaySettings(BaseSettings):
 
     @property
     def exchange_configured(self) -> bool:
-        """Whether the gateway will mint per-upstream credentials (task 27)."""
+        """Whether the gateway will mint per-upstream credentials."""
         return bool(self.auth_client_id and self.auth_client_secret)
 
     @model_validator(mode="after")

@@ -96,7 +96,7 @@ def test_the_false_positive_rate_covers_every_benign_document(report: Report) ->
 
 def test_withholding_a_benign_document_is_measured_separately(report: Report) -> None:
     """Flagged and stopped are different events, and only one of them gets a
-    security control switched off. As of task 48's demotion the second is zero,
+    security control switched off. Since the benign-corpus demotion the second is zero,
     which is the claim the ADR makes and this is where it is checked."""
     assert report.benign_withheld_rate.total == report.false_positive_rate.total
     assert report.benign_withheld_rate.successes <= report.false_positive_rate.successes
@@ -179,7 +179,7 @@ def test_every_attack_still_does_what_the_corpus_records(report: Report) -> None
 
 
 # ---------------------------------------------------------------------------
-# The committed baseline (task 53)
+# The committed baseline
 # ---------------------------------------------------------------------------
 
 

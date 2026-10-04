@@ -1,6 +1,6 @@
 """The channel a human answers on, and why it is not the one the agent speaks to.
 
-Task 55. Task 54 built everything up to the moment a call stops: the policy says
+`acp.approvals.record` builds everything up to the moment a call stops: the policy says
 `require_approval`, the gateway answers `input_required`, and the record sits in
 the store waiting. Nothing could answer it. This is the answering.
 

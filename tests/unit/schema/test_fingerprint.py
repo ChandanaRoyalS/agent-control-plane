@@ -81,7 +81,7 @@ def test_an_unfamiliar_field_changes_the_fingerprint() -> None:
 
 def test_an_invisible_character_changes_the_fingerprint() -> None:
     """A zero-width joiner is part of the string, so it is part of the digest.
-    Recognising it *as* an attack is task 45; being unable to miss it is this
+    Recognising it *as* an attack is the detector's job; being unable to miss it is this
     layer's only obligation."""
     after = fingerprint_tool(definition_of(tool(description="Search‍ documents by keyword.")))
 

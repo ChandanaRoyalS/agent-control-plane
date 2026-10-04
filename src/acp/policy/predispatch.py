@@ -144,7 +144,7 @@ class PreDispatchAuthorizationMiddleware:
         # A bare Policy wraps into a set whose default it is — the same
         # normalisation `build_server` performs, done again here because this
         # middleware is constructed independently and a rule enforced in one
-        # place and assumed in another is how the two drift (task 58).
+        # place and assumed in another is how the two drift.
         self._policies = (
             policy if isinstance(policy, PolicySet) or policy is None else PolicySet(policy)
         )
@@ -162,7 +162,7 @@ class PreDispatchAuthorizationMiddleware:
         if self._audit is None:  # pragma: no cover — guarded by the caller
             return
         with contextlib.suppress(ACPError):
-            # On a thread (task 61). A refusal here is the fastest path through
+            # On a thread. A refusal here is the fastest path through
             # the gateway — it never parses a body — and parking the event loop
             # to record it would make the cheap path the expensive one.
             await self._audit.arecord(*args, **kwargs)

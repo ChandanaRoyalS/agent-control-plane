@@ -185,7 +185,7 @@ class Gate:
     expires_at: float | None = None
     """When the caller stops being able to answer.
 
-    Safe to disclose for the reason `retry_after` is (task 42): it describes only
+    Safe to disclose for the reason `retry_after` is: it describes only
     the limit the caller is already inside. It is a hint, not a promise — the
     check that matters happens at resolution.
     """

@@ -1,4 +1,4 @@
-"""The scripted attack demo — task 64.
+"""The scripted attack demo.
 
 `agent` is the credulous half: a deterministic stand-in for a model that acts on
 instructions it retrieved. The driver is `scripts/attack_demo.py`.

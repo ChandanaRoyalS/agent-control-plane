@@ -96,7 +96,7 @@ def test_a_manifest_id_absent_from_the_corpus_is_an_error() -> None:
         split_attacks(corpus, manifest)
 
 
-# -- the seal, and the anti-filler assertions (lesson 21) --------------------
+# -- the seal, and the anti-filler assertions ------------------------------
 
 
 def test_the_development_loader_excludes_every_held_out_id() -> None:

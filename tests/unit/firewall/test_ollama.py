@@ -1,6 +1,6 @@
 """The Ollama transport, exercised with a mocked HTTP client.
 
-What a live model returns is task 52's concern; what this module does with a
+What a live model returns is the evaluation's concern; what this module does with a
 response is testable now: it builds a fenced prompt, sends the shape Ollama
 expects, extracts the model text, and copes with a response missing the field.
 """

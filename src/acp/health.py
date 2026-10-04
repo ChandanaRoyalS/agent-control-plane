@@ -5,7 +5,7 @@ Top-level rather than inside ``acp.gateway`` on purpose. Health is a property of
 ``acp.gateway`` made the metrics-and-readiness app import the inbound server and
 therefore the MCP SDK, which is a dependency it has no reason to carry.
 
-The breaker (task 14) already knows when an upstream is failing. Two things it
+The breaker already knows when an upstream is failing. Two things it
 cannot do on its own, and this module exists for both.
 
 **It cannot recover without traffic.** A breaker opens, waits out its reset
@@ -58,7 +58,7 @@ DEFAULT_JITTER = 0.3
 HealthObserver = Callable[["HealthRecord", "UpstreamHealth"], object]
 """Something that wants to know when an upstream's health changes.
 
-The trace console (task 63) is the first, and the hook exists rather than health
+The trace console is the first, and the hook exists rather than health
 importing it for the same reason `CatalogueObserver` does: **health has no
 business knowing what a console is.** It is called on transitions only, with the
 new record and the state it came from.
@@ -73,7 +73,7 @@ is (ADR 0056).
 CatalogueObserver = Callable[[str, ListToolsResult], object]
 """Something that wants to see each catalogue the prober fetches.
 
-Schema drift detection (task 20) is the first such observer, and the reason this
+Schema drift detection is the first such observer, and the reason this
 hook exists rather than the prober importing it directly: health has no business
 knowing what drift is. The return value is ignored — typed as ``object`` so an
 observer that returns something useful to its own callers does not have to
@@ -318,7 +318,7 @@ class HealthMonitor:
 
         Every replica probing on the same tick is a synchronised burst against
         every upstream, from a component whose whole purpose is to avoid
-        exactly that — the same reasoning as the retry backoff in task 13.
+        exactly that — the same reasoning as the jittered retry backoff.
         """
         spread = self._interval * self._jitter
         return max(0.0, self._uniform(self._interval - spread, self._interval + spread))

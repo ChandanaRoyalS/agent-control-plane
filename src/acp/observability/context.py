@@ -67,7 +67,7 @@ def bind(**fields: Any) -> None:
     """Add fields to the current context for the rest of this task.
 
     Used for facts discovered part-way through — the resolved upstream, the
-    principal once authenticated (task 22). Replaces the mapping rather than
+    principal once authenticated. Replaces the mapping rather than
     mutating it, so a sibling task that copied the context earlier is unaffected.
     """
     _context.set(MappingProxyType({**_context.get(), **fields}))

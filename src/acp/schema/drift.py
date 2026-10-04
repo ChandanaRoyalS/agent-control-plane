@@ -16,7 +16,7 @@ caller that does not know about it; a widened enum accepts values policy was
 written to reject. It is the ordinary reason to care about drift and the one
 everybody thinks of first.
 
-**A new tool is a policy gap.** Deny-by-default (task 32) means it cannot be
+**A new tool is a policy gap.** Deny-by-default means it cannot be
 called yet, which is the correct behaviour and also the reason nobody would
 notice it — the alert is what turns "silently unusable" into "somebody should
 write a rule for this".

@@ -149,7 +149,7 @@ class CallToolResult(BaseModel):
     A JSON-RPC ``error`` object is reserved for protocol-level failures — an
     unknown method, an unknown tool, malformed params — which never reached
     tool execution at all. The mocks preserve this distinction deliberately,
-    because the gateway's error taxonomy (Phase 1, later) has to handle both
+    because the gateway's error taxonomy (`acp.exceptions`) has to handle both
     cases differently.
     """
 

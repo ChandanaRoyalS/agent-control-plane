@@ -3,8 +3,8 @@
 Every number this harness reports is a proportion over a corpus somebody wrote
 by hand: 8 attacks in a family, 106 benign documents. A bare "75%" over 8
 documents reads exactly like a 75% over 8,000 and is a completely different
-claim, and the whole reason task 52 reports intervals is to stop that sentence
-being written.
+claim, and the whole reason the harness reports intervals is to stop that
+sentence being written.
 
 **Percentile bootstrap**, not a normal approximation. The Wald interval on a
 proportion is the standard choice and it is wrong in precisely the cases this

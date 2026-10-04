@@ -43,8 +43,8 @@ CLIENT_SECRET = "dev-only-not-a-secret"  # noqa: S105 — a fixture, committed o
 # right and the exception is the thing worth writing down.
 
 USERS = {"alice": "alice", "bob": "bob"}
-"""The two demo users and their passwords. Two, not one, because Phase 2 has to
-end with the same agent and the same tool producing different credentials for
+"""The two demo users and their passwords. Two, not one, because the identity demo
+has to end with the same agent and the same tool producing different credentials for
 different people — and that demo needs two people to be about."""
 
 

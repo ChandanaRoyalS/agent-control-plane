@@ -73,8 +73,8 @@ class AuthorizationServer:
         minted = MINTED_A if audience.endswith("mock-a") else MINTED_B
         if form["subject_token"] != INBOUND:
             # A real authorization server mints a different credential for a
-            # different caller, and a mock that did not would make task 30's
-            # central failure invisible: alice's credential served to bob would
+            # different caller, and a mock that did not would make the exchange
+            # cache's central failure invisible: alice's credential served to bob would
             # be the same string either way, and every assertion would pass.
             minted = f"{minted}.for.{form['subject_token']}"
         return httpx.Response(200, json={"access_token": minted, "expires_in": self.expires_in})
@@ -177,8 +177,8 @@ def test_the_upstream_never_receives_the_inbound_token() -> None:
     """The property the entire security model rests on, asserted rather than
     claimed.
 
-    Task 31 makes this exhaustive across every path. This is the first version
-    of it, on the path that now deliberately attaches a credential — which is
+    `test_no_passthrough` makes this exhaustive across every path. This is the
+    original version of it, on the path that deliberately attaches a credential — which is
     the one where getting it wrong would look like a feature working.
     """
     server, upstream = AuthorizationServer(), Upstream()
@@ -218,11 +218,11 @@ def test_each_upstream_gets_a_credential_minted_for_it_alone() -> None:
 
 
 def test_without_a_cache_every_call_mints() -> None:
-    """Task 27's behaviour, which is still a supported shape and is what every
+    """Uncached exchange, which is still a supported shape and is what every
     other test in this file runs in — ``cache=None`` is how a test counts
     exchanges without a cache answering half of them.
 
-    This is the test task 27 said would change when caching arrived. It has:
+    This is the test that changed when caching arrived:
     the assertion that *nothing* is reused became an assertion about the
     configuration in which nothing is reused, and everything below is the
     argument about the key that the change was waiting on.
@@ -303,7 +303,7 @@ def test_a_repeat_call_from_the_same_caller_is_served_from_the_cache() -> None:
 
 
 def test_a_second_caller_never_receives_the_first_ones_credential() -> None:
-    """The whole reason task 30 needed an argument rather than a dictionary.
+    """The whole reason the exchange cache needed an argument rather than a dictionary.
 
     Key the cache on the upstream — the obvious thing, since the credential is
     'the credential for mock-a' — and bob is handed a credential minted with
@@ -327,7 +327,7 @@ def test_a_second_caller_never_receives_the_first_ones_credential() -> None:
 def test_a_second_upstream_never_receives_the_first_ones_credential() -> None:
     """The other half of the key, and the confused-deputy defence surviving the
     cache. One caller, two upstreams: reuse here would hand mock-b a credential
-    minted for mock-a, which is the thing task 27 mints per call to prevent."""
+    minted for mock-a, which is the thing per-call minting exists to prevent."""
     server, upstream = AuthorizationServer(), Upstream()
 
     session(
@@ -365,7 +365,7 @@ def test_a_burst_from_one_caller_produces_one_exchange() -> None:
 
     Without the second cache read inside the lock, every request that queued
     while the first was minting goes on to mint its own — which is the defect
-    the JWKS cache shipped with in task 22. Here it is worse than wasted work: a
+    the JWKS cache originally shipped with. Here it is worse than wasted work: a
     burst from one agent becomes a burst of token requests, and an authorization
     server that rate-limits the gateway takes the whole estate down rather than
     one caller.
@@ -427,7 +427,7 @@ def test_an_upstream_with_no_audience_is_called_without_a_credential() -> None:
 def test_a_call_with_no_principal_carries_no_credential() -> None:
     """The background health prober, which has no caller because no user asked
     for it. A known and scoped gap: the correct answer is a client-credentials
-    grant for the gateway's own account, which belongs with task 30."""
+    grant for the gateway's own account, which belongs with the exchange cache."""
     server, upstream = AuthorizationServer(), Upstream()
 
     call(server, upstream, authenticated=False)

@@ -1,4 +1,4 @@
-"""Every relative link in the documentation points at something — task 65.
+"""Every relative link in the documentation points at something.
 
 **This exists because moving one file broke fourteen links at once.**
 

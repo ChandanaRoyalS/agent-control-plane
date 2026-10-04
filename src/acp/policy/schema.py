@@ -1,9 +1,9 @@
 """The policy schema: what a rulebook is allowed to say.
 
-Task 32 is the rulebook, not the engine. These models load and validate a policy
+This is the rulebook, not the engine. These models load and validate a policy
 document at startup; nothing here decides a request. What they guarantee is that
-by the time task 33's evaluator exists, the policy it reads is well-formed and
-its default is *deny* — a policy cannot be written, by omission or by typo, that
+the policy the evaluator (``acp.policy.evaluate``) reads is well-formed and its
+default is *deny* — a policy cannot be written, by omission or by typo, that
 lets an unmatched request through.
 
 Deny-by-default is structural rather than configurable on purpose. A boolean
@@ -73,7 +73,7 @@ class Rule(BaseModel):
     say allow-or-deny is the most dangerous line in the file, so the schema
     refuses to guess.
 
-    Matching semantics (which task 33 will implement, and which the shape here
+    Matching semantics (which the evaluator implements, and which the shape here
     commits to): a field set to a list matches when the request's value is in
     that list; a field left unset matches anything. All set fields must match —
     the fields are ANDed. This is deliberately the simplest thing that can
@@ -145,12 +145,12 @@ class Rule(BaseModel):
 class Policy(BaseModel):
     """A whole policy document: an ordered list of rules over a deny default.
 
-    The default is not a field. It is the fixed behaviour of the engine task 33
-    will build — a request matching no rule is denied — and it is stated here in
+    The default is not a field. It is the fixed behaviour of the evaluator — a
+    request matching no rule is denied — and it is stated here in
     the type so that no future edit can turn it into configuration. The only way
     the document expresses "allow" is a rule whose effect is allow.
 
-    Order matters, and the model preserves it: task 33 evaluates rules top to
+    Order matters, and the model preserves it: the evaluator reads rules top to
     bottom and the first match wins, which is what lets a narrow `deny` sit
     ahead of a broad `allow`. That evaluation order is a decision recorded in
     the ADR, not an accident of list iteration.

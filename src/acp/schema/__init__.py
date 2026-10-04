@@ -12,9 +12,9 @@ because only the first is obvious.
 An argument schema that gains a required field breaks every caller written
 against the old one. That is the ordinary correctness case.
 
-A tool nobody has written policy for appears in the catalogue. Deny-by-default
-(task 32) means it cannot be called, which is correct and is also why nobody
-would notice — the alert is what makes the gap actionable instead of invisible.
+A tool nobody has written policy for appears in the catalogue. Deny-by-default means it cannot be
+called, which is correct and is also why nobody would notice — the alert is what makes the gap
+actionable instead of invisible.
 
 And a description changes. The description is prose that goes straight into the
 agent's prompt, which makes it the most powerful field in the entire protocol and

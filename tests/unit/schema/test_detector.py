@@ -108,7 +108,7 @@ def test_a_clean_catalogue_says_nothing(caplog: pytest.LogCaptureFixture) -> Non
 
 
 def test_the_log_line_names_the_tool_and_the_kind(caplog: pytest.LogCaptureFixture) -> None:
-    """These become fields in a JSON log line (task 15). An alert body reading
+    """These become fields in a JSON log line. An alert body reading
     "schema.drift" with nothing attached is one somebody has to go and
     reconstruct from the metrics."""
     detector = DriftDetector(baseline(), known=["mock-a"])

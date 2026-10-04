@@ -353,7 +353,7 @@ def test_an_open_circuit_with_no_known_cause_reports_itself() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The catalogue observer (task 20)
+# The catalogue observer
 # ---------------------------------------------------------------------------
 
 

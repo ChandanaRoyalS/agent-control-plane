@@ -1,10 +1,10 @@
 """An async JSON-RPC client for one upstream MCP server.
 
 Scope note: this deliberately contains no retries, no circuit breaker and no
-health checking. Those are tasks 13, 14 and 18, and they wrap this rather than
-living inside it — a client that silently retries is a client you cannot build a
-correct circuit breaker on top of, because the breaker can no longer see how
-many attempts actually failed.
+health checking. Those are separate layers (`retry`, `breaker`, `acp.health`),
+and they wrap this rather than living inside it — a client that silently retries
+is a client you cannot build a correct circuit breaker on top of, because the
+breaker can no longer see how many attempts actually failed.
 
 What it does own: connection pooling, layered timeouts, and turning every
 possible failure into a member of the exception taxonomy.
@@ -66,8 +66,9 @@ class UpstreamClient:
         # where every other configuration problem in this project surfaces.
         self._secret = secret
         # `None` when no exchange is configured, which is every deployment
-        # before task 27 and every test of the transport. Typed structurally
-        # (see `protocol.Credentials`) so this module never imports identity.
+        # without an identity provider and every test of the transport. Typed
+        # structurally (see `protocol.Credentials`) so this module never
+        # imports identity.
         self._credentials = credentials
         # Monotonic per-client request IDs. JSON-RPC only requires that an id be
         # unique among in-flight requests on a connection, so a simple counter

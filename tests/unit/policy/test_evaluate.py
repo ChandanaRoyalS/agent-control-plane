@@ -142,7 +142,7 @@ def test_decision_reason_text() -> None:
     assert Decision(allowed=False, rule="r").reason == "denied by rule 'r'"
 
 
-# --- argument-level rules (task 37) ---
+# --- argument-level rules ---
 
 
 def _arg_policy() -> Policy:

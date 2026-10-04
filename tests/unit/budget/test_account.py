@@ -1,6 +1,6 @@
 """The budget account: one string, and the boundary it carries.
 
-Task 58. The limiter and quota counter key on whatever string they are given,
+The limiter and quota counter key on whatever string they are given,
 so isolation lives entirely in this function — which is why its tests are
 about collisions, not about arithmetic.
 """
@@ -53,7 +53,7 @@ def test_one_tenants_spend_cannot_drain_anothers_bucket() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Reading it back — task 63
+# Reading it back — for the console
 # ---------------------------------------------------------------------------
 
 

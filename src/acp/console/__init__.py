@@ -1,4 +1,4 @@
-"""The live trace console — task 63.
+"""The live trace console.
 
 `events` is the wire shape, `hub` the fan-out, `app` the routes. The design
 argument lives in `events`: **the console is a view of the audit chain, not a

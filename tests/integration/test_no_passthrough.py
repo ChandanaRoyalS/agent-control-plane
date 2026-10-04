@@ -7,7 +7,8 @@ the upstream that receives it can act as the caller everywhere the caller has
 access, and this gateway has not reduced the blast radius of an agent — it has
 added a hop to it.
 
-Task 27 asserted this once, on one path: a normal `tools/list` through a normal
+`test_credential_exchange` asserts this once, on one path: a normal `tools/list`
+through a normal
 client. That is the route somebody would think to check. This file is about the
 routes nobody thinks to check, and about making the next person's new route fail
 the build until they have thought about it.
@@ -526,7 +527,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         method="call_tool",
         authenticated=False,
     ),
-    # -- the path task 30 added --------------------------------------------
+    # -- the path the exchange cache added ----------------------------------
     Scenario(
         name="a second call served from the credential cache",
         stack="full",
@@ -643,7 +644,8 @@ def test_the_inbound_token_does_reach_the_authorization_server(
 def test_a_static_credential_never_travels_with_the_callers_token(
     inbound: str, swept: list[tuple[Scenario, Traffic]]
 ) -> None:
-    """Task 29's path, which bypasses exchange entirely and is therefore the one
+    """The stored-credential path, which bypasses exchange entirely and is therefore
+    the one
     where a "well, we have no minted credential, send what we have" fallback
     would be easiest to write and hardest to notice."""
     needles = secrets_of(inbound)
@@ -725,8 +727,8 @@ def test_no_path_puts_the_inbound_token_in_an_exception(
     inbound: str, swept: list[tuple[Scenario, Traffic]]
 ) -> None:
     """Exception messages travel further than logs: into tracebacks, into error
-    responses, into issue trackers pasted by whoever hit the bug. Task 27 gave
-    `ExchangedToken` a custom `__repr__` for exactly this reason; this asserts
+    responses, into issue trackers pasted by whoever hit the bug. `ExchangedToken`
+    has a custom `__repr__` for exactly this reason; this asserts
     the property rather than that one implementation of it."""
     needles = secrets_of(inbound)
     found: list[str] = []
@@ -752,8 +754,8 @@ both are listed by name so that classifying a *new* method is a deliberate act."
 def test_every_method_on_the_upstream_protocol_is_accounted_for() -> None:
     """The alarm on the wall.
 
-    Add a method to `Upstream` — `read_resource`, `get_prompt`, whatever Phase 3
-    needs — and this fails until it is either swept above or declared incapable
+    Add a method to `Upstream` — `read_resource`, `get_prompt`, whatever comes
+    next — and this fails until it is either swept above or declared incapable
     of making a request. Without it, the sweep silently covers less of the
     surface every time the surface grows, which is how a security test decays
     into a formality.

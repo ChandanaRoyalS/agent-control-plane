@@ -1,10 +1,10 @@
 """Policy: the rulebook that decides what an authenticated caller may do.
 
-Phase 2 answers *who is asking*. This package answers *what they may do* — and
-task 32 is only its first half: the rulebook is loaded and validated at startup,
-deny-by-default, but nothing evaluates it yet. The engine that turns a policy
-plus a request into an allow/deny decision is `evaluate` (task 33). Wiring
-that decision into the request path so a denied call is refused is task 34.
+`acp.identity` answers *who is asking*. This package answers *what they may do* — in
+halves. `schema` is the rulebook: loaded and validated at startup,
+deny-by-default, and it evaluates nothing. The engine that turns a policy plus a
+request into an allow/deny decision is `evaluate`. Wiring that decision into the
+request path so a denied call is refused is `enforce`.
 
 Keeping load/validate separate from evaluate mirrors how identity was built
 (a config that fails fast, and an enforcement path that trusts it), and it means

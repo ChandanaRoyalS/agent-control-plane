@@ -3,7 +3,7 @@
 `discover` has nineteen tests and `IssuerRegistry` has fifteen. Neither says
 anything about whether the gateway *calls* them, and "the security control is
 implemented but not reachable" is a real and quiet way to fail — the same gap
-that left `build_token_validator` untested in task 22 behind a 93% coverage
+that once left `build_token_validator` untested behind a 93% coverage
 number.
 
 So this file asserts the wiring: that a missing `jwks_url` is discovered rather
@@ -11,7 +11,8 @@ than ignored, that an explicit one skips discovery and says so, that a file of
 several issuers becomes several registrations, and that a server contradicting
 its own identity stops the process instead of the first request.
 
-Task 24 adds the same question one layer out: whether the published protected
+Protected resource metadata adds the same question one layer out: whether the published
+protected
 resource document actually names the servers the registry holds, rather than a
 second list that has to be kept in step with it.
 """
@@ -77,8 +78,8 @@ class FakeDiscovery:
     is not tidiness: a monkeypatched callable which accepts *less* than the real
     one fails only when the caller passes the argument it is missing, so adding
     a parameter to `discover` breaks every test that patches it — at the call
-    site, with a `TypeError` about a fake. Which is precisely what `insecure_hosts`
-    did in task 26.
+    site, with a `TypeError` about a fake. Which is precisely what adding
+    `insecure_hosts` did.
     """
 
     def __init__(self, jwks_uri: str = DISCOVERED) -> None:
@@ -224,7 +225,7 @@ def test_no_identity_configuration_reaches_no_discovery(
 
 
 # ---------------------------------------------------------------------------
-# Protected resource metadata — task 24
+# Protected resource metadata
 # ---------------------------------------------------------------------------
 
 RESOURCE = "https://gw.corp.test/mcp"
@@ -329,7 +330,7 @@ def test_a_resource_matching_the_audience_warns_about_nothing(
 
 
 # ---------------------------------------------------------------------------
-# Refusing to serve unauthenticated — task 26
+# Refusing to serve unauthenticated
 # ---------------------------------------------------------------------------
 
 

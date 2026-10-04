@@ -152,7 +152,7 @@ async def gateway_from_configs(
             logger.warning("schema.drift_detection_inert", extra={"reason": "probing disabled"})
 
         def _watch_spend(payer: str, tool: str, cost: float) -> None:
-            """A budget was drawn. Task 63's fifth source.
+            """A budget was drawn. The trace console's fifth source.
 
             `observed`, and this one is worth being precise about *why*. The
             chain records the calls a running total could be computed from, and
@@ -180,7 +180,7 @@ async def gateway_from_configs(
             )
 
         def _watch_health(record: HealthRecord, previous: UpstreamHealth) -> None:
-            """An upstream's health changed. Task 63.
+            """An upstream's health changed.
 
             `observed`, not recorded: nobody asked for this and no decision was
             made about a call, so it is not an auditable fact — and the console
@@ -260,7 +260,7 @@ async def gateway_from_configs(
         # two are: the signature every existing caller depends on is unchanged.
         app.state.approvals = approvals
         app.state.audit = audit
-        # Task 63. Read by `acp serve` to mount the console on the admin
+        # Read by `acp serve` to mount the trace console on the admin
         # listener, beside the operator channel and behind the same credential.
         #
         # Passed in rather than built here, because the hub has to reach the
@@ -360,7 +360,7 @@ def _gated_rule_names(policy: Policy | PolicySet) -> set[str]:
 
     Duplicate names across tenants collapse in the set, which is correct for a
     startup log line and would be wrong for enforcement — enforcement never
-    reads this; it selects one tenant's policy and reads that (task 58).
+    reads this; it selects one tenant's policy and reads that.
     """
     if isinstance(policy, Policy):
         return {r.name for r in policy.rules if r.effect is Effect.REQUIRE_APPROVAL}
@@ -688,12 +688,12 @@ def build_token_exchanger(
         client_id=settings.auth_client_id,
         client_secret=settings.auth_client_secret,
         # The whole estate, so a credential minted for one upstream can be
-        # checked for opening another's door (task 28). Passed here rather than
+        # checked for opening another's door. Passed here rather than
         # discovered, because "which audiences are mine" is a fact about this
         # deployment's configuration and not about any token.
         peer_audiences=[u.audience for u in upstreams if u.audience],
-        # Every deployment gets one. Task 27 minted per call and cached nothing,
-        # which was correct while the key had not been argued over; ADR 0022 is
+        # Every deployment gets one. Minting per call and caching nothing was
+        # correct only while the key had not been argued over; ADR 0022 is
         # that argument.
         cache=CredentialCache(max_entries=settings.auth_credential_cache_max_entries),
         # So a minted credential appears in the chain beside the call that
@@ -760,7 +760,7 @@ def check_upstream_audiences(upstreams: Sequence[UpstreamConfig], *, exchanging:
     """
     if not exchanging:
         return
-    # Two ways to be credentialed since task 29, and an upstream needs one of
+    # Two ways to be credentialed, and an upstream needs one of
     # them: it exchanges (`audience`) or it presents something stored
     # (`credential_ref`). The config model already refuses both at once.
     missing = [u.name for u in upstreams if not u.audience and not u.credential_ref]
@@ -840,7 +840,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     # The whole set, not one file: the default policy plus one per declared
     # tenant, each validated at startup so a malformed or missing tenant policy
     # is a boot failure naming the tenant rather than a surprise on that
-    # tenant's first request (task 58). With no tenant labels this collapses to
+    # tenant's first request. With no tenant labels this collapses to
     # exactly the old single-policy behaviour.
     tenants = (
         tenant_labels(_issuer_documents(settings))
@@ -885,8 +885,8 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     )
     firewall = build_firewall(settings)
     approvals = build_approval_store(settings, policy)
-    # Task 63. Built unconditionally and cheap when nobody is watching — an
-    # empty subscriber list and a 50-event ring. Whether the console is
+    # The trace console's hub. Built unconditionally and cheap when nobody is
+    # watching — an empty subscriber list and a 50-event ring. Whether the console is
     # *reachable* is decided by `console_routes`, which needs the operator
     # credential; building the hub here regardless keeps that one decision in
     # one place instead of two that have to agree.

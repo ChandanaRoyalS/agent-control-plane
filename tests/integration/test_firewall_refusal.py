@@ -1,4 +1,4 @@
-"""The firewall on the real path — task 47.
+"""The firewall on the real path.
 
 `tests/unit/firewall/test_decision.py` proves the decision. That is a fact about
 a function. This proves the gateway calls it, in the right place, and — the
@@ -241,7 +241,7 @@ def conversation(
 
 
 def test_the_payload_never_reaches_the_caller(keypair: Keypair) -> None:
-    """The assertion task 47 exists for, made against the response body rather
+    """The assertion firewall refusal exists for, made against the response body rather
     than against an object — because what a model reads is the bytes."""
     upstream = PoisonUpstream(POISON)
 

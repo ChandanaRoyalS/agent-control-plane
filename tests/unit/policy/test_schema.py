@@ -99,7 +99,7 @@ def test_empty_policy_is_valid_and_means_deny_everything() -> None:
 
 
 def test_policy_preserves_rule_order() -> None:
-    """First-match-wins evaluation (task 33) depends on order, so the model must
+    """First-match-wins evaluation depends on order, so the model must
     not reorder or dedupe the sequence it was given."""
     policy = Policy(
         rules=(
@@ -128,7 +128,7 @@ def test_extra_fields_are_forbidden_on_a_policy() -> None:
         Policy.model_validate(bad)
 
 
-# --- args field (task 37) ---
+# --- args field ---
 
 
 def test_args_defaults_to_empty() -> None:

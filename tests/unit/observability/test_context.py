@@ -61,7 +61,7 @@ def test_context_is_restored_on_the_way_out() -> None:
 
 def test_bind_adds_to_the_current_scope() -> None:
     """For facts discovered part-way through — the resolved upstream, or the
-    principal once authenticated in task 22."""
+    principal once authenticated."""
     with context.request("req-1"):
         context.bind(upstream="mock-a")
 

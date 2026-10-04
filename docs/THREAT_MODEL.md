@@ -1,6 +1,6 @@
 # Threat model
 
-**Status:** complete for Phase 7 (task 59). Superseded stub kept in git history.
+**Status:** complete as of v1.0.0. Superseded stub kept in git history.
 **Last measured:** 2026-08-13, at `main` after PR #64.
 
 ## How to read this document
@@ -125,7 +125,7 @@ number. A control with none of those is listed in §6 instead.
 - **Denials never explain themselves to the caller** (ADR 0027) — every
   distinction is an oracle an agent can map one request at a time.
 
-### 5.3 Tenancy *(new in task 58 — ADR 0051)*
+### 5.3 Tenancy *(ADR 0051)*
 
 - **The tenant comes from the issuer registration, never a claim.** It is
   stamped after verification, by the registration whose keys checked the
@@ -353,7 +353,7 @@ class of provider for a property it cannot observe either way.
 
 ### 6.10 A caller whose protocol version cannot carry `input_required`
 
-Deferred since task 54. The SDK already fails closed, but the operator sees
+Deferred. The SDK already fails closed, but the operator sees
 `-32603 Handler returned an invalid result` rather than "this caller cannot
 answer an approval".
 
@@ -445,7 +445,7 @@ make prove-cache ; make prove-predispatch ; make prove-passthrough ; make prove-
 The four harnesses are the honest part: each *breaks a control on purpose* and
 requires the specific assertion written for it to be the one that fails. A
 security test that has never been seen to fail is a claim about whoever wrote
-it. Sixteen mutations run on every pull request.
+it. Eighteen deliberate breakages are checked on every pull request.
 
 To see the audit chain's stated limits behave as documented: run the approval
 demo, `make audit-checkpoint`, edit any line of `audit/audit.jsonl` and verify
@@ -458,5 +458,5 @@ demo, `make audit-checkpoint`, edit any line of `audit/audit.jsonl` and verify
 
 | Date | Change |
 |---|---|
-| 2026-08-13 | Completed for Phase 7 (task 59). Register consolidated from ADRs 0013–0051, measured numbers from `corpus/eval-baseline.json`. |
+| 2026-08-13 | Completed. Register consolidated from ADRs 0013–0051, measured numbers from `corpus/eval-baseline.json`. |
 | Phase 1 | Stub created, so that what is *not* defended was visible from the beginning rather than implied. |

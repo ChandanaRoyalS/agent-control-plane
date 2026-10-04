@@ -1,6 +1,6 @@
 """The anchor a chain cannot provide for itself.
 
-Task 57's other half. `acp.audit.chain` is explicit that a hash chain detects
+The other half of verification. `acp.audit.chain` is explicit that a hash chain detects
 modification, splicing and reordering, and **cannot** detect truncation of the
 tail — delete the last thousand entries and what remains is a perfectly valid
 chain. Nothing inside the file can say otherwise, because the file no longer

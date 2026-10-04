@@ -1,6 +1,6 @@
 """A circuit breaker for one upstream.
 
-Retries (task 13) answer "this attempt failed, try again." They do not answer
+Retries answer "this attempt failed, try again." They do not answer
 the question that follows: *this upstream has failed the last twenty times, why
 is every new caller still waiting thirty seconds to find that out?* A dead
 upstream with retries and no breaker is worse than one with neither — each
@@ -135,7 +135,7 @@ def counts_as_failure(exc: BaseException) -> bool:
     can take a perfectly healthy upstream offline for everybody, which is a
     denial of service the gateway inflicts on itself.
 
-    *A credential that could not be minted* (task 27). The exchange happens
+    *A credential that could not be minted*. The exchange happens
     before a single byte is sent to the upstream, so a failure there says
     nothing whatever about its health — and because an unreachable authorization
     server is legitimately marked ``recoverable``, it would otherwise land in

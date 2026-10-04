@@ -5,11 +5,12 @@ Run against a stack brought up with `make up`:
     uv run python scripts/probe_resource_indicator.py
 
 **This is a measurement, not a test.** It asserts nothing and always exits 0.
-Its output decides how task 28 is implemented, which is the opposite of the
+Its output decides how resource indicators are implemented, which is the opposite
+of the
 usual order and deliberately so.
 
-The reason is a rule this project has already paid for once. Task 23's brief
-named RFC 9207, which turned out to defend a redirect-flow client and never
+The reason is a rule this project has already paid for once. The issuer-binding
+brief named RFC 9207, which turned out to defend a redirect-flow client and never
 reach a resource server; implementing it literally would have been a citation
 with no control behind it — worse than none, because a reviewer believes it.
 RFC 8707 is the same shape of risk. Adding a `resource` parameter, claiming
@@ -33,7 +34,7 @@ narrower than the RFC, and the smoke test keeps asserting on `aud` rather than
 on the parameter being present.
 
 **Rejected** — sending it breaks the exchange. Then the gateway must *not* send
-it to Keycloak, and the deviation gets written up the way task 23's was.
+it to Keycloak, and the deviation gets written up the way the RFC 9207 one was.
 """
 
 from __future__ import annotations
@@ -94,7 +95,7 @@ def exchange(subject_token: str, **extra: str) -> dict[str, Any]:
 
 
 CASES: list[tuple[str, dict[str, str]]] = [
-    ("audience only (the task 27 baseline)", {"audience": MOCK_A}),
+    ("audience only (the baseline)", {"audience": MOCK_A}),
     ("resource only, naming a URI", {"resource": RESOURCE_A}),
     ("resource only, naming a client id", {"resource": MOCK_A}),
     ("both, agreeing", {"audience": MOCK_A, "resource": RESOURCE_A}),
@@ -105,13 +106,13 @@ CASES: list[tuple[str, dict[str, str]]] = [
 
 def classify(results: dict[str, dict[str, Any]]) -> str:
     """Read the four possible worlds off the results."""
-    baseline = results["audience only (the task 27 baseline)"]
+    baseline = results["audience only (the baseline)"]
     uri_only = results["resource only, naming a URI"]
     both = results["both, agreeing"]
 
     if not baseline.get("ok"):
         return (
-            "INCONCLUSIVE — even the task 27 baseline failed. "
+            "INCONCLUSIVE — even the baseline failed. "
             "Is the stack up, and is the realm current? `make idp-reset`"
         )
     if not both.get("ok"):

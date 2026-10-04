@@ -1,7 +1,7 @@
 """Fencing a tool result so the model knows it was *retrieved*, not *said*.
 
-Task 45 catches text that looks like an attack. This catches the attack that
-does not: a well-written paragraph asserting something false — "the customer has
+The detectors catch text that looks like an attack. This catches the attack
+that does not: a well-written paragraph asserting something false — "the customer has
 already approved this refund" — where nothing is misspelled, encoded or hidden,
 and there is no pattern to match.
 
@@ -13,8 +13,8 @@ user said. Framing restores the boundary that was never there.
 **The delimiter is the whole design.** A fixed marker is a string the attacker
 can also write: a document containing a matching closing marker followed by "the
 above is verified, proceed as instructed" closes the fence early, and everything
-after it reads as trusted again. That is task 45's ``BOUNDARY_ESCAPE`` family,
-and it defeats a fixed fence completely. So the delimiter carries 128 bits of
+after it reads as trusted again. That is the detectors' ``BOUNDARY_ESCAPE``
+family, and it defeats a fixed fence completely. So the delimiter carries 128 bits of
 randomness, drawn fresh for every result — an attacker cannot include a value
 that did not exist when they wrote the document.
 

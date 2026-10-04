@@ -1,6 +1,7 @@
 """What an operator is shown, and why it is the same bytes that bind the call.
 
-Task 55. Task 54 held a call and recorded a fingerprint of it; nothing recorded
+The original approval flow held a call and recorded a fingerprint of it; nothing
+recorded
 what the call *was*, so the only thing an approval channel could have offered a
 human was a tool name and a hex digest. **An approval you cannot read is not an
 approval** — it is a rubber stamp with extra ceremony — so the record now carries

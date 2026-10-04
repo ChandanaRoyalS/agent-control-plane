@@ -24,14 +24,14 @@ SDK's own client cache states the rule plainly: only ``public`` entries may be
 shared across authorization contexts. A ``private`` catalogue is one the
 upstream computed *for a particular caller*, and holding it in a cache shared
 between callers would hand one principal the tool list belonging to another.
-This gateway has no principals yet — identity arrives in task 22 — so there is
-exactly one thing it can do safely, and it does that: cache ``public`` only.
-When identity lands, the cache key gains the principal and ``private`` becomes
-cacheable per-principal rather than not at all.
+This cache is keyed per upstream, not per principal, so there is exactly one
+thing it can do safely, and it does that: cache ``public`` only. A ``private``
+catalogue is never held here. (Per-principal caching of *results* lives in
+``acp.results``, keyed on tenant, subject and actor — ADR 0035.)
 
 **No stale-on-error.** Serving a cached catalogue for an upstream that has since
 died would have the agent calling tools that cannot work — precisely what
-task 18's withdrawal exists to prevent. A cache entry is a claim about
+health-driven withdrawal (ADR 0011) exists to prevent. A cache entry is a claim about
 freshness, not a consolation prize.
 """
 
@@ -118,8 +118,8 @@ class CachingUpstreamClient:
     Only ``tools/list`` is cached. A tool *call* is an action with effects, and
     a cache that returned yesterday's answer to `create_ticket` would be a bug
     with consequences rather than a stale read. Result caching for genuinely
-    idempotent tools is task 43, and it needs the per-principal key this layer
-    deliberately does not have yet.
+    idempotent tools lives in `acp.results.cache`, and it needs the
+    per-principal key this layer deliberately does not have.
     """
 
     def __init__(

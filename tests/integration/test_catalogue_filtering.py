@@ -5,7 +5,7 @@ middleware sets the principal that on_list_tools filters by. Built on the same
 lifespan-aware harness as test_gateway_server: the SDK's streamable-HTTP app
 starts its session-manager task group in the ASGI lifespan.
 
-Paired with test_policy_enforcement (task 34b): that proves a denied call is
+Paired with test_policy_enforcement: that proves a denied call is
 refused; this proves a denied tool is never offered.
 """
 

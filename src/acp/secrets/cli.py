@@ -2,8 +2,8 @@
 
 Deliberately here rather than in ``acp.cli``. That module imports the MCP SDK,
 which the environment these are written in cannot install, so anything living
-there is untestable *and* untype-checkable until it reaches Chandana's machine —
-which is how three bugs have shipped so far. What is in ``acp.cli`` for secrets
+there is untestable *and* untype-checkable until it reaches a machine with the SDK
+installed — which is how three bugs have shipped so far. What is in ``acp.cli`` for secrets
 is argparse wiring; every decision is here, where a test can reach it.
 
 Nothing in this file prints a secret. `set` reads from a prompt or stdin and

@@ -1,4 +1,4 @@
-"""Budget controls: keep an agent's spending bounded (Phase 4).
+"""Budget controls: keep an agent's spending bounded.
 
 The first control is rate limiting — a token bucket per principal, so a runaway
 or compromised agent draws from a bucket that refills at a fixed rate rather than

@@ -64,8 +64,8 @@ def test_liveness_does_not_depend_on_the_upstreams() -> None:
 
     A liveness probe that fails because a dependency is unhealthy gets the
     container restarted for somebody else's outage, turning one broken upstream
-    into a crash loop across every replica. Task 18 adds a readiness endpoint
-    that reports upstream health without conflating the two.
+    into a crash loop across every replica. The readiness endpoint reports
+    upstream health without conflating the two.
     """
     assert get(HEALTH_PATH).status_code == 200
 
@@ -183,7 +183,7 @@ def test_readiness_reports_error_types_never_messages() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Schema drift (task 20)
+# Schema drift
 # ---------------------------------------------------------------------------
 
 

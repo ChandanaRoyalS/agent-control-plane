@@ -4,7 +4,7 @@ Built on the SDK's low-level ``Server`` rather than the high-level
 ``MCPServer`` — see ADR 0005. The distinction matters more than it looks.
 ``MCPServer`` registers tools statically with decorators, which models a tool
 *provider*. A gateway is a tool *broker*: its catalogue is computed on every
-request, merged from live upstreams and (from task 35) filtered by what the
+request, merged from live upstreams and filtered by policy to what the
 calling principal is entitled to see. ``Server`` takes ``on_list_tools`` and
 ``on_call_tool`` as per-request async handlers, which is exactly that shape.
 """
@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 
 APPROVAL_EVENT = "approval.gate"
 """One record per approval decision on the request path — started, still
-waiting, proceeded or refused. The operator side (task 55) writes the human's
+waiting, proceeded or refused. The operator side writes the human's
 answer; this writes what the gateway did with it."""
 
 SERVER_NAME = "agent-control-plane"
@@ -139,7 +139,7 @@ def _charge(
     """Draw this call against both budgets, or raise the refusal it earns.
 
     ``payer`` is the tenant-qualified account (`acp.budget.account`), not the
-    bare subject — two tenants' alices must drain two buckets (task 58). With
+    bare subject — two tenants' alices must drain two buckets. With
     no principal (auth off) there is no per-caller budget to charge, so both
     are skipped. The cost is resolved
     once and shared, because a tool that costs ten should cost ten to each
@@ -166,7 +166,7 @@ def _charge(
         raise to_mcp_error(exc) from exc
 
     if charged is not None:
-        # Task 63's spend line, and it is reported **after** both draws
+        # The trace console's spend line, and it is reported **after** both draws
         # succeeded rather than before them. A refused call is not spend — the
         # budget was not debited — and a console that counted the attempt would
         # show a total that disagrees with the limiter the moment anybody is
@@ -205,7 +205,7 @@ async def _chain(audit: AuditLog, *args: Any, **fields: Any) -> None:
     try:
         # `arecord`, not `record`: the write is a synchronous `fsync`, and
         # running it here would park the event loop for every other request in
-        # the process (task 61, ADR 0053). Awaited, so this request still may
+        # the process (ADR 0053). Awaited, so this request still may
         # not proceed until its entry is durable.
         await audit.arecord(*args, **fields)
     except ACPError as exc:
@@ -407,7 +407,7 @@ def build_server(
     because the SDK wants plain callables, and because there is no per-server
     mutable state to hold — every request is answered from the upstreams as they
     are *now*, which is the property that makes health-driven catalogue
-    withdrawal (task 18) possible later.
+    withdrawal possible later.
     """
 
     # A bare `Policy` still works everywhere one was accepted, wrapped as a
@@ -415,13 +415,13 @@ def build_server(
     # from every direction: a tenanted principal reaching a gateway built with
     # a bare policy selects an unknown tenant and gets DENY_ALL — never the
     # single-tenant rules, which from that principal's point of view are some
-    # other tenant's policy (task 58).
+    # other tenant's policy.
     policies = policy if isinstance(policy, PolicySet) or policy is None else PolicySet(policy)
 
     # `_ctx` and `_params` are positional in the SDK's handler contract, so
     # they cannot be dropped. Underscore-prefixed until they are used:
-    # `_ctx` carries the HTTP request (headers, auth) and becomes load-bearing
-    # in tasks 22 and 35; `_params.cursor` matters once catalogues paginate.
+    # `_ctx` carries the HTTP request (headers, auth) for authentication and
+    # policy filtering; `_params.cursor` matters once catalogues paginate.
     async def on_list_tools(
         _ctx: ServerRequestContext[None, Any],
         _params: types.PaginatedRequestParams | None,
@@ -646,7 +646,7 @@ def build_app(
     protection: it rejects any ``Host`` it was not told to expect, which defends
     a locally-bound server against a malicious web page resolving a hostname to
     a loopback address. Defaults cover local development; deployment behind a
-    real hostname must pass its own list, and that becomes config in task 11.
+    real hostname must pass its own list, via ``allowed_hosts`` in the settings.
 
     ``resource``, when given, adds the RFC 9728 metadata route *and* is what the
     authentication middleware exempts. One object doing both is the point: the

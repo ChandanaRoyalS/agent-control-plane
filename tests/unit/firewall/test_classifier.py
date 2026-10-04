@@ -1,7 +1,8 @@
 """The model-based detector: every path that does not need a live model.
 
-The classifier's value is not that it classifies well here — that is task 52's
-measurement, against a running model — but that it is safe: absent, garbage, and
+The classifier's value is not that it classifies well here — that is the
+evaluation's measurement, against a running model — but that it is safe: absent,
+garbage, and
 hostile model responses all yield no finding and never raise into the screening
 path. Those are the properties tested here.
 """

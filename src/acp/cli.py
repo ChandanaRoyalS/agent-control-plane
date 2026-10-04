@@ -5,8 +5,8 @@ real upstream from a terminal and watch what it does. That matters more than it
 sounds: a proxy you can only exercise through its own test suite is a proxy you
 cannot debug when something odd happens against a real server.
 
-Subcommands land here as the phases do — ``policy explain`` and
-``policy simulate`` in phase 3, ``audit verify`` in task 57.
+Subcommands land here as their subsystems do — ``policy explain`` and
+``policy simulate`` beside the policy engine, ``audit verify`` beside the chain.
 """
 
 from __future__ import annotations
@@ -268,7 +268,7 @@ def _simulate_command(policy: Policy, args: argparse.Namespace) -> int:
 
 
 def _add_schemas_commands(subparsers: Any) -> None:
-    """``acp schemas capture`` and ``acp schemas check`` (task 20).
+    """``acp schemas capture`` and ``acp schemas check``.
 
     Two verbs because the workflow has two halves and conflating them is the
     failure mode: a command that both reports drift *and* records it as the new
@@ -297,7 +297,7 @@ def _add_schemas_commands(subparsers: Any) -> None:
 
 
 def _add_audit_commands(subparsers: Any) -> None:
-    """``acp audit verify | checkpoint`` (task 57).
+    """``acp audit verify | checkpoint``.
 
     Argparse wiring only; every decision lives in ``acp.audit.cli``, which has no
     SDK import and is therefore testable and type-checkable in the environment it
@@ -359,7 +359,7 @@ def _audit_command(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
 
 
 def _add_secrets_commands(subparsers: Any) -> None:
-    """``acp secrets init | set | list`` (task 29).
+    """``acp secrets init | set | list``.
 
     Argparse wiring only. Every decision lives in ``acp.secrets.cli``, where a
     test can reach it — this module imports the MCP SDK, so anything written
@@ -658,7 +658,7 @@ async def _fetch_catalogues(
 
     A plain ``UpstreamClient`` rather than the assembled stack from
     ``build_upstream``: this must see what the server is saying *now*, and a
-    cached catalogue (task 19) would let ``check`` certify a response from
+    cached catalogue would let ``check`` certify a response from
     minutes ago as current.
 
     Sequential rather than concurrent, deliberately. This is a command a person

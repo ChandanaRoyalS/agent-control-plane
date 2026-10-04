@@ -1,4 +1,4 @@
-"""What retrieved text can talk the agent into — task 64.
+"""What retrieved text can talk the agent into.
 
 The demo's whole claim rests on this parser being a *fair* stand-in for a model
 that follows instructions it read. Two failure directions matter, and both are

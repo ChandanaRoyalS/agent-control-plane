@@ -1,9 +1,10 @@
 """Filter a tool catalogue to what a principal is allowed to see.
 
-Task 34 refused a denied call; this is the other half — a tool the caller may
+Enforcement (``acp.policy.enforce``) refuses a denied call; this is the other
+half — a tool the caller may
 not use is not shown in ``tools/list`` at all, so a well-behaved agent never
 learns it exists and never offers it. The two compose: filtering keeps a denied
-tool out of sight, and enforcement (task 34) refuses it if the agent names it
+tool out of sight, and enforcement refuses it if the agent names it
 anyway from somewhere else. Filtering is defence by construction; enforcement is
 the guarantee that makes hiding safe rather than merely tidy.
 

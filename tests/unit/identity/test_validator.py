@@ -42,7 +42,7 @@ class StubKeys:
 def validator(keypair: Keypair, **policy: Any) -> TokenValidator:
     """A validator trusting exactly one issuer.
 
-    Cross-issuer behaviour — the point of task 23 — is tested in
+    Cross-issuer behaviour — the point of the issuer registry — is tested in
     `test_issuers.py`. Here the registry is a registry of one so these tests
     stay about verification rather than about selection.
     """
@@ -174,7 +174,7 @@ def test_a_token_for_another_service_is_refused(keypair: Keypair) -> None:
     """Correctly signed by the right issuer, unexpired, and minted for the
     expense system. Accepting it would let anything that can obtain a token for
     *any* service in the estate act through this gateway — the same problem
-    RFC 8707 resource indicators solve on the way out in task 26."""
+    RFC 8707 resource indicators solve on the way out."""
     token = keypair.sign(claims(aud="expenses-api"))
 
     with pytest.raises(AuthenticationError):
@@ -183,8 +183,8 @@ def test_a_token_for_another_service_is_refused(keypair: Keypair) -> None:
 
 def test_a_token_from_another_issuer_is_refused(keypair: Keypair) -> None:
     """Possession of a signing key that this gateway happens to trust is not
-    the same as being the authorization server it was told to trust. Task 23
-    hardens this further with RFC 9207."""
+    the same as being the authorization server it was told to trust. The issuer
+    registry hardens this further with RFC 9207."""
     token = keypair.sign(claims(iss="https://idp.attacker.test/"))
 
     with pytest.raises(AuthenticationError):

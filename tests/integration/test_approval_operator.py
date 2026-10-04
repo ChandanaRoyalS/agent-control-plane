@@ -1,6 +1,6 @@
 """Integration: the channel a person answers on, and who cannot reach it.
 
-Task 55. Two properties are worth more than the rest of this file put together,
+Two properties are worth more than the rest of this file put together,
 and they are the first and last tests here.
 
 **The agent's listener has no approval routes.** Not "has them and refuses" —

@@ -9,7 +9,7 @@ happened: the transcript is `docs/demo/attack.txt`, captured from a real run of
 `make attack-demo`, and the trace is real links from a real audit chain. A page
 edited by hand drifts from those the first time either changes, and a front page
 that quietly stops being true is this project's most-repeated failure wearing a
-new hat (lesson 67, twice on the README already).
+new hat (twice on the README already).
 
 So the page is a build product, `--check` runs in the test suite, and the two
 inputs are files in the repository rather than prose in a template.
@@ -54,8 +54,8 @@ TRACE = ROOT / "docs" / "demo" / "trace.jsonl"
 OUTPUT = ROOT / "docs" / "index.html"
 DECISIONS = ROOT / "docs" / "decisions"
 
-REPO: Final = "https://github.com/chandanaroyal719-bot/agent-control-plane"
-IMAGE: Final = "ghcr.io/chandanaroyal719-bot/agent-control-plane:1.0.0"
+REPO: Final = "https://github.com/ChandanaRoyalS/agent-control-plane"
+IMAGE: Final = "ghcr.io/chandanaroyals/agent-control-plane:1.0.0"
 
 RECORD_KEYS: Final = frozenset({"seq", "prev", "hash", "record"})
 
@@ -447,7 +447,7 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
   <div>
     <span class="pill">MCP gateway</span>
     <span class="pill">v1.0.0</span>
-    <span class="pill">1,893 tests</span>
+    <span class="pill">~1,900 tests</span>
   </div>
   <h1>An AI agent reads a document. The document tells it to do something else.</h1>
   <p class="deck">This is the security boundary that sits in between &mdash; it decides what an

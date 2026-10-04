@@ -84,8 +84,8 @@ def is_retryable(exc: BaseException) -> bool:
     return isinstance(exc, ACPError) and exc.recoverable and exc.retry_locally
 
 
-# and this project targets 3.12+, but a plain TypeVar parses under every
-# toolchain that might read this file, which matters more than the syntax.
+# A plain TypeVar rather than PEP 695 syntax: it parses under every toolchain
+# that might read this file, which matters more than the newer spelling.
 async def with_retry(  # noqa: UP047
     operation: Callable[[], Awaitable[T]],
     policy: RetryPolicy,

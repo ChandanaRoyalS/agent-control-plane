@@ -124,10 +124,9 @@ records command lines. `acp secrets set` reads from a prompt when there is a
 terminal and from stdin when there is not — the second is what makes it usable
 from a deployment script.
 
-**Put the CLI logic in `acp.cli`.** That module imports the MCP SDK, which the
-environment this is authored in cannot install, so anything there is untestable
-*and* untype-checkable until it reaches Chandana's machine — the cause of three
-shipped bugs so far. `acp.secrets.cli` holds every decision and has tests;
+**Put the CLI logic in `acp.cli`.** That module imports the MCP SDK, so anything
+there is only exercised where the SDK is installed — the cause of three shipped
+bugs so far. `acp.secrets.cli` holds every decision and has tests;
 `acp.cli` holds argparse wiring.
 
 ## Consequences

@@ -1,6 +1,6 @@
 """The seam the request path calls, and the one place fail-closed is decided.
 
-Task 56. `chain` links, `sink` stores, and this is what the gateway actually
+`chain` links, `sink` stores, and this is what the gateway actually
 talks to — one method, one construction site for `AuditRecord`, one policy about
 what happens when the write fails.
 
@@ -29,11 +29,11 @@ sink, a separate file, a separate guarantee — and a record built here rather
 than scraped from a `LogRecord`, so its schema is a thing this project decided
 instead of a by-product of what somebody passed to `extra=`.
 
-**The write happens on a thread, and the caller still waits for it (task 61).**
+**The write happens on a thread, and the caller still waits for it.**
 `record` is synchronous and does a synchronous `os.fsync`. Called directly from
-an `async def` handler — as it was until task 61 — that syscall runs *on the
+an `async def` handler, that syscall runs *on the
 event loop*, so one request's durability stops every other request in the
-process, including ones that write no audit record at all. Task 60 measured it:
+process, including ones that write no audit record at all. Measured:
 `tools/list`, which never touches this module, was **12.6x slower at p95**.
 
 `arecord` is the seam the request path uses now. It hands `record` to a worker
@@ -118,7 +118,7 @@ class AuditLog:
         self._clock = clock
         self._limiter: CapacityLimiter | None = None
         self._published = published
-        """Called with each entry **after** it is durable. Task 63's console.
+        """Called with each entry **after** it is durable. The console's feed.
 
         A callback rather than an object, so this module does not know a console
         exists. Audit is the thing every other subsystem depends on; giving it an
@@ -216,7 +216,7 @@ class AuditLog:
         )
         if not self._sink.blocking:
             # Nothing to wait for. The thread hop is two context switches and a
-            # limiter acquisition, and task 61's own before/after measured that
+            # limiter acquisition, and the before/after measurement showed that
             # paying it for a page-cache write costs 29% of throughput. The
             # sink is asked rather than guessed at — see `AuditSink.blocking`.
             entry = call()
@@ -226,7 +226,7 @@ class AuditLog:
         return entry
 
     def _publish(self, entry: Entry | None) -> None:
-        """Hand a durable entry to whoever is watching. Task 63.
+        """Hand a durable entry to whoever is watching.
 
         **Here, and not inside `record`**, for two reasons that both matter.
 

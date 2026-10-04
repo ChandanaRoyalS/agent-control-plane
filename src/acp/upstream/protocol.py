@@ -3,8 +3,8 @@
 The registry brokers between upstreams; it has no business knowing whether the
 thing it holds retries, breaks a circuit, or talks straight to a socket. Typing
 it against a ``Protocol`` rather than ``UpstreamClient`` makes that explicit and
-keeps the decorators (``RetryingUpstreamClient`` now, a circuit-breaking one in
-task 14) composable without the registry changing at all.
+keeps the decorators (``RetryingUpstreamClient``, the circuit-breaking
+``GuardedUpstreamClient``) composable without the registry changing at all.
 
 Structural typing is the right tool here specifically because these wrappers are
 *not* subclasses. Making them inherit from ``UpstreamClient`` would drag along a

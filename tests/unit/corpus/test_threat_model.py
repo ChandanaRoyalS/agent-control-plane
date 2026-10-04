@@ -1,4 +1,4 @@
-"""The threat model's numbers must be the measured ones — task 59.
+"""The threat model's numbers must be the measured ones.
 
 `docs/THREAT_MODEL.md` is the document a reader is most likely to *believe*
 without checking, because prose reads as authoritative in a way a JSON file
@@ -12,7 +12,7 @@ tables are parsed out of the Markdown and diffed against
 `corpus/eval-baseline.json` — the same committed artifact `make eval-check`
 gates on.
 
-This is lesson 34 (*documentation numbers must come from the shipped
+This is a standing rule (*documentation numbers must come from the shipped
 defaults*) applied to the one document where being wrong is most expensive,
 and it is the same argument ADR 0013 makes for schema drift and ADR 0047 for
 the evaluation gate: **a claim worth making is worth failing the build over.**
@@ -58,7 +58,7 @@ def document() -> str:
 
 
 def test_the_threat_model_exists_and_is_not_a_stub() -> None:
-    """It was a stub from Phase 1 to Phase 7, deliberately. It is not one now,
+    """It was a stub for most of the project's life, deliberately. It is not one now,
     and a regression to one should be loud rather than quiet."""
     text = document()
     assert "**Status:** stub" not in text

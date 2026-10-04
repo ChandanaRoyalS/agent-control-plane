@@ -1,7 +1,8 @@
-"""Settings to firewall — task 47's half of a gap this project keeps hitting.
+"""Settings to firewall — the firewall's half of a gap this project keeps hitting.
 
 `gateway_from_settings` has silently dropped new wiring four separate times
-(tasks 22, 29, 43 and 46). Each time the feature was built, tested, merged, and
+(identity, stored credentials, result caching and provenance framing). Each
+time the feature was built, tested, merged, and
 did nothing in a real deployment, because the only thing that could have noticed
 was a test of the assembly rather than of the parts.
 

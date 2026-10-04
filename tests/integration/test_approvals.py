@@ -19,7 +19,7 @@ prevented it already existed. See `helpers` for what was done about that.
 
 **The assertion that matters most is the last one.** An agent that answers its
 own `input_responses` must gain nothing, because the caller of this gateway is
-the agent and Phase 5's whole premise is that agents read hostile text.
+the agent and the firewall's whole premise is that agents read hostile text.
 """
 
 from __future__ import annotations
@@ -224,7 +224,7 @@ def test_a_policy_that_holds_a_call_with_no_store_fails_closed(keypair: Keypair)
 
 
 def test_the_held_call_carries_the_arguments_an_operator_must_read(keypair: Keypair) -> None:
-    """A person cannot approve what they cannot see (task 55).
+    """A person cannot approve what they cannot see.
 
     Asserted here rather than only in the unit tests because the value has to
     survive the whole request path — the arguments an operator is shown are the

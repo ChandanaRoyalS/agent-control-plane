@@ -2,7 +2,7 @@
 
 Deliberately a wrapper rather than logic inside ``UpstreamClient``. A client
 that silently retries is a client you cannot build a correct circuit breaker on
-top of (task 14), because the breaker can no longer see how many attempts
+top of, because the breaker can no longer see how many attempts
 actually failed — three retries of one call would look like one failure, and the
 breaker would take three times too long to open. Keeping the retrying separate
 means each layer sees the truth.
@@ -106,8 +106,8 @@ class RetryingUpstreamClient:
 
         An event with fields rather than a sentence: `upstream.retry` can be
         counted per upstream and per error type without anyone writing a regular
-        expression against a message that will eventually be reworded. Task 17
-        turns exactly these fields into a metric.
+        expression against a message that will eventually be reworded. The
+        metrics module turns exactly these fields into a metric.
         """
 
         def observe(attempt: int, delay: float, exc: BaseException) -> None:

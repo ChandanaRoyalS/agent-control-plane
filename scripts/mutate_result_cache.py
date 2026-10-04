@@ -25,8 +25,8 @@ Each mutation is a key somebody could plausibly write:
    gateway whose whole model is an agent acting *for* a human.
 3. **Drop the arguments.** Not a cross-caller leak, but a caller served their
    own answer to a different question, which is its own kind of wrong.
-4. **Drop the tenant.** Restores the key exactly as it stood before task 58,
-   which is the honest way to state what that task fixed: two identity
+4. **Drop the tenant.** Restores the key exactly as it stood before tenancy,
+   which is the honest way to state what tenancy fixed: two identity
    providers each with an `alice`, one cache entry between them. The
    subject-isolation test is blind to it — both callers *are* alice — so this
    mutation is caught by the two-tenant test or by nothing.
@@ -74,7 +74,7 @@ MUTATIONS: tuple[Mutation, ...] = (
         path=CACHE,
         anchor=ANCHOR,
         replacement=dropping("tenant"),
-        # Task 58's boundary. Dropping it leaves the key exactly as it was
+        # The tenant boundary. Dropping it leaves the key exactly as it was
         # before tenancy existed — which is the point: this mutation restores
         # the bug, and the assertion that must notice is the one written for
         # it. The subject-isolation test does NOT catch this (both callers are

@@ -1,4 +1,4 @@
-"""The routes a watcher talks to — task 63.
+"""The routes a watcher talks to.
 
 **On the admin listener, never the gateway's.** The same argument as the
 operator channel (ADR 0049): this stream carries *every principal's* activity,

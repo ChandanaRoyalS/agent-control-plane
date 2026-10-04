@@ -1,6 +1,6 @@
 """Where entries go, and what happens when they cannot go there.
 
-Task 56. `acp.audit.chain` computes links; this decides where they land. Kept
+`acp.audit.chain` computes links; this decides where they land. Kept
 apart on purpose: the chaining rule is then testable without a filesystem, and a
 Postgres- or object-store-backed sink arrives later as a class rather than a
 redesign.
@@ -26,7 +26,7 @@ an operator makes a deliberate, recorded decision about a file they can still se
 kernel when the machine loses power is a record that describes a call which
 really happened, and it is precisely the crash-adjacent window an investigation
 cares about. The cost is real and is stated rather than hidden: this bounds
-write throughput to the disk's sync rate, and Phase 8 measures it. `fsync=False`
+write throughput to the disk's sync rate, and ``perf/`` measures it. `fsync=False`
 exists for tests and for a deployment that has consciously traded the guarantee.
 """
 
@@ -49,20 +49,20 @@ class AuditSink(Protocol):
     """The three operations an audit writer needs.
 
     Deliberately not a general file interface, and deliberately with no `read`.
-    Verification is a separate program walking the artifact from the outside
-    (task 57); giving the writing path a way to read its own chain back would
-    invite a "repair" function, and a log that can repair itself is a log that
-    can be repaired by whoever broke it.
+    Verification is a separate program walking the artifact from the outside;
+    giving the writing path a way to read its own chain back would invite a
+    "repair" function, and a log that can repair itself is a log that can be
+    repaired by whoever broke it.
     """
 
     @property
     def blocking(self) -> bool:
         """Whether `append` waits on hardware.
 
-        Task 61 moved the audit write to a worker thread so an `fsync` could
-        not park the event loop. Task 61's own measurement then showed the
-        thread hop is a **fixed cost** — two context switches and a limiter
-        acquisition — that is worth paying only when the write actually waits:
+        The audit write runs on a worker thread so an `fsync` cannot park the
+        event loop. Measurement of that change then showed the thread hop is a
+        **fixed cost** — two context switches and a limiter acquisition — that
+        is worth paying only when the write actually waits:
         with `fsync` off, offloading cost 29% of throughput for nothing.
 
         So the sink declares it, because the sink is the only thing that knows.

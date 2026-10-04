@@ -110,7 +110,7 @@ class InMemoryApprovalStore:
     def pending(self) -> tuple[ApprovalRequest, ...]:
         """Everything still awaiting a person, oldest first.
 
-        For the operator side (task 55) and for tests. Not part of the protocol:
+        For the operator side and for tests. Not part of the protocol:
         a shared store may hold far more than one instance should ever list, and
         the request path never needs it.
         """

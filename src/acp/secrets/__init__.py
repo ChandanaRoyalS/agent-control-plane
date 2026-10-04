@@ -1,9 +1,9 @@
-"""Secrets the gateway holds because it has to — task 29.
+"""Secrets the gateway holds because it has to.
 
-Task 27 removed most of them: the gateway mints an upstream credential per call
+Token exchange removes most of them: the gateway mints an upstream credential per call
 and keeps none. This is for the upstreams that cannot take part in that — an API
 key issued out of band, a vendor appliance that will never speak RFC 8693 — and
-which before task 29 could not be configured at all.
+which without a secret store could not be configured at all.
 
 The store's honest claim is that it reduces many secrets to one key, and makes
 that key small enough to hand to a runtime rather than to a person. See

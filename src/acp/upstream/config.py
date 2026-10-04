@@ -44,7 +44,7 @@ class UpstreamConfig(BaseModel):
     """Full URL of the upstream's MCP endpoint, e.g. ``http://mock-a:9101/mcp``."""
 
     audience: str = ""
-    """What a credential for this upstream must be minted for (task 27).
+    """What a credential for this upstream must be minted for.
 
     The value the gateway sends as RFC 8693's ``audience`` when exchanging the
     caller's token, and the ``aud`` the resulting credential carries. It names
@@ -73,12 +73,12 @@ class UpstreamConfig(BaseModel):
     """
 
     credential_ref: str = ""
-    """Name of a secret in the store to send to this upstream (task 29).
+    """Name of a secret in the store to send to this upstream.
 
     The other door, for an upstream that cannot take part in token exchange —
     an API key issued out of band, a vendor appliance that will never speak
-    RFC 8693. Before task 29 such an upstream could not be configured at all,
-    because task 27 made `audience` mandatory once exchange was on.
+    RFC 8693. Without this door such an upstream could not be configured at
+    all, because `audience` is otherwise mandatory once exchange is on.
 
     A *reference*, never a value. A credential in this file is a credential in
     git, in every backup of the config directory, and in the diff of whoever

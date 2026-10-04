@@ -1,6 +1,6 @@
 """Fan one stream of events out to whoever is watching, and never the reverse.
 
-Task 63. The hub sits between the audit write and the browser, and every
+The hub sits between the audit write and the browser, and every
 decision in it follows from one rule:
 
 **A watcher must not be able to affect the thing it is watching.**

@@ -1,6 +1,6 @@
 """The screener with an optional classifier attached.
 
-A bare screener must be byte-for-byte the layer it was before task 51 — the
+A bare screener must be byte-for-byte the layer it was without a classifier — the
 classifier is additive, never a replacement — and an attached classifier's
 findings must appear alongside the patterns, while its absence or failure changes
 nothing.

@@ -7,7 +7,7 @@
     uv run python scripts/evaluate.py --unseal        # opens the held-out split
     ACP_FIREWALL_CLASSIFIER_ENABLED=1 uv run python scripts/evaluate.py
 
-Task 52. Every earlier number in this project was a count; these are estimates,
+Every earlier number in this project was a count; these are estimates,
 and they come with intervals because a rate over 106 documents and a rate over
 106,000 read identically and are not the same claim.
 
@@ -23,7 +23,7 @@ The report still *names* the split and its size on every run, unsealed or not,
 so the seal is visible in the artifact rather than asserted in a document nobody
 opens.
 
-`--check` is the CI gate (task 53, ADR 0047). It diffs this run against
+`--check` is the CI gate (ADR 0047). It diffs this run against
 `corpus/eval-baseline.json` and fails on any count that got worse. `--capture`
 rewrites that file, which is how a change is *accepted* — as a reviewable diff
 with a person's name on it rather than as a threshold somebody quietly raised.

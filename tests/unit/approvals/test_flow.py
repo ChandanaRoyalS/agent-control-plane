@@ -341,7 +341,7 @@ def test_an_absent_actor_is_not_the_same_as_any_actor() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tenancy (task 58): an approval cannot cross a tenant boundary
+# Tenancy: an approval cannot cross a tenant boundary
 # ---------------------------------------------------------------------------
 
 

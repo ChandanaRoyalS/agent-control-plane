@@ -1,4 +1,4 @@
-"""Provenance framing on the real path — task 46.
+"""Provenance framing on the real path.
 
 `tests/unit/firewall/test_provenance.py` proves the fence. That is a fact about
 a function. This proves the gateway calls it, and — the assertion that matters —

@@ -13,7 +13,7 @@ in doing this properly; it is not a product and has no operational track record.
 
 ## Reporting a vulnerability
 
-Open a [security advisory](https://github.com/chandanaroyal719-bot/agent-control-plane/security/advisories/new)
+Open a [security advisory](https://github.com/ChandanaRoyalS/agent-control-plane/security/advisories/new)
 rather than a public issue, and please allow time for a fix before disclosing.
 
 If you would rather not use GitHub advisories, open a normal issue containing
@@ -219,5 +219,10 @@ The ones that carry the most weight for security specifically:
 
 ## Supported versions
 
-None yet. There has been no release, so there is nothing to backport to. Once
-there is, this section will say which versions receive fixes.
+| Version | Supported |
+|---|---|
+| 1.0.x | yes |
+| < 1.0 | no |
+
+Fixes land on `main` and are released as a patch of the current minor. There
+is no long-term-support line; upgrade to the latest 1.x.

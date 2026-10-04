@@ -5,7 +5,7 @@ dropped connections. This breaks something else entirely — the *content* of a
 perfectly well-formed, fast, successful response. Every request still succeeds.
 Nothing times out, nothing errors, no breaker opens. That is precisely why it
 needs its own switch and its own module: it is the failure mode none of the
-resilience machinery built in tasks 13 to 18 can see.
+resilience machinery (timeouts, retries, breakers, health probes) can see.
 
 Selected process-wide via ``MOCK_SCHEMA_DRIFT`` rather than per-request via a
 header, because the request that has to observe it is the health prober's, and
@@ -17,8 +17,9 @@ The ``description`` flavour is the one worth understanding. It appends an
 instruction to a tool's description and changes nothing else: same name, same
 arguments, same behaviour, same successful responses. That is the MCP rug pull.
 A server earns trust for six months and then edits one paragraph of prose that
-goes straight into every agent's prompt. Detecting it is task 20's actual
-purpose; blocking what it says is task 45's.
+goes straight into every agent's prompt. Detecting it is the drift detector's
+actual purpose (``acp.schema.detector``); blocking what it says is the
+firewall's.
 """
 
 from __future__ import annotations

@@ -194,7 +194,7 @@ def test_an_argument_scoped_approval_does_not_let_the_fast_path_refuse() -> None
 
 
 # ---------------------------------------------------------------------------
-# Whether this policy can hold a call at all (task 55)
+# Whether this policy can hold a call at all
 # ---------------------------------------------------------------------------
 
 

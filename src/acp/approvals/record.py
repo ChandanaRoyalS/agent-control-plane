@@ -1,6 +1,6 @@
 """What a pending approval is, and what it is bound to.
 
-Task 54. The policy can now say `require_approval` (ADR 0048), which means a
+The policy can say `require_approval` (ADR 0048), which means a
 call stops mid-flight and waits for a person. The 2026-07-28 revision gives that
 a stateless-looking shape: the gateway answers `resultType: "input_required"`
 with an opaque `request_state`, and the client retries with it once the approval
@@ -42,7 +42,7 @@ from enum import StrEnum
 from typing import Any, Final
 
 FINGERPRINT_VERSION: Final = "acp-approval-v2"
-"""Stamped into every fingerprint. v2 added the tenant (task 58): without it,
+"""Stamped into every fingerprint. v2 added the tenant: without it,
 an approval granted to acme's alice would bind to a byte-identical call from
 globex's alice — a human's yes crossing a boundary the human was never shown.
 The bump invalidates nothing at rest (approvals live minutes, in memory) and is
@@ -211,7 +211,7 @@ class ApprovalRequest:
     arguments_bytes: int = 0
 
     tenant: str | None = None
-    """Shown to the operator (task 58). "alice wants to delete the dataset" and
+    """Shown to the operator. "alice wants to delete the dataset" and
     "acme's alice wants to delete the dataset" are different sentences, and the
     person deciding is entitled to the one that is true. Defaulted so the
     single-tenant gateway constructs records exactly as before."""

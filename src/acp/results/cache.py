@@ -13,7 +13,7 @@ is true. Bob's read appears nowhere at all: not upstream, because the upstream
 was never called, and not in the gateway's log, because a cache hit is the
 system working.
 
-This is ADR 0022 one layer up and worse. Task 30's bad key would have served
+This is ADR 0022 one layer up and worse. A bad credential-cache key would have served
 alice's *credential* to bob — serious, but a credential can be rotated, an
 exchange can be counted, an `aud` claim can be checked. A bad result key serves
 the data itself, with no credential involved.
@@ -22,7 +22,7 @@ the data itself, with no credential involved.
 actor, the upstream, the tool, and the arguments — canonically encoded, under a
 version tag. Over-specificity costs a cache miss. Under-specificity costs a
 disclosure. Where the two trade off, the answer is always the one that costs a
-miss; that is the rule task 30 settled on, and the only one that stays right
+miss; that is the rule the credential cache settled on, and the only one that stays right
 when somebody adds a claim next year that nobody here has thought about.
 
 **Why the actor is in there.** Two agents acting for alice do not share an
@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 KEY_VERSION: Final = "acp-result-v2"
 """Stamped into every key.
 
-v2 added the tenant (task 58). The bump is the mechanism working as designed:
+v2 added the tenant. The bump is the mechanism working as designed:
 every v1 entry misses rather than being reinterpreted, so a cache filled
 before tenancy existed cannot serve across a boundary that did not exist when
 it was written. One miss per warm entry is the entire cost.

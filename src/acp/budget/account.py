@@ -1,7 +1,7 @@
 """What a budget is charged to, once tenancy exists.
 
-Task 58. The rate limiter and the quota counter key their dictionaries on a
-string, and until now that string was ``principal.subject`` — which is unique
+The rate limiter and the quota counter key their dictionaries on a string, and
+without this module that string would be ``principal.subject`` — which is unique
 within one identity provider and nothing more. Two tenants whose IdPs each
 have an ``alice`` would share a bucket: one tenant's spend exhausts the
 other's allowance, which is cross-tenant interference in the polite direction
@@ -46,7 +46,7 @@ def parties(payer: str) -> tuple[str | None, str | None]:
 
     Here rather than at the call site because **the format has an owner**, and
     the one place that writes it is the only place that should claim to read it.
-    The trace console (task 63) wants to display who spent, and doing that by
+    The trace console wants to display who spent, and doing that by
     splitting on a comma would be string surgery on somebody else's encoding —
     which works until a subject contains a comma, which is precisely the case
     the list encoding above exists to make harmless.

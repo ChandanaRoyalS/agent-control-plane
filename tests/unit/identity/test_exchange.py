@@ -344,7 +344,7 @@ def test_the_form_is_url_encoded_not_json() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Resource indicators, and checking what was actually granted — task 28
+# Resource indicators, and checking what was actually granted
 # ---------------------------------------------------------------------------
 #
 # Measured, not assumed: Keycloak 26.7 accepts `resource` and discards it,

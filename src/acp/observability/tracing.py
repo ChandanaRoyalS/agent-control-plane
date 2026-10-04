@@ -73,8 +73,8 @@ except ImportError:  # pragma: no cover
 def trace_ids() -> Mapping[str, str]:
     """The active trace and span IDs, W3C-formatted, or empty outside a span.
 
-    Merged onto every log record by ``ContextFilter``, which is what finally
-    closes the loop task 15 opened: a log line can be pivoted to its trace, and
+    Merged onto every log record by ``ContextFilter``, which is what closes the
+    loop structured logging opened: a log line can be pivoted to its trace, and
     a slow span can be pivoted to the log lines explaining why.
 
     Hex-formatted to fixed width rather than printed as integers, because that

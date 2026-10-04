@@ -5,7 +5,8 @@ socket, no real network, no external process. That is the whole payoff of owning
 the mock upstreams — the suite never depends on anything outside the repository,
 so it is fast, deterministic, and works offline and in CI identically.
 
-**And the second half, which task 55 added after paying for its absence.** These
+**And the second half, added with the operator channel after paying for its absence.**
+These
 helpers already knew how to build a valid 2026-07-28 request — envelope in
 ``params._meta``, routing headers derived from the body — and `test_approvals`
 was written without them. It hand-rolled a request that omitted the envelope, so
@@ -265,7 +266,7 @@ async def call_gateway(
 def mock_clients() -> list[UpstreamClient]:
     """The two mock upstreams, wired in-process.
 
-    Repeated verbatim in five test files before task 55, which is five places
+    Previously repeated verbatim in five test files, which is five places
     for one of them to acquire a mock the others do not have — and a suite whose
     files disagree about what "the estate" is proves less than it appears to.
     """

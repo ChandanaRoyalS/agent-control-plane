@@ -258,11 +258,17 @@ tool-mention and image detectors were **demoted to report-only** after the
 benign corpus caught them withholding the gateway's own audit log and a
 marketing newsletter (ADR 0039).
 
-**The generalisation claim is untested.** A held-out split exists (`heldout v1`,
-7 attacks, one per family) and **has never been scored** — it requires a
-deliberate `--unseal`. Every number above is fitted to corpora that were
-consulted while writing the detectors. *A rate over the development set measures
-how well the firewall fits what it has already seen.*
+**The generalisation claim rests on seven documents.** Held-out v1 (7 attacks,
+one per family) was scored once, on 2026-10-04 (ADR 0060): patterns only, 3 of 7
+produced a finding, **none was withheld**, and every outcome matched what the
+corpus recorded before the seal. That supports "the author's expectations held on
+unseen attacks"; it does not support a rate. v1 is now spent, and v2 has to come
+from attacks nobody on this project wrote. Every other number above is fitted to
+corpora that were consulted while writing the detectors.
+
+The optional model classifier, measured alone (ADR 0060), flags 1 of 106 benign
+documents and 3 of 36 development attacks, at about 1.4 s a call, and added no
+held-out recall. It is off by default and is not counted as a defence here.
 
 Provenance framing removes the *free* version of the attack — the one that works
 because nothing ever told the model the text was retrieved — but it is an

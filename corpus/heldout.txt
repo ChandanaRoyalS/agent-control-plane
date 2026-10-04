@@ -22,7 +22,14 @@
 # Format: one attack id (<family>/<slug>) per line. Blank lines and #-comments
 # are ignored.
 
+# UNSEALED. Version 1 was scored once, on 2026-10-04, and the result is recorded
+# in ADR 0060. Its seven attacks are no longer unseen: they stay excluded from
+# tuning so the development baseline does not move, but no number over them may
+# be quoted as a generalisation estimate again. The next held-out split comes
+# from attacks nobody on this project wrote (ADR 0060), and gets version 2.
+
 version: 1
+unsealed: 2026-10-04, ADR 0060
 
 boundary_escape/fake-end-marker
 delayed_multi_step/deferred-trigger

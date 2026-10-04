@@ -27,6 +27,17 @@ without somebody accepting the change.
   per-call latency and whether a second run gives the same answer. Development
   split only; not a CI gate.
 
+- `corpus/heldout.txt` accepts an `unsealed: <date>, <reference>` line. Once a
+  held-out split has been scored, `scripts/evaluate.py` reports it as already
+  unsealed on every run, and a later `--unseal` says plainly that it is no
+  longer a generalisation estimate.
+
+### Changed
+
+- Held-out split v1 was scored once and is marked spent (ADR 0060): patterns
+  only, 3 of 7 attacks produced a finding, none was withheld, every outcome as
+  the corpus recorded. ADR 0060 also records the classifier measured alone.
+
 ### Fixed
 
 - The site footer counted 58 architecture decisions after the 59th landed; the

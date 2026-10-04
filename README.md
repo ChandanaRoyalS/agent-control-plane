@@ -6,7 +6,7 @@ and the systems they are allowed to touch.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~1,900 tests · 94% coverage · 59 architecture decisions · 4 mutation harnesses
+**~1,900 tests · 94% coverage · 60 architecture decisions · 4 mutation harnesses
 proving 18 deliberate breakages are caught**
 
 ## The problem

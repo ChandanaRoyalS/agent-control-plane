@@ -232,12 +232,14 @@ def _build() -> _Collectors | None:
         firewall_decisions=Counter(
             "firewall_decisions_total",
             "Tool results screened by the injection firewall, by decision.",
-            # A closed set of four: clean, reported, would_refuse, refused. The
-            # denominator is here on purpose — `clean` is counted even though it
-            # is deliberately not logged, because a detection count without the
-            # traffic it was drawn from is not a rate, and the false-positive
-            # rate is the number this whole phase is judged on.
-            ["decision"],
+            # A closed set of five decisions (clean, reported, would_refuse,
+            # refused, withheld) over two surfaces (a tool's result, or the
+            # catalogue's description of it). The denominator is here on
+            # purpose — `clean` is counted even though it is deliberately not
+            # logged, because a detection count without the traffic it was
+            # drawn from is not a rate, and the false-positive rate is the
+            # number this whole phase is judged on.
+            ["decision", "surface"],
             namespace=NAMESPACE,
             registry=registry,
         ),
@@ -368,7 +370,7 @@ def record_audit_write(*, outcome: str) -> None:
     _C.audit_writes.labels(outcome).inc()
 
 
-def record_firewall_decision(*, decision: str) -> None:
+def record_firewall_decision(*, decision: str, surface: str = "result") -> None:
     """One screened tool result, by what the gateway did about it.
 
     The interesting series is the ratio between ``would_refuse`` and everything
@@ -379,7 +381,7 @@ def record_firewall_decision(*, decision: str) -> None:
     """
     if _C is None:
         return
-    _C.firewall_decisions.labels(decision).inc()
+    _C.firewall_decisions.labels(decision, surface).inc()
 
 
 def record_firewall_finding(*, family: str, confidence: str) -> None:

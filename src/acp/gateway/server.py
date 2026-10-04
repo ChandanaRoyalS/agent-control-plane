@@ -38,9 +38,10 @@ from acp.budget import (
 )
 from acp.exceptions import ACPError, PolicyDeniedError
 from acp.firewall import Firewall, Inspection, frame
+from acp.firewall.catalogue import CatalogueInspection
 from acp.gateway.converters import to_input_required, to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.naming import upstream_of
-from acp.gateway.registry import UpstreamRegistry
+from acp.gateway.registry import Catalogue, UpstreamRegistry
 from acp.identity import (
     AuthenticationMiddleware,
     ProtectedResource,
@@ -197,6 +198,7 @@ def _served_from_cache(results: ResultCache, key: ResultKey, tool: str) -> CallT
 
 
 FIREWALL_EVENT = "firewall.screened"
+CATALOGUE_EVENT = "firewall.catalogue"
 AUTHORIZATION_EVENT = "policy.decision"
 TOOL_CALL_EVENT = "tool.called"
 
@@ -308,6 +310,59 @@ async def _audit_screening(
             "trigger_count": len(inspection.triggers),
         },
     )
+
+
+async def _screen_catalogue(
+    firewall: Firewall | None, audit: AuditLog | None, catalogue: Catalogue
+) -> Catalogue:
+    """The catalogue with every tool's description screened.
+
+    A description is model-visible text an upstream wrote. It is screened like
+    a result and, in enforce mode, a tool whose description crosses the same
+    bar is withheld from the catalogue — see `acp.firewall.catalogue` and ADR
+    0065. Called after policy filtering, so a tool the caller may not see is
+    neither screened nor recorded against them.
+    """
+    if firewall is None or not catalogue.tools:
+        return catalogue
+    inspection = await firewall.ainspect_catalogue(catalogue.tools)
+    await _audit_catalogue(audit, current_principal(), inspection)
+    return replace(catalogue, tools=inspection.served)
+
+
+async def _audit_catalogue(
+    audit: AuditLog | None,
+    principal: Principal | None,
+    inspection: CatalogueInspection,
+) -> None:
+    """Chain each tool whose description produced a finding.
+
+    One record per flagged tool, not per catalogue: the fact worth keeping is
+    *which* tool an upstream described in a way the detectors noticed, and
+    whether the caller was shown it. Clean tools are not recorded, for the
+    reason clean results are not (`_audit_screening`). Families and
+    confidences only — never the description text, which is the payload.
+    """
+    if audit is None:
+        return
+    for screened in inspection.flagged:
+        findings = screened.screening.findings
+        await _chain(
+            audit,
+            AuditCategory.FIREWALL,
+            CATALOGUE_EVENT,
+            subject=principal.subject if principal is not None else None,
+            actor=_actor_of(principal),
+            tenant=principal.tenant if principal is not None else None,
+            tool=screened.tool.name,
+            outcome=AuditOutcome.DENIED if screened.withheld else AuditOutcome.ALLOWED,
+            detail={
+                "families": sorted({str(f.family) for f in findings}),
+                "confidences": sorted({str(f.confidence) for f in findings}),
+                "finding_count": len(findings),
+                "trigger_count": len(screened.triggers),
+            },
+        )
 
 
 async def _audit_call(
@@ -450,6 +505,8 @@ def build_server(
                 else []
             )
             catalogue = replace(catalogue, tools=visible)
+
+        catalogue = await _screen_catalogue(firewall, audit, catalogue)
 
         if catalogue.is_total_failure:
             # Nothing answered. Returning an empty catalogue would tell the

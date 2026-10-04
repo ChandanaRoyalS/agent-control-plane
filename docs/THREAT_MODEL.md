@@ -155,7 +155,8 @@ call cannot spend, and **before** the result cache so repetition is not free.
 Three layers, each with a stated limit (§6.1 has the limits):
 
 1. **Deterministic detectors** — seven patterns, no model, no network
-   (ADR 0036).
+   (ADR 0036), over every tool result and, since ADR 0065, every tool
+   description in the catalogue.
 2. **Provenance framing** — every result fenced in a per-result nonce boundary
    the document cannot forge (ADR 0037).
 3. **Structured refusal** — withholds on a deliberately narrow bar, and
@@ -309,15 +310,21 @@ client that flattens the content blocks and loses their order.
 > for text, a detector whose yes rate on clean tool output is low enough that
 > "caught" and "said yes" converge, measured against a fresh held-out source (v1 and v2 are spent), not tuned on it.
 
-### 6.2 A hostile tool *description* — **unscreened and unfenced**
+### 6.2 A hostile tool *description* — **screened, not fenced; the polite one passes**
 
 Tool descriptions reach the model's context through `tools/list` and are
-attacker-controlled in exactly the way tool results are. **Nothing screens or
-frames them.** Schema drift detection (ADR 0013) catches a description that
-*changes*; a catalogue that was hostile from its first fetch passes untouched.
+attacker-controlled in exactly the way tool results are. Since ADR 0065 every
+description, and every `description` inside the input schema, is screened with
+the same detectors and the same bar as a result; in enforce mode a tool that
+crosses it is withheld from the catalogue. Measured on 1,102 descriptions
+nobody here wrote: zero findings, zero withheld. On eight poisoned descriptions
+written here, the two enforceable detectors withhold, five more are detected
+and served, and the polite false claim passes.
 
-This is the cheapest high-severity gap in the system: the screening and framing
-machinery already exists and is simply not pointed at this input.
+What remains: a description **cannot be fenced** — its purpose is to be
+followed, so there is no honest frame — and a polite poisoned description reads
+like a legitimate one. The control for what it talks the model into is the
+tool-call policy (§5.2, ADR 0063).
 
 ### 6.3 The static secrets store is shared across tenants
 
@@ -435,8 +442,9 @@ they would actually use.
    system. **Cost: writing a paragraph.** This is the attack I would try first
    and the one I would expect to work.
 2. **Poison a tool description** on an upstream I control or can influence
-   (§6.2). Unscreened, unfenced, and it lands in the model's context on every
-   `tools/list` rather than once per call.
+   (§6.2), in plain English rather than with anything a detector matches. It
+   lands in the model's context on every `tools/list`, and nothing fences it;
+   what I make the model call is still the policy's to refuse.
 3. **Split the attack across calls** (`delayed_multi_step`: 0/4). No single
    result is hostile; the firewall screens results, not conversations.
 4. **Get any permitted tool on an upstream that uses a static secret** and act
@@ -507,6 +515,7 @@ demo, `make audit-checkpoint`, edit any line of `audit/audit.jsonl` and verify
 
 | Date | Change |
 |---|---|
+| 2026-10-05 | Tool descriptions screened and, in enforce mode, withheld (ADR 0065); §6.2 narrowed. |
 | 2026-10-04 | Held-out v2 scored once: firewall and both policies generalised exactly (ADR 0064). |
 | 2026-10-04 | Text detectors and tool-call policy measured on InjecAgent (ADR 0063). |
 | 2026-10-04 | Held-out v1 scored (ADR 0060); external InjecAgent corpus added and held-out v2 sealed (ADR 0061). |

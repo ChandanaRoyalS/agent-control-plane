@@ -217,8 +217,10 @@ jobs:
         # log in a directory anyone on the host can append to is a claim with a
         # hole in it. The runner has passwordless sudo; the verifier step below
         # reads the file, so the group needs read.
+        # Mode first, then owner: after the chown the runner user no longer
+        # owns the directory and a plain `chmod` is refused.
         run: |
-          mkdir -p audit && sudo chown 10001:$(id -g) audit && chmod 770 audit
+          mkdir -p audit && chmod 770 audit && sudo chown 10001:$(id -g) audit
           docker compose up -d --wait gateway
 
       - name: Keycloak's log if it did not come up

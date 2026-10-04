@@ -577,6 +577,7 @@ def _serve_command(args: argparse.Namespace) -> int:
                     # store above: a console pointed at a second hub would
                     # show an empty page while the gateway served traffic.
                     console=getattr(app.state, "console", None),
+                    operator_validator=getattr(app.state, "operator_validator", None),
                 ),
                 settings.admin_host,
                 settings.admin_port,
@@ -590,7 +591,7 @@ def _serve_command(args: argparse.Namespace) -> int:
                     # a gated deployment with no channel looks identical to a
                     # working one until the first call is held and never answered.
                     "approval_channel": bool(
-                        settings.approval_operator_token
+                        (settings.approval_operator_token or settings.approval_operator_audience)
                         and getattr(app.state, "approvals", None) is not None
                     ),
                 },

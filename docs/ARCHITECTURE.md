@@ -1,7 +1,7 @@
 # Architecture
 
 How the system behaves. **[`decisions/`](decisions/README.md) is why it behaves
-that way** — 58 of them, indexed and grouped.
+that way** — 59 of them, indexed and grouped.
 
 Start with the request path below. It is nine stages, and two of their positions
 in that order are load-bearing enough that moving them would be a vulnerability

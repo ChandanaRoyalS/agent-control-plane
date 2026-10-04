@@ -5,23 +5,33 @@
 the store waiting. Nothing could answer it. This is the answering.
 
 **The separation is the feature, not the plumbing.** The agent talks to the MCP
-listener on `:8080`; a person decides on the admin listener on `:9090`, which is
-bound to loopback by default and has never been reachable from the request path.
-So an agent cannot approve its own call *because it cannot address the thing that
-approves calls* — a structural property rather than a check somebody has to
-remember to write. It is the same argument `_await_approval` makes about
-`input_responses` (MRTR lets a client answer the questions a server asked, and
-here the client is the agent), made once more in the network topology, because a
-control that depends on one `if` statement staying correct is a control one
-refactor away from being gone.
+listener on `:8080`; a person decides on the admin listener on `:9090`, a
+separate port bound to loopback by default, behind a credential the request
+path never sees. On the default bind an agent cannot reach the thing that
+approves calls at all; on a wider bind — the compose stack publishes the port —
+it would need an operator's credential to try (ADR 0049 §4). It is the same
+argument `_await_approval` makes about `input_responses` (MRTR lets a client
+answer the questions a server asked, and here the client is the agent), made
+once more at the network layer.
+
+**Who is answering is recorded, not assumed.** An operator proves who they are
+in one of two ways. The strong one is a JWT from an authorization server this
+gateway already trusts, minted for the *operator audience* rather than the
+gateway's (`ACP_APPROVAL_OPERATOR_AUDIENCE`): the same validator, keys, issuer
+binding and tenant stamping as the request path, so the audit row can name a
+verified subject and an operator from one tenant cannot answer another tenant's
+call. The weak one is the shared token (`ACP_APPROVAL_OPERATOR_TOKEN`), kept
+for a laptop and a compose stack, which proves possession of a secret and
+nothing about a person — the row says so (`operator: shared-token`). A
+deployment that is a security control should configure the first.
 
 **These endpoints are authenticated, and the rest of the admin surface is not.**
 That surface was designed as a read-only scrape target behind loopback. Approving
 a call is a *write*, and the thing it writes is a permission — so the channel is
-mounted only when an operator credential is configured, and a deployment that has
-not configured one does not get a 403, it gets a listener with no such route.
-A feature you did not configure should not exist; a 403 is a promise that the
-thing is there and merely shut, which invites exactly one more mistake.
+mounted only when a way to authenticate an operator is configured, and a
+deployment that has configured none does not get a 403, it gets a listener with
+no such route. A feature you did not configure should not exist; a 403 is a
+promise that the thing is there and merely shut, which invites one more mistake.
 
 **And the last place an injection can land is here.** The arguments shown below
 were chosen by an agent that may have read a hostile document. Their audience is
@@ -52,6 +62,8 @@ from acp.approvals.store import ApprovalStore
 from acp.audit import AuditLog
 from acp.audit import Category as AuditCategory
 from acp.audit import Outcome as AuditOutcome
+from acp.exceptions import ACPError
+from acp.identity import TokenValidator
 
 APPROVALS_PATH: Final = "/approvals"
 APPROVAL_PATH: Final = "/approvals/{token}"
@@ -140,21 +152,91 @@ def as_view(request: ApprovalRequest, now: float) -> dict[str, Any]:
     }
 
 
-def _authorized(request: Request, credential: str) -> bool:
-    """Whether this request carries the operator credential.
+SHARED_OPERATOR_NAME: Final = "shared-token"
+"""What the audit row records as the operator when the shared token was used.
+
+A name that cannot be mistaken for a person. The row is the one record of who
+answered, and "the shared token" is the honest answer when that is all the
+channel verified — not blank, which reads as an omission, and not a configured
+label, which would let a config file assert an identity nothing checked.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class Operator:
+    """Who is answering, as far as the channel could verify.
+
+    ``subject`` is a verified JWT ``sub`` or `SHARED_OPERATOR_NAME`; ``tenant``
+    is stamped from the issuer registration (never a claim — the same rule as
+    the request path, ADR 0051) and is ``None`` for the shared token, which
+    belongs to no tenant and is therefore not scoped to one.
+    """
+
+    subject: str
+    tenant: str | None = None
+    issuer: str | None = None
+
+    @property
+    def verified(self) -> bool:
+        return self.subject != SHARED_OPERATOR_NAME
+
+    def may_answer(self, held: ApprovalRequest) -> bool:
+        """Whether this operator is entitled to decide ``held``.
+
+        A verified operator decides only within their tenant: acme's operator
+        does not approve globex's delete, however valid acme's token is. A call
+        with no tenant (a single-tenant deployment) is open to any verified
+        operator, and the shared token — scoped to nothing — may answer
+        anything, which is one more reason to prefer the JWT.
+        """
+        if not self.verified or held.tenant is None:
+            return True
+        return self.tenant == held.tenant
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorAuthenticator:
+    """Turns a request into an `Operator`, or ``None``.
+
+    Two proofs, tried in a fixed order. The shared token is compared first and
+    in constant time; anything that is not it is handed to the validator, when
+    one is configured, as a JWT minted for the operator audience. Every failure
+    is the same ``None`` — the specific reason is logged by the validator and
+    never returned, for the reason `TokenValidator` gives.
+    """
+
+    credential: str = ""
+    validator: TokenValidator | None = None
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.credential) or self.validator is not None
+
+    async def authenticate(self, request: Request) -> Operator | None:
+        header = request.headers.get("authorization", "")
+        scheme, _, presented = header.partition(" ")
+        if scheme.lower() != "bearer" or not presented:
+            return None
+        if self.credential and _matches(presented, self.credential):
+            return Operator(subject=SHARED_OPERATOR_NAME)
+        if self.validator is None:
+            return None
+        try:
+            principal = await self.validator.validate(presented)
+        except ACPError:
+            return None
+        return Operator(subject=principal.subject, tenant=principal.tenant, issuer=principal.issuer)
+
+
+def _matches(presented: str, credential: str) -> bool:
+    """Constant-time equality against the shared token.
 
     ``compare_digest`` rather than ``==``: the comparison is against a secret,
     and a short-circuiting comparison over a value an attacker controls leaks its
-    prefix one request at a time. Cheap to do correctly, and this is a listener
-    somebody will eventually expose beyond loopback whatever the default says.
+    prefix one request at a time. Over bytes, not str: `compare_digest` raises
+    `TypeError` for a non-ASCII `str`, which turned an unauthenticated request
+    carrying one into a 500 on the admin listener rather than a 401.
     """
-    header = request.headers.get("authorization", "")
-    scheme, _, presented = header.partition(" ")
-    if scheme.lower() != "bearer":
-        return False
-    # Over bytes, not str: `compare_digest` raises `TypeError` for a non-ASCII
-    # `str`, which turned an unauthenticated request carrying one into a 500 on
-    # the admin listener rather than a 401.
     return secrets.compare_digest(presented.encode("utf-8"), credential.encode("utf-8"))
 
 
@@ -166,22 +248,40 @@ def _unauthorized() -> Response:
     )
 
 
-def build_pending(reader: ApprovalReader, credential: str) -> Any:
+def _forbidden() -> Response:
+    """A verified operator, outside their tenant.
+
+    Differentiated from 401 because the operator is authenticated and is the
+    party this channel serves (see `_unanswerable`); what is withheld is which
+    *other* tenant's call this is, and the 403 carries none of it.
+    """
+    return JSONResponse({"error": "not this operator's tenant"}, status_code=403)
+
+
+def build_pending(reader: ApprovalReader, auth: OperatorAuthenticator) -> Any:
     """`GET /approvals` — every call currently waiting on a person.
 
     Authenticated even though it only reads, because of *what* it reads. The list
     carries subjects, tool names and argument values: it is a live feed of what
     the estate's agents are trying to do, which is a better reconnaissance report
     than the metrics endpoint this listener was designed around.
+
+    Filtered by what the operator may answer: a tenant's operator sees that
+    tenant's queue, not the estate's. The shared token sees everything, which
+    is the listing-side statement of the same fact `Operator.may_answer` makes.
     """
 
     async def pending(request: Request) -> Response:
-        if not _authorized(request, credential):
+        operator = await auth.authenticate(request)
+        if operator is None:
             return _unauthorized()
         now = time.time()
         return JSONResponse(
             {
-                "pending": [as_view(held, now) for held in reader.pending()],
+                "pending": [
+                    as_view(held, now) for held in reader.pending() if operator.may_answer(held)
+                ],
+                "operator": operator.subject,
                 "notice": UNTRUSTED_NOTICE,
             }
         )
@@ -250,7 +350,9 @@ def _unanswerable(held: ApprovalRequest | None, now: float) -> Response | None:
     return None
 
 
-def build_decide(store: ApprovalStore, credential: str, audit: AuditLog | None = None) -> Any:
+def build_decide(
+    store: ApprovalStore, auth: OperatorAuthenticator, audit: AuditLog | None = None
+) -> Any:
     """`POST /approvals/{token}` — a person's answer, recorded once.
 
     **The human's decision is chained.** Every other audit record in this project
@@ -261,7 +363,8 @@ def build_decide(store: ApprovalStore, credential: str, audit: AuditLog | None =
     """
 
     async def decide(request: Request) -> Response:
-        if not _authorized(request, credential):
+        operator = await auth.authenticate(request)
+        if operator is None:
             return _unauthorized()
 
         answer = await _read_answer(request)
@@ -270,9 +373,18 @@ def build_decide(store: ApprovalStore, credential: str, audit: AuditLog | None =
 
         token = request.path_params["token"]
         now = time.time()
-        refusal = _unanswerable(store.get(token), now)
+        held = store.get(token)
+        refusal = _unanswerable(held, now)
         if refusal is not None:
             return refusal
+        if held is not None and not operator.may_answer(held):
+            # After `_unanswerable`, so an operator is told "no such request"
+            # for a token that does not exist and "not your tenant" only for one
+            # that does — the existence of another tenant's token is still not
+            # something a URL guess should confirm... except that it must be,
+            # because the token is 256 random bits and was handed to the agent
+            # that asked. Nobody guesses it; the 403 leaks nothing.
+            return _forbidden()
 
         decided = store.decide(token, approved=answer.approved, reason=answer.reason)
         if decided is None:  # pragma: no cover — the lookup above already found it
@@ -301,7 +413,15 @@ def build_decide(store: ApprovalStore, credential: str, audit: AuditLog | None =
                 rule=decided.rule,
                 outcome=AuditOutcome.ALLOWED if answer.approved else AuditOutcome.DENIED,
                 reason=answer.reason or None,
-                detail={"fingerprint": decided.fingerprint},
+                detail={
+                    "fingerprint": decided.fingerprint,
+                    # *Who answered.* A verified subject and the issuer that
+                    # vouched for it, or the honest `shared-token`. This is
+                    # the field the row exists for.
+                    "operator": operator.subject,
+                    "operator_issuer": operator.issuer,
+                    "operator_verified": operator.verified,
+                },
             )
         return JSONResponse({**as_view(decided, now), "notice": UNTRUSTED_NOTICE})
 
@@ -309,25 +429,29 @@ def build_decide(store: ApprovalStore, credential: str, audit: AuditLog | None =
 
 
 def operator_routes(
-    store: ApprovalStore | None, credential: str, audit: AuditLog | None = None
+    store: ApprovalStore | None,
+    credential: str,
+    audit: AuditLog | None = None,
+    validator: TokenValidator | None = None,
 ) -> Sequence[Route]:
     """The approval routes, or none at all.
 
     Two ways to get an empty list, and they are the same answer to different
     questions: nothing to decide about (no store), or nobody entitled to decide
-    (no credential). Either way the routes are absent rather than present and
-    closed — see the module docstring.
+    (neither a shared token nor an operator validator). Either way the routes
+    are absent rather than present and closed — see the module docstring.
 
     ``reader`` is narrowed by capability rather than by type. A store that cannot
     list is a perfectly good request-path store, and it simply does not get a
     listing endpoint; that is a smaller failure than refusing to mount a channel
     an operator could still use to answer a token they were told about.
     """
-    if store is None or not credential:
+    auth = OperatorAuthenticator(credential=credential, validator=validator)
+    if store is None or not auth.configured:
         return ()
 
-    routes = [Route(APPROVAL_PATH, build_decide(store, credential, audit), methods=["POST"])]
+    routes = [Route(APPROVAL_PATH, build_decide(store, auth, audit), methods=["POST"])]
     reader = store if isinstance(store, ApprovalReader) else None
     if reader is not None:
-        routes.insert(0, Route(APPROVALS_PATH, build_pending(reader, credential), methods=["GET"]))
+        routes.insert(0, Route(APPROVALS_PATH, build_pending(reader, auth), methods=["GET"]))
     return routes

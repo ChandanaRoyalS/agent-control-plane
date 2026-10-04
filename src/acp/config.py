@@ -155,6 +155,23 @@ class GatewaySettings(BaseSettings):
     in the secret store like any other.
     """
 
+    approval_operator_audience: str = ""
+    """Audience of an operator's JWT on the approval channel.
+
+    Set it and an operator proves who they are the way an agent does: a token
+    from an authorization server in the issuer registry, verified with the same
+    validator, keys and issuer binding, minted for *this* audience rather than
+    the gateway's — so a token that may call tools cannot approve them and the
+    reverse. The verified subject is what the audit row records as the
+    operator, and the tenant stamped from the registration is what scopes
+    which calls that operator may answer (ADR 0059).
+
+    Requires authentication to be configured; an audience with no issuers to
+    check it against is refused at load. Empty leaves the channel on the shared
+    token alone, if one is set — a deployment that is a security control should
+    not leave it there.
+    """
+
     approval_ttl_seconds: float = Field(default=DEFAULT_TTL_SECONDS, gt=0)
     """How long a held call waits before expiry refuses it.
 
@@ -587,16 +604,33 @@ class GatewaySettings(BaseSettings):
         return bool(self.auth_client_id and self.auth_client_secret)
 
     @model_validator(mode="after")
-    def _operator_token_is_a_credential(self) -> GatewaySettings:
-        """An operator token that is set must be long enough to be one.
+    def _operator_channel_is_coherent(self) -> GatewaySettings:
+        """The two ways to authenticate an operator, each checked for sense.
 
-        Empty means "no channel" and is fine. Anything else authorises a write
-        that grants permissions, on a listener the compose stack publishes, and
-        a four-character value there is not a weak credential but a guessable
-        one. Sixteen characters is the floor `secrets.token_urlsafe(12)`
-        produces and well under what `acp secrets` would store; it exists to
-        catch `changeme`, not to grade entropy.
+        An operator audience needs issuers to verify it against and must not be the gateway's own
+        audience. A shared token that is set must be long enough to be one. Empty for both means "no
+        channel" and is fine. Anything else authorises a write that grants permissions, on a
+        listener the compose stack publishes, and a four-character value there is not a weak
+        credential but a guessable one. Sixteen characters is the floor `secrets.token_urlsafe(12)`
+        produces and well under what `acp secrets` would store; it exists to catch `changeme`, not
+        to grade entropy.
         """
+        if self.approval_operator_audience and not (self.auth_issuer or self.auth_issuers_file):
+            msg = (
+                "ACP_APPROVAL_OPERATOR_AUDIENCE names an audience for operator tokens, but no "
+                "authorization server is configured to verify them (ACP_AUTH_ISSUER or "
+                "ACP_AUTH_ISSUERS_FILE). An audience nothing can check is not a credential."
+            )
+            raise ValueError(msg)
+        if (
+            self.approval_operator_audience
+            and self.approval_operator_audience == self.auth_audience
+        ):
+            msg = (
+                "ACP_APPROVAL_OPERATOR_AUDIENCE must differ from ACP_AUTH_AUDIENCE: with one "
+                "audience, every agent token is also an operator token."
+            )
+            raise ValueError(msg)
         token = self.approval_operator_token
         if token and len(token) < MIN_OPERATOR_TOKEN_LENGTH:
             msg = (

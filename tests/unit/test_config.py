@@ -438,3 +438,32 @@ def test_an_empty_operator_token_still_means_no_channel() -> None:
 def test_an_operator_token_at_the_floor_is_accepted() -> None:
     token = "x" * MIN_OPERATOR_TOKEN_LENGTH
     assert settings(approval_operator_token=token).approval_operator_token == token
+
+
+# ---------------------------------------------------------------------------
+# An operator audience needs issuers behind it, and must not be the gateway's
+# ---------------------------------------------------------------------------
+
+
+def test_an_operator_audience_without_issuers_is_refused() -> None:
+    with pytest.raises(ValidationError, match="ACP_APPROVAL_OPERATOR_AUDIENCE"):
+        settings(approval_operator_audience="acp-operators")
+
+
+def test_an_operator_audience_equal_to_the_gateways_is_refused() -> None:
+    """With one audience, every agent token is also an operator token."""
+    with pytest.raises(ValidationError, match="must differ"):
+        settings(
+            auth_issuer="https://idp.example/realms/acp",
+            auth_audience="acp-gateway",
+            approval_operator_audience="acp-gateway",
+        )
+
+
+def test_an_operator_audience_with_issuers_is_accepted() -> None:
+    accepted = settings(
+        auth_issuer="https://idp.example/realms/acp",
+        auth_audience="acp-gateway",
+        approval_operator_audience="acp-operators",
+    )
+    assert accepted.approval_operator_audience == "acp-operators"

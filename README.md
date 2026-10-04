@@ -6,7 +6,7 @@ and the systems they are allowed to touch.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~1,900 tests · 94% coverage · 58 architecture decisions · 4 mutation harnesses
+**~1,900 tests · 94% coverage · 59 architecture decisions · 4 mutation harnesses
 proving 18 deliberate breakages are caught**
 
 ## The problem
@@ -219,7 +219,7 @@ solo work. `make check` passing locally means CI passes.
 
 ## Architecture decisions
 
-Fifty-eight decisions that required thought are recorded in
+Fifty-nine decisions that required thought are recorded in
 [`docs/decisions/`](docs/decisions/). The ones worth reading first are the ones
 where the measurement disagreed with the plan:
 
@@ -247,7 +247,7 @@ where the measurement disagreed with the plan:
 | 7 · Audit | **complete** | Hash-chained log with external anchoring, multi-tenancy, threat model |
 | 8 · Performance | **complete** | Load harness, a head-of-line defect found and fixed, published overhead with its switch settings |
 | 9 · Demo | **complete** | Live trace console over SSE, scripted attack demo |
-| 10 · Release | **v1.0.1 released** | Tagged and published to ghcr; architecture map, an index of all 58 decisions, and a machine-checked release surface |
+| 10 · Release | **v1.0.1 released** | Tagged and published to ghcr; architecture map, an index of all 59 decisions, and a machine-checked release surface |
 
 ## What this does not do
 

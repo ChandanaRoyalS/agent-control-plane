@@ -32,11 +32,13 @@ from acp.approvals import (
     State,
     request_for,
 )
+from acp.approvals.operator import SHARED_OPERATOR_NAME
 from acp.audit import AuditLog
 from acp.audit.sink import MemoryAuditSink
+from acp.identity import IssuerRegistration, IssuerRegistry, JwksCache, TokenPolicy, TokenValidator
 from acp.policy import Effect, Policy, Rule
 
-from ..tokens import Keypair, claims
+from ..tokens import AUDIENCE, ISSUER, Keypair, claims
 from .helpers import authenticated_gateway, call_gateway
 
 pytestmark = pytest.mark.integration
@@ -469,7 +471,7 @@ def test_a_denial_on_the_admin_port_stops_the_call(keypair: Keypair) -> None:
 # ---------------------------------------------------------------------------
 
 
-def held_store_for_agent(actor: str, tenant: str) -> tuple[InMemoryApprovalStore, str]:
+def held_store_for_agent(actor: str, tenant: str | None) -> tuple[InMemoryApprovalStore, str]:
     store = InMemoryApprovalStore()
     request = request_for(
         tenant=tenant,
@@ -526,8 +528,13 @@ def test_the_decision_row_names_the_agent_and_tenant_and_never_the_token() -> No
     assert row["subject"] == ALICE
     assert row["actor"] == "agent-ticket-bot"
     assert row["tenant"] == "acme"
-    assert row["detail"] == {"fingerprint": store.get(token).fingerprint}  # type: ignore[union-attr]
+    assert row["detail"]["fingerprint"] == store.get(token).fingerprint  # type: ignore[union-attr]
+    assert "request_state" not in row["detail"]
     assert token not in json.dumps(row), "the live request_state must not reach the chain"
+    # Answered with the shared token, and the row says exactly that rather than
+    # leaving the operator blank or letting configuration assert a name.
+    assert row["detail"]["operator"] == SHARED_OPERATOR_NAME
+    assert row["detail"]["operator_verified"] is False
 
 
 def test_a_non_ascii_bearer_is_a_401_not_a_500() -> None:
@@ -547,3 +554,157 @@ def test_a_non_ascii_bearer_is_a_401_not_a_500() -> None:
     response: httpx.Response = anyio.run(_run)
 
     assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Operators who prove who they are
+# ---------------------------------------------------------------------------
+
+OPERATOR_AUDIENCE = "acp-operators"
+
+
+def operator_validator(keypair: Keypair, *, tenant: str | None = None) -> TokenValidator:
+    """The request path's validator, re-targeted at the operator audience —
+    exactly what `build_operator_validator` does from settings."""
+
+    def handle(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=keypair.jwks())
+
+    keys = JwksCache(
+        "https://idp.test/jwks",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+    )
+    registration = IssuerRegistration(
+        policy=TokenPolicy(issuer=ISSUER, audience=AUDIENCE), keys=keys, tenant=tenant
+    )
+    gateway_side = TokenValidator(issuers=IssuerRegistry([registration]))
+    return TokenValidator(issuers=gateway_side.issuers.for_audience(OPERATOR_AUDIENCE))
+
+
+def operator_token(keypair: Keypair, subject: str = "oncall@example.test") -> str:
+    return keypair.sign(claims(sub=subject, aud=OPERATOR_AUDIENCE, act=None))
+
+
+def admin_with_jwt(
+    method: str,
+    path: str,
+    *,
+    store: InMemoryApprovalStore,
+    validator: TokenValidator,
+    bearer: str,
+    audit: AuditLog | None = None,
+    body: Any = None,
+) -> httpx.Response:
+    async def _run() -> httpx.Response:
+        # No shared token at all: the JWT is the only way in.
+        app = build_admin_app(None, None, store, "", audit, operator_validator=validator)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://admin") as client:
+            return await client.request(
+                method, path, headers={"authorization": f"Bearer {bearer}"}, json=body
+            )
+
+    response: httpx.Response = anyio.run(_run)
+    return response
+
+
+def test_a_verified_operator_decides_and_the_row_names_them(keypair: Keypair) -> None:
+    """The point of the whole change: the audit row records a subject an
+    authorization server vouched for, not a label a config file asserted."""
+    sink = MemoryAuditSink()
+    audit = AuditLog(sink, required=True)
+    store, token = held_store_for_agent("agent-ticket-bot", "acme")
+
+    response = admin_with_jwt(
+        "POST",
+        approval_path(token),
+        store=store,
+        validator=operator_validator(keypair, tenant="acme"),
+        bearer=operator_token(keypair),
+        audit=audit,
+        body={"approved": True, "reason": "checked the ticket"},
+    )
+
+    assert response.status_code == 200, response.text
+    (row,) = [json.loads(line)["record"] for line in sink.lines()]
+    assert row["detail"]["operator"] == "oncall@example.test"
+    assert row["detail"]["operator_issuer"] == ISSUER
+    assert row["detail"]["operator_verified"] is True
+
+
+def test_an_agents_token_cannot_open_the_operator_channel(keypair: Keypair) -> None:
+    """Same issuer, same keys, correctly signed — minted for the *gateway*.
+    The audience is what keeps "may call tools" and "may approve them" apart,
+    and a token that is one must not be the other."""
+    store, token = held_store_for_agent("agent-7", None)
+    agents_token = keypair.sign(claims())  # aud = the gateway's audience
+
+    response = admin_with_jwt(
+        "POST",
+        approval_path(token),
+        store=store,
+        validator=operator_validator(keypair),
+        bearer=agents_token,
+        body={"approved": True},
+    )
+
+    assert response.status_code == 401
+    assert store.get(token).state is State.PENDING  # type: ignore[union-attr]
+
+
+def test_an_operator_from_another_tenant_is_refused(keypair: Keypair) -> None:
+    """acme's operator, however valid their token, does not approve globex's
+    delete. The tenant comes from the issuer registration (ADR 0051), so it is
+    not something the token can claim its way across."""
+    store, token = held_store_for_agent("agent-7", "globex")
+
+    response = admin_with_jwt(
+        "POST",
+        approval_path(token),
+        store=store,
+        validator=operator_validator(keypair, tenant="acme"),
+        bearer=operator_token(keypair),
+        body={"approved": True},
+    )
+
+    assert response.status_code == 403
+    assert store.get(token).state is State.PENDING  # type: ignore[union-attr]
+
+
+def test_the_listing_shows_an_operator_only_their_tenants_queue(keypair: Keypair) -> None:
+    store = InMemoryApprovalStore()
+    for tenant in ("acme", "globex", "acme"):
+        request = request_for(
+            tenant=tenant,
+            subject=ALICE,
+            actor="agent-7",
+            tool=TOOL,
+            arguments={"query": tenant},
+            rule="approve-searches",
+            now=time.time(),
+        )
+        assert request is not None
+        store.create(request)
+
+    body = admin_with_jwt(
+        "GET",
+        APPROVALS_PATH,
+        store=store,
+        validator=operator_validator(keypair, tenant="acme"),
+        bearer=operator_token(keypair),
+    ).json()
+
+    assert body["operator"] == "oncall@example.test"
+    assert [held["tenant"] for held in body["pending"]] == ["acme", "acme"]
+
+
+def test_with_neither_token_nor_validator_the_routes_are_absent() -> None:
+    store = held_store()
+
+    async def _run() -> int:
+        app = build_admin_app(None, None, store, "", None, operator_validator=None)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://admin") as client:
+            return (await client.get(APPROVALS_PATH)).status_code
+
+    assert anyio.run(_run) == 404

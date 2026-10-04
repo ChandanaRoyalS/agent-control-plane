@@ -47,7 +47,7 @@ might need, with no principal anywhere in the picture.
 | 3 | **The agent's decision-making** | Corruptible through content. An agent talked into a destructive call does the attacker's work with the *user's* authority — no credential theft required. |
 | 4 | **The audit log's integrity** | Not valuable to steal; valuable to *edit*. It is the only artifact that says what happened. |
 | 5 | **The secret-store key** | One file that decrypts every static credential. |
-| 6 | **The operator approval channel** | Whoever can answer approvals can authorise the calls policy refused to decide alone. |
+| 6 | **The operator approval channel** | Whoever can answer approvals can authorise the calls policy refused to decide alone — which is why the answer is recorded against a verified subject (ADR 0059), not a shared secret. |
 
 ---
 
@@ -182,7 +182,15 @@ denial never runs.
   approval view and the audit row carry the acting agent and the tenant, so
   the person deciding sees both identities (ADR 0015) and the record says who
   asked — the `request_state` token is not written to the chain, because the
-  chain is durable and widely readable and the token is a live handle. MRTR's `input_responses` is read by nobody: the
+  chain is durable and widely readable and the token is a live handle.
+- **Who approved is a verified subject** (ADR 0059). With
+  `ACP_APPROVAL_OPERATOR_AUDIENCE` set, an operator presents a JWT from an
+  issuer the gateway already trusts, minted for the operator audience; the
+  same validator checks it, the tenant is stamped from the registration, and
+  the row records the verified `sub`. An agent's token is refused on the
+  channel because its audience is the gateway's; an operator decides only
+  within their tenant. The shared token remains for development and records
+  itself as `shared-token` — the row never asserts a name nothing checked. MRTR's `input_responses` is read by nobody: the
   client **is** the agent, so asking it to confirm would be theatre.
 - **What the operator reads is what was fingerprinted**, byte for byte, from
   one encoder. Arguments over 8 KiB are **withheld, not truncated** — a

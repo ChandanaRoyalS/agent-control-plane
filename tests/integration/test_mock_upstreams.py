@@ -278,3 +278,37 @@ def test_chaos_none_behaves_normally() -> None:
     body = post(mock_a.app, rpc("tools/list"), {CHAOS_MODE_HEADER: "none"})
 
     assert len(body["result"]["tools"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# The credential the upstream reports is the last *call*, not the last request
+# ---------------------------------------------------------------------------
+
+
+def test_debug_credential_reports_the_last_tools_call_not_the_last_probe() -> None:
+    """The gateway's health prober sends a credential-less ``tools/list`` every
+    few seconds. If that overwrote the record, a smoke test reading it after a
+    result-cached call (which never reaches this process) would race the prober
+    and read nothing — the flake that failed CI on an unrelated change."""
+
+    async def _run() -> tuple[Any, Any]:
+        app = mock_a.app
+        async with asgi_client(app) as client:
+            call = rpc("tools/call", {"name": "search", "arguments": {"query": "x"}})
+            await client.post(
+                MCP_URL,
+                json=call,
+                headers={**headers_for(call), "Authorization": "Bearer not.a.jwt"},
+            )
+            after_call = (await client.get("/debug/credential")).json()
+
+            probe = rpc("tools/list")
+            await client.post(MCP_URL, json=probe, headers=headers_for(probe))
+            after_probe = (await client.get("/debug/credential")).json()
+        return after_call, after_probe
+
+    after_call, after_probe = anyio.run(_run)
+
+    assert after_call["present"] is True
+    assert after_call["fingerprint"]
+    assert after_probe == after_call, "a probe must not erase what the last call carried"

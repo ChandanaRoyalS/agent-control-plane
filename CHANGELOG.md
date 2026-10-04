@@ -41,6 +41,13 @@ without somebody accepting the change.
   `TypeError`/`ValueError` from the cast, outside the error taxonomy. It is now
   a malformed-response `UpstreamProtocolError`.
 
+- **The identity smoke test no longer races the health prober.** The mock
+  upstreams' `/debug/credential` recorded every request, probes included, and
+  the smoke test's repeated `search` calls were answered from the result cache
+  without reaching the upstream — so a probe landing mid-run blanked the record
+  and four checks failed on an unrelated change. The mocks now record only
+  `tools/call`, and the smoke test sends a distinct query per call.
+
 ### Changed
 
 - Removed the author's internal task-plan numbering and one-shot patch scripts

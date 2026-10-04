@@ -15,6 +15,20 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.2.0] - 2026-10-04
+
+The evaluation release. The injection firewall is now measured on attacks
+nobody on this project wrote — 2,108 InjecAgent documents, half sealed and
+scored once — alongside two text detectors and the policy engine. The short
+version: pattern screening catches the injection that announces itself and none
+that does not; no text detector tested does better without flagging most tool
+output; and the policy blocks or holds every attack's tool call (35/35 on
+held-out v2) at no cost to the tasks. ADRs 0060–0064 record each step. No
+setting, CLI flag or audit field changed; `plain_assertion` is a new value of
+the firewall-finding `family` label.
+
 ### Added
 
 - `scripts/evaluate_classifier.py` (`make eval-classifier`) scores the optional
@@ -22,7 +36,7 @@ without somebody accepting the change.
   report cannot show what the model contributed — a benign document the patterns
   already flagged is flagged either way. This asks the model directly and keeps
   the outcomes the firewall throws away: an answer naming a family the firewall
-  cannot report (`plain_assertion`, `delayed_multi_step`), malformed JSON, and
+  cannot report, malformed JSON, and
   timeouts are counted separately rather than as "no finding". Also reports
   per-call latency and whether a second run gives the same answer. Development
   split only; not a CI gate.
@@ -63,8 +77,6 @@ without somebody accepting the change.
 
 ### Fixed
 
-- `scripts/evaluate_hf_detector.py` printed `revision: unknown`; it now reads
-  the commit of the snapshot that loaded from the local cache.
 - The classifier's prompt offered seven families and the parser accepted five,
   so a model verdict of `plain_assertion` — the family the classifier exists
   for — was discarded. `plain_assertion` is now a reportable family (the model's
@@ -288,7 +300,8 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.2.0
 [1.1.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.1.1
 [1.1.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.1.0
 [1.0.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.0.1

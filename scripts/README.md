@@ -6,6 +6,8 @@ Operational and verification scripts. None is part of the shipped package
 | script | run via | what it does |
 |---|---|---|
 | `evaluate.py` | `make eval`, CI (`--check`) | Scores the firewall against the committed corpus, false positives first; `--check` fails if any count regressed against `corpus/eval-baseline.json`. |
+| `evaluate_external.py` | `make eval-external`, CI (`--check`) | Scores the firewall on InjecAgent's development half: recall against a template-only control, withholding, intervals over attacker instructions; `--check` fails on fewer caught or withheld. |
+| `import_injecagent.py` | by hand | Re-imports InjecAgent at its pinned commit and regenerates the hash-ruled held-out v2 manifest; byte-identical on every run. |
 | `evaluate_classifier.py` | `make eval-classifier` | Scores the Ollama classifier alone, with no patterns: false positives, recall, the five outcomes the firewall collapses to two, latency and run-to-run agreement. Needs a local Ollama; not in CI. |
 | `corpus_stats.py` | `make corpus` | Describes the benign corpus and what each detector does to it. |
 | `mutate_no_passthrough.py` | `make prove-passthrough`, CI | Breaks the no-passthrough invariant three ways and requires the suite to catch each. |

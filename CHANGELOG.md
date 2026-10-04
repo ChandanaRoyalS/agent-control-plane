@@ -32,6 +32,13 @@ without somebody accepting the change.
   unsealed on every run, and a later `--unseal` says plainly that it is no
   longer a generalisation estimate.
 
+- An external attack corpus: 2,108 poisoned tool responses from InjecAgent
+  (Findings of ACL 2024, MIT), imported verbatim at a pinned commit by
+  `scripts/import_injecagent.py`, split by attacker instruction with half sealed
+  as held-out v2. `scripts/evaluate_external.py` (`make eval-external`) scores
+  recall against a template-only control with intervals over instructions, and
+  `--check` runs in CI against a committed baseline (ADR 0061).
+
 ### Changed
 
 - Held-out split v1 was scored once and is marked spent (ADR 0060): patterns

@@ -87,6 +87,12 @@ jobs:
       - name: Fail if the firewall got worse
         run: uv run python scripts/evaluate.py --check
 
+      # The same gate over attacks nobody on this project wrote (ADR 0061):
+      # InjecAgent's development half, counts per slice against a committed
+      # baseline. Held-out v2 is never scored here.
+      - name: Fail if the firewall got worse on external attacks
+        run: uv run python scripts/evaluate_external.py --check
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

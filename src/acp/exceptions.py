@@ -147,8 +147,8 @@ class CredentialExchangeError(ACPError):
     The authorization server is a different dependency with different
     availability characteristics, and borrowing an upstream's backoff policy for
     it means an identity outage is measured against — and eventually charged
-    to — a service that is behaving perfectly. Caching exchanged credentials
-    (task 30) is the real mitigation; a tighter retry loop is not.
+    to — a service that is behaving perfectly. Caching exchanged credentials is
+    the real mitigation; a tighter retry loop is not.
     """
 
 
@@ -336,8 +336,8 @@ class PolicyDeniedError(ACPError):
     ``None`` when the deny default applied. As with ``AuthenticationError``, the
     reason is for the log rather than the caller: telling an agent *which* rule
     denied it, or that a tool exists but is forbidden, is an oracle worth
-    denying. From task 35 the tool will not appear in the catalogue at all, so
-    the honest answer to the caller is simply that no such tool is available.
+    denying. With catalogue filtering the tool will not appear in the catalogue
+    at all, so the honest answer to the caller is simply that no such tool is available.
     """
 
     code = -32040
@@ -351,7 +351,7 @@ class RateLimitExceededError(ACPError):
     own: the bucket refills with the passage of time, so the identical request
     will succeed once enough of it has passed. That is genuinely different advice
     from a policy denial — "wait, then retry" rather than "stop" — and the flag
-    is what tells the agent which. The first budget defence (Phase 4): a runaway
+    is what tells the agent which. The first budget defence: a runaway
     or compromised agent cannot spend without bound, because each principal draws
     from a bucket that fills at a fixed rate.
 
@@ -373,7 +373,7 @@ class QuotaExceededError(ACPError):
     this window ends". The identical call succeeds once the window rolls over.
     Where the rate limiter stops a fast flood, the quota stops a slow drain that
     never trips the rate limiter but would still run up unbounded spend across the
-    window (Phase 4).
+    window.
 
     Carries ``retry_after`` seconds — the time until the window resets — in
     ``details``. Safe to expose: it describes only the window the caller is
@@ -387,8 +387,8 @@ class QuotaExceededError(ACPError):
 class AuditUnavailableError(ACPError):
     """This call could not be recorded, so it was not made.
 
-    The fail-closed half of task 56. An audit log that stops recording while the
-    gateway keeps serving is worse than no audit log, because the record then
+    The fail-closed half of the audit record. An audit log that stops recording
+    while the gateway keeps serving is worse than no audit log, because the record then
     *asserts by omission* that nothing happened during the window somebody will
     eventually ask about. So an unwritable record refuses the call, unless a
     deployment has deliberately said otherwise with ``ACP_AUDIT_REQUIRED=false``.

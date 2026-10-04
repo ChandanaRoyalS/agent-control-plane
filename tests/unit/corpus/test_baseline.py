@@ -58,7 +58,7 @@ def a_baseline(
 
     Every parameter spelled out rather than taken as ``**overrides: object``.
     That shortcut typechecks as `Any` in the sandbox and fails `mypy --strict`
-    on a machine that can resolve the model — the same trap as bug 42, and the
+    on a machine that can resolve the model — a trap this project has fallen into, and the
     reason this project does not splat loose mappings into typed constructors.
     """
     base = baseline_from(a_report())

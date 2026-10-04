@@ -65,7 +65,7 @@ class Disconnected(Exception):  # noqa: N818 — deliberately not an *Error; see
     response; the in-process ASGI test transport surfaces this same exception
     to the caller, which is the closest an in-process test can get to a genuine
     dropped TCP connection. Full socket-level disconnect behaviour is exercised
-    later, in Phase 1's integration tests against a real running server.
+    by the compose smoke test against a real running server.
     """
 
 

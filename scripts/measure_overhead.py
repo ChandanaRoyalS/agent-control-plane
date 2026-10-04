@@ -4,15 +4,16 @@
     make up
     make overhead
 
-Task 62. The decisions are in `perf/overhead.py`; this is the driver.
+The decisions are in `perf/overhead.py`; this is the driver.
 
 **Sequential, one request in flight.** Overhead is the work the gateway does
 that the upstream would not have done, and it is only visible when nothing is
-queueing. Task 60's harness measures the opposite question — what happens when
+queueing. The load harness measures the opposite question — what happens when
 it is busy — and its p50 of ~300 ms is a statement about a queue. Both are
 true; only this one is the gateway's cost.
 
-**Alternating blocks, three rounds.** Task 61 found that a laptop warms
+**Alternating blocks, three rounds.** The audit-offload measurement found that a
+laptop warms
 measurably over five minutes, so a direct-then-gateway ordering would charge
 the whole drift to whichever ran second. Alternating spreads it evenly, and
 every number printed carries its range.

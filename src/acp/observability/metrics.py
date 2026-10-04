@@ -3,7 +3,7 @@
 Traces answer "what happened in this one request". Metrics answer "what is
 happening across all of them" — how often, how slowly, and how much of it is
 failing. They are cheap to add now and are the thing you want the instant you
-load test, which is task 60.
+load test (see ``perf/``).
 
 Everything here is deliberately small in cardinality, and that is the whole
 design problem. A Prometheus time series exists for every distinct combination
@@ -341,7 +341,7 @@ def observe_bulkhead(*, upstream: str, in_flight: int, capacity: int) -> None:
 
 
 def record_result_cache(*, outcome: str) -> None:
-    """One tool-result cache lookup (task 43).
+    """One tool-result cache lookup.
 
     The interesting failure is silent in both directions. A key too *specific*
     still returns correct results and simply never hits, so the estate serves
@@ -355,7 +355,7 @@ def record_result_cache(*, outcome: str) -> None:
 
 
 def record_audit_write(*, outcome: str) -> None:
-    """One audit chain entry, written or not (task 56).
+    """One audit chain entry, written or not.
 
     ``failed`` climbing is the one alarm that cannot come from the audit log, so
     it has to come from here. Alert on it: with `ACP_AUDIT_REQUIRED` on it means
@@ -369,7 +369,7 @@ def record_audit_write(*, outcome: str) -> None:
 
 
 def record_firewall_decision(*, decision: str) -> None:
-    """One screened tool result, by what the gateway did about it (task 47).
+    """One screened tool result, by what the gateway did about it.
 
     The interesting series is the ratio between ``would_refuse`` and everything
     else while a deployment runs in report mode, because that is the estimate of
@@ -383,7 +383,7 @@ def record_firewall_decision(*, decision: str) -> None:
 
 
 def record_firewall_finding(*, family: str, confidence: str) -> None:
-    """One detector finding (task 45), sliced the way the corpus is sliced.
+    """One detector finding, sliced the way the corpus is sliced.
 
     By family, because a single detection rate over mixed traffic is unreadable:
     the same number can be even coverage of everything or perfect coverage of
@@ -396,7 +396,7 @@ def record_firewall_finding(*, family: str, confidence: str) -> None:
 
 
 def record_credential_cache(*, outcome: str) -> None:
-    """One exchanged-credential cache lookup (task 30).
+    """One exchanged-credential cache lookup.
 
     Worth a counter rather than a log line because the interesting number is a
     *ratio* over time, and the interesting failure is silent: a cache whose key
@@ -410,7 +410,7 @@ def record_credential_cache(*, outcome: str) -> None:
 
 
 def record_schema_drift(*, upstream: str, kind: str) -> None:
-    """One newly observed catalogue change (task 20).
+    """One newly observed catalogue change.
 
     A counter rather than only a gauge, because the two answer different
     questions. The gauge says how much is outstanding right now; the counter

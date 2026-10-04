@@ -1,4 +1,4 @@
-"""One caller's result must never reach another — task 44, on the real path.
+"""One caller's result must never reach another, on the real path.
 
 `tests/unit/results/test_cache.py` proves the key distinguishes two callers.
 That is a fact about a hash. This is a fact about the gateway: a real signed
@@ -8,7 +8,7 @@ assertion on what the *second caller receives*.
 **The mock upstream returns something different every call**, and that is what
 makes this test able to fail at all. A mock that answered identically would make
 a leak and a correct miss indistinguishable — every assertion would pass whether
-or not the cache was keyed on the principal. Task 30 learned this: its
+or not the cache was keyed on the principal. The exchange cache taught this: its
 authorization-server mock returned one credential string per audience, so
 alice's credential served to bob would have been the same string and the suite
 would have been green through the breach.
@@ -50,7 +50,7 @@ MCP_HEADERS = {
 ALICE = "alice@example.test"
 BOB = "bob@example.test"
 
-# Task 58. A second authorization server, so two tenants can each have an
+# Tenancy. A second authorization server, so two tenants can each have an
 # "alice" — which is the whole point: within one issuer a subject is unique,
 # and across two it is not, and every key in this file was built when there
 # was only one.
@@ -118,7 +118,7 @@ def validator_for(keypair: Keypair) -> TokenValidator:
 
 
 def tenanted_validator(keypair: Keypair) -> TokenValidator:
-    """Two registrations, two tenants, one signing key (task 58).
+    """Two registrations, two tenants, one signing key.
 
     One key deliberately: the tenant boundary must not depend on the two
     issuers having different keys. If it did, this test would be proving the
@@ -287,12 +287,12 @@ def test_two_agents_acting_for_one_person_do_not_share_an_entry(keypair: Keypair
 
 
 def test_two_tenants_with_the_same_subject_do_not_share_an_entry(keypair: Keypair) -> None:
-    """Task 58's breach, on the real path.
+    """The tenancy breach, on the real path.
 
     Two authorization servers, two tenants, and an `alice` in each. Same
     subject string, same actor, same tool, same arguments — everything the key
-    held before the tenant joined it. Until task 58 these two calls produced
-    one cache entry, and the second alice read the first alice's records.
+    held before the tenant joined it. Without the tenant in the key these two calls
+    produced one cache entry, and the second alice read the first alice's records.
 
     Nothing about that failure is observable from inside either tenant: the
     answer is well-formed, the policy allowed the call, and the upstream logged

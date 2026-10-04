@@ -1,6 +1,6 @@
 """Fail-closed, redaction order, and the record's shape.
 
-Task 56. `AuditLog` is the seam the request path calls and the single place the
+`AuditLog` is the seam the request path calls and the single place the
 decision about an unwritable record is made.
 """
 
@@ -30,7 +30,7 @@ class BrokenSink:
     blocking = True
     """Declared blocking so the fail-closed tests exercise the *threaded* path:
     an exception has to cross the thread boundary to reach the caller, and that
-    is the half of the guarantee task 61 could have broken."""
+    is the half of the guarantee the threaded `arecord` path could have broken."""
 
     def append(self, _record: Any) -> Any:
         raise OSError("no space left on device")
@@ -194,7 +194,7 @@ def test_the_clock_is_injected() -> None:
 
 
 # ---------------------------------------------------------------------------
-# `arecord` — the same guarantees, off the event loop (task 61, ADR 0053)
+# `arecord` — the same guarantees, off the event loop (ADR 0053)
 # ---------------------------------------------------------------------------
 
 
@@ -278,7 +278,8 @@ def test_concurrent_arecords_produce_one_intact_chain() -> None:
 def test_the_write_does_not_happen_on_the_calling_thread() -> None:
     """The point of the exercise, asserted directly.
 
-    Task 60 measured the symptom — `tools/list`, which writes no audit record,
+    The load harness measured the symptom — `tools/list`, which writes no audit
+    record,
     was 12.6x slower at p95 because it was parked behind other requests'
     `fsync`. The cause was that the write ran on the event loop's thread. This
     asserts the cause is gone, rather than re-measuring the symptom.
@@ -354,7 +355,7 @@ def test_the_event_loop_keeps_running_during_a_slow_write() -> None:
 
 
 def test_a_non_blocking_sink_is_not_offloaded() -> None:
-    """The correction task 61's own measurement forced.
+    """The correction that measuring the offload forced.
 
     Offloading is a fixed cost — two context switches and a limiter — that pays
     for itself only when the write waits on hardware. With `fsync` off it cost

@@ -350,7 +350,7 @@ def test_report_and_enforce_differ_only_in_whether_they_act() -> None:
 def test_configured_hosts_reach_the_firewall_it_builds() -> None:
     """Asserted on the findings rather than on a refusal, since the corpus
     demoted the image detector. The host list still decides what is reported,
-    which is what tasks 51 and 52 will combine with a second signal."""
+    which is what the classifier combines with a second signal."""
     firewall = firewall_for(Mode.ENFORCE, allowed_hosts=frozenset({"cdn.corp"}))
     assert firewall is not None
 
@@ -434,8 +434,8 @@ def test_a_failed_upstream_result_is_screened_too() -> None:
 
 def test_every_enforceable_detector_is_a_real_detector() -> None:
     """A name in this set that no detector answers to is a rule that can never
-    fire — coverage that looks present and is not. The same alarm task 31 put on
-    the `Upstream` protocol and task 45 put on the detector registry."""
+    fire — coverage that looks present and is not. The same alarm that sits on
+    the `Upstream` protocol and on the detector registry."""
     assert ENFORCEABLE.issubset(DETECTOR_NAMES)
 
 

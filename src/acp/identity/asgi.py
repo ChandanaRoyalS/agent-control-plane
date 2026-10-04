@@ -24,8 +24,8 @@ somebody can extend. See ``acp.identity.resource``.
 
 **Unauthenticated mode is a real mode, and it is loud.** With no identity
 provider configured, this middleware binds ``None`` and lets the request
-through. That is how every task before this one behaved, and pretending
-otherwise would mean the gateway could not run at all until Phase 2 finishes.
+through. A gateway with no identity provider can still run — pretending
+otherwise would make local development impossible.
 What it must never be is *quiet*: startup warns, and every log line for every
 request carries ``principal: anonymous``, so no one can read a log and fail to
 notice.
@@ -141,7 +141,7 @@ class AuthenticationMiddleware:
         bind_principal(principal)
         # Held apart from the principal, and read by exactly one module. See
         # `principal._subject_token` for why the token is not a field on the
-        # thing that represents identity, and task 27 for what needs it.
+        # thing that represents identity, and `acp.identity.exchange` for what needs it.
         bind_subject_token(token)
         context.bind(**principal.as_log_fields())
         await self._app(scope, receive, send)

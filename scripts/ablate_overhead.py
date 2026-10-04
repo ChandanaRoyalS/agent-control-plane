@@ -5,7 +5,7 @@
     make overhead-ablate           # one pass, ~8 minutes
     make overhead-ablate-repeat    # three passes, ~25 minutes, tighter
 
-Task 62. The ladder is `perf.overhead.ABLATION`; this walks it.
+The ladder is `perf.overhead.ABLATION`; this walks it.
 
 **Why an ablation and not a flamegraph.** ADR 0053 already made this argument
 for the audit `fsync`: a controlled A/B shows *causation* where a profile shows

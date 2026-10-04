@@ -1,6 +1,6 @@
 """Human-in-the-loop approvals: a call that stops and waits for a person.
 
-Phase 6. Everything before this decides automatically — policy allows or denies,
+Everything else in the request path decides automatically — policy allows or denies,
 budgets charge, the firewall screens. This is the case where the right answer is
 that no rule should decide: a destructive call, a production dataset, a refund
 above a threshold. The policy says `require_approval` (ADR 0048) and the call

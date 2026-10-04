@@ -1,7 +1,7 @@
-"""The anchor, and the two commands that use it — task 57.
+"""The anchor, and the two commands that use it.
 
 An audit log nobody can verify is just an expensive log, which is why this is
-its own task. The chain catches edits; the anchor catches the two attacks a
+its own module. The chain catches edits; the anchor catches the two attacks a
 self-contained chain provably cannot see. These are the tests for the second
 half.
 """

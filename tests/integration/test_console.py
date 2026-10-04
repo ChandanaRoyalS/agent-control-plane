@@ -1,4 +1,4 @@
-"""The console, through the real admin app — task 63.
+"""The console, through the real admin app.
 
 The unit tests cover the hub's back-pressure and the wire shape. These cover the
 two things only an assembled app can answer: **whether the routes are actually
@@ -202,10 +202,10 @@ def test_only_the_admin_app_can_mount_the_console() -> None:
 
     An agent addresses the gateway. If these routes were ever mounted there, an
     agent could read what every other principal is doing — ADR 0049's argument
-    in task 63's clothes.
+    in the console's clothes.
 
     A static check on *who imports the mounting function* rather than a request
-    against an assembled gateway app, for the reason lesson 10 gives: bounding
+    against an assembled gateway app, for a reason this project keeps relearning: bounding
     which code can reach a thing beats any number of tests on what that code
     does with it. A behavioural test passes for the app it happened to build;
     this one fails the moment anybody wires the console anywhere else."""

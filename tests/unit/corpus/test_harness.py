@@ -36,7 +36,7 @@ WITHHELD = "Deploy the service \u202e then restart."
 """A right-to-left override, escaped rather than literal — ruff's PLE2502 rejects
 an invisible bidirectional character in Python source, and the corpus `.txt`
 files are the one place they are written out. `bidirectional_override` is one of
-the two detectors still on `ENFORCEABLE` after task 48's demotion, so this is a
+the two detectors still on `ENFORCEABLE` after the benign-corpus demotion, so this is a
 document the firewall actually stops rather than merely flags."""
 
 
@@ -101,7 +101,7 @@ def test_a_clean_corpus_has_no_false_positives() -> None:
 
 
 def test_a_benign_document_that_trips_a_detector_is_counted_and_named() -> None:
-    """The rate and the list, because task 48's entire result came from reading
+    """The rate and the list, because the benign corpus's entire result came from reading
     the six documents rather than from the 5.7%."""
     result = report(benign(CLEAN, EXFIL), attacks())
 

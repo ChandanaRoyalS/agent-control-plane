@@ -23,7 +23,7 @@ it, and if it could, it would be minting credentials on the first one's say-so.
 **The inbound token goes here and nowhere else.** It is read from
 ``current_subject_token()``, whose whole reason for existing separately from the
 ``Principal`` is that exactly one module should be able to reach it. The
-invariant task 31 has to prove is a statement about this file.
+no-passthrough invariant the test suite proves is a statement about this file.
 
 **A failed exchange fails the call.** The two alternatives are to call the
 upstream with no credential, which is a gateway that has silently stopped
@@ -31,7 +31,7 @@ enforcing the thing it exists for, or to forward the caller's own token, which
 is the passthrough this phase exists to make impossible. Neither is a
 degradation worth having; refusing is.
 
-**Asking for a scope is not the same as getting one** (task 28). RFC 8707 §2
+**Asking for a scope is not the same as getting one**. RFC 8707 §2
 says an authorization server that cannot honour a `resource` request SHOULD
 answer `invalid_target`. Keycloak 26.7, measured rather than assumed, accepts
 the parameter and discards it — including when it directly contradicts
@@ -88,8 +88,8 @@ DEFAULT_EXPIRY_SKEW = 30.0
 
 A token that is valid when the gateway checks it and expired when the upstream
 does is the worst possible outcome, because it fails *after* the side effect
-might have happened. Task 30 refreshes against this margin; task 27 only records
-it, since nothing is cached yet.
+might have happened. The cache refreshes against this margin; an uncached exchange
+only records it.
 """
 
 
@@ -142,7 +142,7 @@ class TokenExchanger:
         # cross-upstream check has nothing to compare against, which is the
         # correct state for a single-upstream deployment.
         self._peers = frozenset(peer_audiences)
-        # `None` disables caching entirely, which is task 27's behaviour and the
+        # `None` disables caching entirely, which is the original behaviour and the
         # right shape for a test that wants to count exchanges. Every deployment
         # has one; see `runtime.build_token_exchanger`.
         self._cache = cache
@@ -161,8 +161,8 @@ class TokenExchanger:
         The cache is checked, then a per-key lock is taken, then the cache is
         checked *again*. That second read is the whole single-flight mechanism
         and it is easy to leave out: without it, every request that queued on the
-        lock while the first one was minting proceeds to mint its own. Task 22
-        shipped exactly that defect in the JWKS cache, where twenty concurrent
+        lock while the first one was minting proceeds to mint its own. The JWKS
+        cache originally shipped exactly that defect, where twenty concurrent
         misses produced twenty-one fetches — found by asserting a *count* rather
         than a type.
         """
@@ -229,7 +229,7 @@ class TokenExchanger:
         except httpx.HTTPError as exc:
             # The authorization server is unreachable or misbehaving. Worth
             # retrying, and emphatically not the caller's fault — the same
-            # distinction task 22 drew between 401 and 503.
+            # distinction the validator draws between 401 and 503.
             logger.warning(
                 "auth.exchange_unreachable",
                 extra={"issuer": issuer, "audience": audience, "error": type(exc).__name__},
@@ -303,7 +303,7 @@ class TokenExchanger:
     def _verify_scope(self, token: ExchangedToken) -> None:
         """Check the credential we were given against the one we asked for.
 
-        This is task 28's actual content. The parameter that requests a scope is
+        This is the real scope control. The parameter that requests a scope is
         advisory — RFC 8707 §2 only *recommends* that a server which cannot
         honour it answers `invalid_target`, and the server this project runs
         against neither honours it nor complains. A control built on the request
@@ -427,7 +427,7 @@ class ExchangedCredentials:
         no principal because no user asked for them. That is a real gap and a
         deliberately scoped one: the correct answer is a client-credentials
         grant for the gateway's own service account, which needs a second grant
-        type and belongs with the caching work in task 30. Until then a probe
+        type and belongs with the caching layer. Until then a probe
         reaches an upstream uncredentialed, which the mock fleet accepts and a
         real upstream would not.
 

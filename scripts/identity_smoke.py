@@ -4,12 +4,12 @@ Run against a stack brought up with `docker compose up -d --wait`:
 
     uv run python scripts/identity_smoke.py
 
-Everything in tasks 22 to 24 is covered by unit and integration tests, and every
+Everything in `acp.identity` is covered by unit and integration tests, and every
 one of those tests validates a token this repository signed, against a key set
 this repository served, from an issuer this repository invented. That proves the
 code is self-consistent. It cannot prove the code is *right*, because a mock
 that agrees with your client proves only that you wrote both — the lesson from
-task 13, restated with a real identity provider on the other end.
+the mock upstreams, restated with a real identity provider on the other end.
 
 So this file asks the questions only a real server can answer:
 
@@ -28,7 +28,8 @@ So this file asks the questions only a real server can answer:
    against something that did not come from this repository.
 8. Is a token whose signature has been altered refused?
 
-Task 27 adds the questions that only the *upstream* can answer, read from the
+Credential exchange adds the questions that only the *upstream* can answer, read
+from the
 mock fleet's `/debug/credential` endpoint:
 
 9.  Did the upstream receive a credential at all?
@@ -38,14 +39,15 @@ mock fleet's `/debug/credential` endpoint:
 12. Does it still name the human, with the gateway recorded as the actor?
 13. Do two different upstreams receive two different credentials?
 
-Task 28 adds the one that a conformant server would make redundant and this one
-does not:
+Resource indicators add the one that a conformant server would make redundant and
+this one does not:
 
 14. Is neither upstream's credential *also* valid at the other? Keycloak accepts
     RFC 8707's `resource` and discards it (ADR 0020), so the scope is real only
     because the gateway checks what it was granted rather than what it asked for.
 
-Task 30 adds the two that only exist once credentials are held between calls:
+The exchange cache adds the two that only exist once credentials are held between
+calls:
 
 15. Does a repeat call reuse the cached credential, rather than the cache being
     a correct-looking structure that never hits?
@@ -365,7 +367,7 @@ def check_it_is_not_the_callers_token(token: str) -> None:
 
 
 def check_the_credential_is_scoped_to_one_upstream(token: str) -> None:
-    """RFC 8707's whole point, and task 28's subject from the other side: a
+    """RFC 8707's whole point, and the resource-indicator check from the other side: a
     credential minted for mock-a must be useless against mock-b."""
     call_a_tool(token, "mock-a__search")
     seen = credential_seen_by(MOCK_A)
@@ -411,7 +413,7 @@ def check_two_upstreams_get_two_credentials(token: str) -> None:
 
 
 def check_a_credential_does_not_open_two_doors(token: str) -> None:
-    """Task 28's control, seen from outside.
+    """The granted-scope control, seen from outside.
 
     Keycloak accepts RFC 8707's `resource` and discards it, so a gateway that
     sent the parameter and trusted it would hand each upstream a credential that
@@ -460,7 +462,7 @@ def check_a_repeat_call_reuses_the_credential(token: str) -> None:
 
 
 def check_two_callers_never_share_a_credential(alice: str, bob: str) -> None:
-    """The failure task 30 exists to not have, observed at the upstream.
+    """The failure the exchange cache exists to not have, observed at the upstream.
 
     Key the cache on the upstream — the obvious thing, since what is cached is
     'the credential for mock-a' — and bob's call arrives at the upstream holding
@@ -509,7 +511,7 @@ def main() -> int:
     check_an_untrusted_issuer_is_refused()
     check_a_tampered_signature_is_refused(alice)
 
-    # Task 27 — what the upstream ends up holding.
+    # Credential exchange — what the upstream ends up holding.
     check_the_upstream_gets_a_credential(alice)
     check_it_is_not_the_callers_token(alice)
     check_the_credential_is_scoped_to_one_upstream(alice)
@@ -517,7 +519,7 @@ def main() -> int:
     check_two_upstreams_get_two_credentials(alice)
     check_a_credential_does_not_open_two_doors(alice)
 
-    # Task 30 — the cache, and the one mistake in it that is a privilege
+    # The exchange cache, and the one mistake in it that is a privilege
     # escalation rather than a performance regression.
     check_a_repeat_call_reuses_the_credential(alice)
     check_two_callers_never_share_a_credential(alice, bob)

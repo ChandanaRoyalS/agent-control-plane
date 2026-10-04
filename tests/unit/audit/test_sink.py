@@ -1,6 +1,6 @@
 """Where entries land, and the two failures that must not be papered over.
 
-Task 56. The chain's correctness is `test_chain.py`'s problem. This is about the
+The chain's correctness is `test_chain.py`'s problem. This is about the
 file: that a restart continues rather than starting a second chain, that a tail
 this cannot read stops the process instead of being truncated away, and that a
 write failure leaves no gap.

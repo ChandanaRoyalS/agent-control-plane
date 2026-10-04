@@ -1,12 +1,12 @@
 """Where the gateway keeps the secrets it genuinely has to hold.
 
-Task 27 removed most of them. The gateway holds no long-lived upstream
+Token exchange removes most of them. The gateway holds no long-lived upstream
 credential, because it mints one per call and throws it away. That is the right
 answer wherever it is available, and it is not always available: an upstream may
 speak an API key issued out of band, or belong to a team with no OAuth
 integration, or be a piece of vendor software that will never learn RFC 8693.
 
-Before this, such an upstream simply could not be configured. Task 27 made
+Before this, such an upstream simply could not be configured. Exchange makes
 `audience` mandatory once exchange is on, which is correct for anything that can
 exchange and a wall for anything that cannot. This is the other door.
 

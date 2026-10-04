@@ -5,7 +5,7 @@ Run against a stack brought up with `make up`:
     uv run python scripts/probe_cimd.py
 
 **This is a measurement, not a test.** It asserts nothing and always exits 0.
-Its output decides how task 25 is closed, which is the same order — and for the
+Its output decides how CIMD support is closed out, which is the same order — and for the
 same reason — as the RFC 8707 probe in `probe_resource_indicator.py`.
 
 What CIMD is
@@ -34,8 +34,8 @@ therefore measures the gateway-as-client direction only.
 Why measure before implementing
 -------------------------------
 
-The same rule the RFC 8707 probe was written for. Task 23's brief named RFC
-9207, which defends a redirect-flow client and never reaches a resource server;
+The same rule the RFC 8707 probe was written for. The issuer-binding work was
+briefed with RFC 9207, which defends a redirect-flow client and never reaches a resource server;
 implementing it literally would have been a citation with no control behind it,
 which is worse than none because a reviewer believes it. CIMD is the same shape
 of risk in the other direction: writing "supports CIMD" — or writing "Keycloak
@@ -72,7 +72,7 @@ from keycloak_token import access_token, claims, post_form, token_endpoint
 GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange"
 ACCESS_TOKEN = "urn:ietf:params:oauth:token-type:access_token"  # noqa: S105 — a type URI
 
-# The registered exchange client — the task 27/28 baseline. Same values the
+# The registered exchange client — the credential-exchange baseline. Same values the
 # RFC 8707 probe uses, kept here rather than imported so the two probes stay
 # independent measurements.
 REGISTERED_CLIENT_ID = "acp-gateway"
@@ -128,7 +128,7 @@ def exchange(subject_token: str, **client_fields: str) -> dict[str, Any]:
 
 CASES: list[tuple[str, dict[str, str]]] = [
     (
-        "registered client id + secret (the task 28 baseline)",
+        "registered client id + secret (the baseline)",
         {"client_id": REGISTERED_CLIENT_ID, "client_secret": REGISTERED_CLIENT_SECRET},
     ),
     (
@@ -144,7 +144,7 @@ CASES: list[tuple[str, dict[str, str]]] = [
 
 def classify(results: dict[str, dict[str, Any]]) -> str:
     """Read the possible worlds off the results."""
-    baseline = results["registered client id + secret (the task 28 baseline)"]
+    baseline = results["registered client id + secret (the baseline)"]
     cimd_alone = results["url client_id alone (CIMD, no secret)"]
     cimd_with_secret = results["url client_id with the registered secret"]
 

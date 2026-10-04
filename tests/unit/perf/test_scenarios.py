@@ -1,4 +1,4 @@
-"""The load harness's decisions, tested — task 60.
+"""The load harness's decisions, tested.
 
 A load generator is a measuring instrument, and **an instrument nobody
 calibrated produces numbers with the authority of measurement and the content
@@ -51,8 +51,8 @@ def test_a_tool_call_carries_both_routing_headers() -> None:
 
     The pre-dispatch fast path abstains when `Mcp-Name` is missing (ADR 0043),
     so a harness that omitted it would benchmark the slow route while
-    publishing the numbers as though they described the fast one. Task 55 found
-    this exact omission in the test suite.
+    publishing the numbers as though they described the fast one. The approvals
+    work found this exact omission in the test suite.
     """
     call = next(c for c in MIX if c.method == "tools/call")
     headers = call.headers(TOKEN)
@@ -282,7 +282,7 @@ def test_principals_are_evenly_spread() -> None:
 
 def test_the_id_based_version_would_have_failed_this() -> None:
     """A regression test proves nothing until you show it would have caught the
-    thing (lesson 25). This is the original expression, asserted broken."""
+    thing. This is the original expression, asserted broken."""
 
     class Simulated:
         pass

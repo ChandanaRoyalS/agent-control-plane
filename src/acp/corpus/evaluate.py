@@ -1,10 +1,10 @@
 """Scoring the firewall against the corpus, sliced the way the corpus is sliced.
 
-This is the seed of task 52's harness — precision, recall and false-positive
-rate with confidence intervals — built now at the depth task 49 needs: run each
-attack through the firewall, compare the outcome to what the corpus expected,
-and report per family. The confidence intervals and the held-out split come
-later; the shape does not change.
+This is the seed of the evaluation harness (`acp.corpus.harness`) — precision,
+recall and false-positive rate with confidence intervals — built at the depth
+the adversarial corpus needs: run each attack through the firewall, compare the
+outcome to what the corpus expected, and report per family. The confidence
+intervals and the held-out split live in the harness; the shape does not change.
 
 **One number is banned here on purpose: a single detection rate.** ADR 0036
 argued it and this makes it structural — `Scoreboard` reports per family and

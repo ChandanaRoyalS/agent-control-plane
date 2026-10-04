@@ -10,7 +10,7 @@ Driven through `helpers.authenticated_gateway`: the SDK's streamable-HTTP app
 starts its session-manager task group in the ASGI lifespan, so the request runs
 inside it or the app serves uninitialised.
 
-**A denial has two layers, and until task 55 this file only ever tested one of
+**A denial has two layers, and this file originally only ever tested one of
 them.** The requests here were hand-rolled and carried no `Mcp-Method` or
 `Mcp-Name`, so the pre-dispatch check (ADR 0043) had nothing to authorize on and
 abstained every time — every assertion below landed on `enforce_call`, the
@@ -200,7 +200,7 @@ def test_neither_refusal_names_the_rule_on_the_wire(keypair: Keypair) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The decision log the simulator replays (task 38)
+# The decision log the simulator replays
 # ---------------------------------------------------------------------------
 
 

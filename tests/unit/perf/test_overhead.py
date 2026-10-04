@@ -1,5 +1,5 @@
 """Gateway overhead: the request shapes, the feature register and the
-arithmetic — task 62.
+arithmetic.
 
 The driver cannot be unit tested; these can, and they are the parts that would
 be **silently wrong**. A direct request that asked a different question than the
@@ -358,7 +358,7 @@ def test_a_zero_direct_median_does_not_divide_by_zero() -> None:
 
 
 def test_spread_shows_the_range_not_just_the_mean() -> None:
-    """Task 61's lesson, in the formatter: a single number hides that one run
+    """The audit-offload lesson, in the formatter: a single number hides that one run
     understated by 30%."""
     assert spread([10.0, 20.0, 30.0]) == "20.0 [10.0-30.0]"
     assert spread([]) == "—"

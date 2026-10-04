@@ -1,6 +1,6 @@
 """Every tool the shipped config names must be a tool that exists.
 
-**This file exists because a one-character typo shipped.** Task 55's demo policy
+**This file exists because a one-character typo shipped.** The approvals demo policy
 said `mock-a__create-ticket`; the tool is `create_ticket`, with an underscore.
 The rule was valid YAML, loaded without complaint, passed every schema check —
 and matched nothing. First-match-wins then handed the call to the broad `allow`
@@ -93,7 +93,7 @@ def test_every_tool_the_compose_policy_names_exists() -> None:
     """**The one this file was written for.**
 
     A rule naming a tool nobody serves does not fail. It never matches, and the
-    next rule decides — which for task 55's demo meant the call the policy was
+    next rule decides — which for the approvals demo meant the call the policy was
     written to hold ran without anybody being asked.
     """
     unknown = policy_tools() - catalogue()
@@ -156,9 +156,9 @@ def test_every_tool_the_cache_table_names_exists() -> None:
 #
 # Every one of them had the same shape: a feature built, tested, merged — and
 # switched off in the only deployment anybody runs, because nothing set its
-# environment variable. `scripts/patch_compose_firewall.py` fixed four at once
-# (cost table, result cache, provenance framing, the firewall). Task 62's
-# overhead register then found two more, and the sixth was the most complete:
+# environment variable. Four were found and fixed together (cost table, result
+# cache, provenance framing, the firewall). The overhead register (ADR 0054)
+# then found two more, and the sixth was the most complete:
 # `ACP_COST_FILE` was set while `ACP_RATE_LIMIT_ENABLED` and `ACP_QUOTA_ENABLED`
 # were not, so `config/costs.yaml` was parsed at every start to feed a decision
 # `_charge` never reached.

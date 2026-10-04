@@ -3,7 +3,7 @@
 The file is a mapping: a ``costs`` map of qualified tool name to cost, and an
 optional ``default`` for tools not named. Absent file means no weighting — the
 caller supplies the default table (every call costs one), so a deployment
-without a costs file behaves exactly as task 38 left it.
+without a costs file behaves exactly as the unweighted limiter did.
 """
 
 from __future__ import annotations

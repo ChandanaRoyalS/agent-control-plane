@@ -20,9 +20,10 @@ a 10MB document would be a control with a documented bypass: put the payload at
 the end.
 
 Screening never raises and never blocks. It returns findings. What to do about
-them is task 47, and keeping the two apart is what makes the false-positive rate
-measurable at all — a detector that also refuses can only be evaluated by
-counting refusals, and by then a legitimate caller has already been told no.
+them is the decision layer (`acp.firewall.decision`), and keeping the two apart
+is what makes the false-positive rate measurable at all — a detector that also
+refuses can only be evaluated by counting refusals, and by then a legitimate
+caller has already been told no.
 """
 
 from __future__ import annotations
@@ -61,7 +62,8 @@ class Screening:
     Load-bearing, not an implementation detail. An unscreened tail is a bypass
     with a known address, so a caller that treats "no findings" and "no findings
     in the part I looked at" as the same thing has a control it does not have.
-    Task 47 should treat a truncated screening as suspicious in its own right.
+    The decision layer treats a truncated screening as suspicious in its own
+    right.
     """
 
     scanned_chars: int = 0
@@ -124,7 +126,7 @@ class Screener:
 
         Compared against `DETECTOR_NAMES` by a test, so a detector written and
         not registered — or registered and not named — fails the build. The
-        same alarm task 31 put on the `Upstream` protocol: a security layer's
+        same alarm the `Upstream` protocol carries: a security layer's
         coverage should not be able to shrink without somebody noticing.
         """
         if self._classifier is None:

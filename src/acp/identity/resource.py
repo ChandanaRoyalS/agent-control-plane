@@ -1,6 +1,6 @@
 """Telling a client which authorization server to go and ask — RFC 9728.
 
-Task 23 made the gateway trust several authorization servers safely. It said
+`issuers` makes the gateway trust several authorization servers safely. It says
 nothing at all about how a *client* is supposed to find out which one to get a
 token from, and the answer today is "somebody configured it by hand". That is
 fine for one agent and one gateway. It stops being fine the moment an agent
@@ -13,7 +13,7 @@ stating plainly because it inverts the usual direction of discovery:
 1. A client makes a request with no token and gets ``401`` with
    ``WWW-Authenticate: Bearer resource_metadata="<url>"``.
 2. It fetches that URL and reads ``authorization_servers``.
-3. It runs RFC 8414 discovery against one of *those* — task 23's code, from the
+3. It runs RFC 8414 discovery against one of *those* — `discovery`'s code, from the
    other side of the wire — and now knows where to authenticate.
 
 The client is told where to go by the resource it was trying to reach, rather
@@ -40,7 +40,7 @@ by the same reasoning.
 **The resource identifier is the same string twice.** It is what this document
 declares under ``resource``, and it is what a client passes as RFC 8707's
 ``resource`` parameter when asking for a token — which is what the authorization
-server puts in ``aud``, which is what task 22 checks. So a client that follows
+server puts in ``aud``, which is what the validator checks. So a client that follows
 this chain from a 401 to a token ends up holding exactly the audience this
 gateway demands, with nothing hardcoded anywhere along the way. That chain is
 also why ``runtime`` warns when the configured resource identifier is not among
@@ -133,8 +133,8 @@ class ProtectedResource:
 
         Optional members are omitted rather than emitted empty. ``"scopes_
         supported": []`` is a claim — that this resource has no scopes — and
-        saying nothing is a different and, until Phase 3 defines them, more
-        accurate statement.
+        saying nothing is a different and, with no scopes defined, more accurate
+        statement.
         """
         document: dict[str, Any] = {"resource": self.resource}
         if self.authorization_servers:

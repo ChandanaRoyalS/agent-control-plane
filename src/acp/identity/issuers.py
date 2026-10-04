@@ -1,6 +1,6 @@
 """Trusted authorization servers, each bound to its own keys and audience.
 
-Task 22 trusted exactly one issuer, and with one issuer there is nothing to
+The validator alone trusts exactly one issuer, and with one issuer there is nothing to
 cross. The moment a gateway trusts two — a corporate directory and a partner's,
 say, or a tenant per authorization server — a new class of mistake becomes
 available, and it is the resource-server form of the **authorization server
@@ -63,7 +63,7 @@ class IssuerRegistration:
     policy: TokenPolicy
     keys: JwksCache
     tenant: str | None = None
-    """Which tenant this authorization server's principals belong to (task 58).
+    """Which tenant this authorization server's principals belong to.
 
     On the *registration*, deliberately, rather than read from a token claim.
     Lying about ``iss`` already fails signature verification, so a token cannot
@@ -75,7 +75,7 @@ class IssuerRegistration:
     """
 
     token_endpoint: str = ""
-    """Where this server exchanges tokens (RFC 8693, task 27).
+    """Where this server exchanges tokens (RFC 8693, see `acp.identity.exchange`).
 
     Part of the registration rather than a single gateway-wide setting, and for
     the reason everything else here is: the exchange has to go back to the server
@@ -245,9 +245,9 @@ def _reject_plaintext_keys(jwks_url: str, label: object, insecure_hosts: Iterabl
     """The same https rule discovery applies to metadata, applied to the keys.
 
     Discovery already refuses a plaintext issuer, but a configured `jwks_url`
-    skips discovery entirely — so until task 26 this check existed on one of the
-    two paths into the same decision, which is the shape of a control that looks
-    present and is not. A key set fetched over plain HTTP can be replaced in
+    skips discovery entirely — without this check the rule would exist on only one
+    of the two paths into the same decision, which is the shape of a control that
+    looks present and is not. A key set fetched over plain HTTP can be replaced in
     transit by an attacker's key set, and every token afterwards verifies
     perfectly against it.
     """

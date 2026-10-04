@@ -1,8 +1,8 @@
 """The evaluation harness: false-positive rate first, then recall, then precision.
 
-Task 52. Everything before it built the firewall and the corpora; this is the
-thing that says how well it works, and says it in an order that reflects what
-actually gets a security control switched off.
+The firewall and the corpora exist; this is the thing that says how well the
+firewall works, and says it in an order that reflects what actually gets a
+security control switched off.
 
 **The false-positive rate comes first, and that is not a presentation choice.**
 A firewall that withholds legitimate documents gets turned off, and once it is
@@ -239,8 +239,9 @@ class Report:
     benign_flagged: tuple[str, ...]
     """Which benign documents tripped a detector, by id.
 
-    A rate tells you how often; only the list tells you *what*, and task 48's
-    whole result came from reading the six documents rather than the 5.7%.
+    A rate tells you how often; only the list tells you *what*, and the whole
+    result of the benign-corpus run (ADR 0039) came from reading the six
+    documents rather than the 5.7%.
     """
 
     heldout_notice: str

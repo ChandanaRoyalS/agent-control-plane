@@ -1,6 +1,6 @@
-"""The adversarial corpus against the live firewall — task 49.
+"""The adversarial corpus against the live firewall.
 
-The benign corpus (task 48) asserts a floor: nothing benign is withheld. This
+The benign corpus asserts a floor: nothing benign is withheld. This
 asserts the other half, and it asserts it in a way that is easy to get wrong.
 
 The naive version checks a detection rate against a threshold. That number is a

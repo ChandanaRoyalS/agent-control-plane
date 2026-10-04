@@ -152,7 +152,7 @@ site:  ## Generate docs/index.html from the captured demo and the audit chain
 	uv run python scripts/build_site.py
 	@echo
 	@echo "Open it:  file://$$(pwd)/docs/index.html"
-	@echo "Published at https://chandanaroyal719-bot.github.io/agent-control-plane/"
+	@echo "Published at https://chandanaroyals.github.io/agent-control-plane/"
 	@echo "once Pages is set to deploy from main -> /docs."
 
 site-check:  ## Fail if docs/index.html is out of date with its inputs

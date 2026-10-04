@@ -4,7 +4,7 @@
 place is the request path — every ``tools/list`` an agent makes already carries a
 fresh catalogue. It is the wrong place for three reasons. It puts hashing work on
 a request an agent is waiting for; it sees nothing through a cache hit, which is
-most requests once task 19 is on; and it is blind to any upstream nobody happens
+most requests once the result cache is on; and it is blind to any upstream nobody happens
 to be calling — which is precisely the upstream whose description turning
 malicious matters most, because the change lands before anyone is watching it.
 

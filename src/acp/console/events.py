@@ -1,6 +1,6 @@
 """What a watcher sees, and how much of it is a record.
 
-Task 63: *"Server-sent events streaming tool calls, denials, firewall findings,
+The brief: *"Server-sent events streaming tool calls, denials, firewall findings,
 breaker state and spend. Minimal styling, no framework ceremony — it exists to
 be watched for thirty seconds."*
 

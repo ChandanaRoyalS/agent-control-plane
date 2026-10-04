@@ -1,6 +1,6 @@
 """Per-tool call costs: weight a call's budget draw by which tool it is.
 
-Rate limiting (task 38) charges every call one token. But calls are not equal —
+Rate limiting charges every call one token. But calls are not equal —
 a large search or a write is more expensive to serve than a cheap lookup, and a
 budget that cannot tell them apart either throttles the cheap ones too hard or
 lets the expensive ones through too easily. A cost table maps a qualified tool
@@ -8,7 +8,7 @@ name to what it costs; the limiter debits that many tokens instead of one.
 
 Pure and tiny: a mapping plus a default. Unlisted tools cost the default (1.0),
 so a gateway with rate limiting on but no cost table behaves exactly as before —
-every call costs one, as task 38 left it.
+every call costs one, as the unweighted limiter did.
 """
 
 from __future__ import annotations

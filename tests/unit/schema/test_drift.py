@@ -83,7 +83,7 @@ def test_both_facets_moving_emits_two_events() -> None:
 
 
 def test_a_new_tool_is_reported() -> None:
-    """Deny-by-default (task 32) means it cannot be called, which is correct and
+    """Deny-by-default means it cannot be called, which is correct and
     is exactly why nobody would notice it. The alert is what turns "silently
     unusable" into "somebody should write a rule"."""
     baseline = snapshot(mock_a=catalogue(search()))

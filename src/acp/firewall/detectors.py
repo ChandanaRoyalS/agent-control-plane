@@ -17,7 +17,7 @@ detector that reported HIGH on them would be wrong about the most-read documents
 in any engineering organisation, and would be turned off within a week.
 
 **The text being screened is hostile input to this code.** It comes from an
-upstream that may be compromised — that is the entire premise of Phase 5. So
+upstream that may be compromised — that is the entire premise of the firewall. So
 every pattern here is linear: no nested quantifiers, no backtracking traps, and
 the screener bounds the input before any of them run. A detector that can be
 made quadratic by a hostile document is a denial-of-service written into the

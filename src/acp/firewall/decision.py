@@ -1,14 +1,16 @@
 """What the gateway does about a finding — the first place the firewall can be wrong.
 
-Task 45 detects and decides nothing. Task 46 frames and judges nothing. This is
-the first module that changes what a caller receives because of what a detector
-thought, and therefore the first that can be wrong about a real request.
+The detectors detect and decide nothing. Provenance framing frames and judges
+nothing. This is the first module that changes what a caller receives because of
+what a detector thought, and therefore the first that can be wrong about a real
+request.
 
 The asymmetry is the design. A missed attack costs whatever the attack was
 worth; a false refusal costs the deployment's trust in the control, and the
 observed response to a firewall that refuses honest traffic is not a tuning
 ticket, it is ``ACP_FIREWALL_MODE=off``. So the bar is set deliberately high and
-the numbers that would justify lowering it are tasks 48 to 52.
+the numbers that would justify lowering it come from the corpora and the
+evaluation harness in `acp.corpus`.
 
 **The refusal never reproduces the content.** Not the payload, not the matched
 span, not a paraphrase. Explaining a refusal by quoting what was in the document
@@ -65,7 +67,7 @@ ENFORCEABLE: Final = frozenset({"bidirectional_override", "encoded_payload"})
 
 Two, and the list is short because it was **measured** rather than reasoned
 about. Both of these produced zero findings across the 106 documents of the
-benign corpus (task 48). Everything else produced some, and a detector that
+benign corpus. Everything else produced some, and a detector that
 fires on real documents cannot be allowed to withhold them.
 
 In code rather than in configuration, deliberately. A deployment can say what it
@@ -102,8 +104,9 @@ newsletter.
 
 Both demoted detectors still fire, are still logged, and still count toward
 `would_refuse` in report mode. What changed is that they no longer withhold
-anything on their own. Tasks 51 and 52 can promote them again by combining them
-with a second signal — which is what the corpus says they need.
+anything on their own. Detector tuning against the harness can promote them
+again by combining them with a second signal — which is what the corpus says
+they need.
 """
 
 INCIDENT_BYTES: Final = 8

@@ -79,18 +79,17 @@ def to_input_required(*, token: str, expires_in: float) -> types.InputRequiredRe
     client is the agent.** An agent that has been talked into deleting the
     production dataset by a poisoned document is exactly the agent that will
     answer its own elicitation "yes", and the whole premise of this gateway's
-    Phase 5 is that agents read hostile text. A boundary the caller can satisfy
+    firewall is that agents read hostile text. A boundary the caller can satisfy
     is not a boundary (SECURITY.md, and the same lesson `Mcp-Name` taught).
 
-    So the approval decision arrives on a channel the agent cannot reach
-    (task 55), and this result says only *wait, and come back with this*. For
-    the same reason `on_call_tool` reads `request_state` from a retry and
-    **discards `input_responses` entirely**: nothing the caller sends can
-    authorise the call it is asking about.
+    So the approval decision arrives on a channel the agent cannot reach, and this result says only
+    *wait, and come back with this*. For the same reason `on_call_tool` reads `request_state` from a
+    retry and **discards `input_responses` entirely**: nothing the caller sends can authorise the
+    call it is asking about.
 
     What the caller does get is enough to be useful: that approval is pending
     and roughly how long it has. The expiry is safe to disclose for the reason
-    `retry_after` is (task 42) — it describes only the limit they are already
+    `retry_after` is — it describes only the limit they are already
     inside. The deciding rule is *not* disclosed, for the reason
     `PolicyDeniedError` withholds it: which rule stopped a call is an oracle a
     caller can map one request at a time.

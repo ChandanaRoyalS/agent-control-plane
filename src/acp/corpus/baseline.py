@@ -1,6 +1,6 @@
 """A committed record of what the firewall caught, and a diff against it.
 
-Task 53. The plan says "fail the build when detection drops or false positives
+The requirement is to "fail the build when detection drops or false positives
 rise beyond threshold", and the word to argue with is **threshold**.
 
 **A threshold is a number somebody picked once, and it can be raised by whoever

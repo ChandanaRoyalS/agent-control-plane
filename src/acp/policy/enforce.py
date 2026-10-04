@@ -1,6 +1,6 @@
 """Enforce a policy decision in the request path, and record it either way.
 
-Task 33's ``evaluate`` decides; this turns a denial into a refused call. It is
+``acp.policy.evaluate`` decides; this turns a denial into a refused call. It is
 the backstop the whole model rests on — even once catalogue filtering removes
 denied tools so they are never offered, a caller can still name a tool directly,
 and this is what stops the call from executing. Filtering is defence by

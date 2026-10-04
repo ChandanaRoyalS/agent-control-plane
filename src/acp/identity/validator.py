@@ -17,7 +17,7 @@ misconfiguration that can only fail closed is not a misconfiguration.
 issued for the expense system is a perfectly valid, correctly signed,
 unexpired token — and accepting it here would let anything that can obtain a
 token for *any* service in the estate act through this gateway. This is the
-same problem RFC 8707 resource indicators solve on the outbound side in task 26.
+same problem RFC 8707 resource indicators solve on the outbound side in `exchange`.
 
 **Expiry is required, not merely honoured.** ``exp`` is technically optional in
 JWT. A token without it never expires, and a verifier that treats a missing
@@ -160,7 +160,7 @@ class TokenValidator:
             raise _rejected("UnusableClaims") from exc
 
         # The tenant comes from the REGISTRATION, after verification — never
-        # from a claim (task 58). The registration was selected by `iss` and
+        # from a claim. The registration was selected by `iss` and
         # then proven: the signature verified against ITS keys and `iss`
         # matched ITS issuer. A token cannot reach this line under a
         # registration that did not issue it, so the tenant stamped here

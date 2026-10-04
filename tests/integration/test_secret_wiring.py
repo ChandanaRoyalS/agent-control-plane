@@ -3,10 +3,11 @@
 `test_store.py` proves the encryption works and `test_cli.py` proves an operator
 can populate it. Neither says anything about whether the *gateway* reads it —
 and "the credential exists but is never resolved" is a real and quiet way to
-fail, the same gap that left `build_token_validator` untested behind a 93%
-coverage number in task 22.
+fail, the same gap that once left `build_token_validator` untested behind a 93%
+coverage number.
 
-Written because the coverage report said so. After task 29 `runtime.py` reported
+Written because the coverage report said so. With stored credentials wired in,
+`runtime.py` reported
 67% with `build_secret_store` and `resolve_upstream_secrets` among the missing
 lines, which is precisely the case where reading the percentage rather than the
 line numbers would have let a startup path ship untested.
@@ -106,7 +107,8 @@ def test_a_referenced_secret_is_resolved_before_serving(tmp_path: Path) -> None:
 
 def test_upstreams_that_exchange_resolve_nothing(tmp_path: Path) -> None:
     """A gateway where everything speaks RFC 8693 has no secrets to hold, which
-    is the whole point of task 27 and the reason this store is optional."""
+    is the whole point of per-call credential exchange and the reason this store is
+    optional."""
     store = build_secret_store(a_store(tmp_path))
 
     resolved = anyio.run(
@@ -144,9 +146,9 @@ def test_a_reference_with_no_store_configured_is_fatal() -> None:
 
 
 def test_a_stored_credential_satisfies_the_exchange_era_rule() -> None:
-    """Task 27 made `audience` mandatory once exchange is on, which was correct
-    for anything that can exchange and a wall for anything that cannot. Task 29
-    is the other door, and this is the check that now accepts it."""
+    """Credential exchange made `audience` mandatory once exchange is on, which is
+    correct for anything that can exchange and a wall for anything that cannot. A
+    stored credential is the other door, and this is the check that accepts it."""
     check_upstream_audiences([upstream(credential_ref="legacy-crm-key")], exchanging=True)
 
 
@@ -156,6 +158,6 @@ def test_an_upstream_credentialed_by_neither_route_is_refused() -> None:
 
 
 def test_without_exchange_nothing_is_required() -> None:
-    """Phase 1's behaviour, which has to keep working: a gateway with no identity
+    """The pre-identity behaviour, which has to keep working: a gateway with no identity
     provider brokers for uncredentialed upstreams exactly as it always did."""
     check_upstream_audiences([upstream()], exchanging=False)

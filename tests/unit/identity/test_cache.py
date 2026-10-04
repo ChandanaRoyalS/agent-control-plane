@@ -68,7 +68,8 @@ def test_the_same_request_is_the_same_key() -> None:
 
 
 def test_the_key_does_not_contain_the_token() -> None:
-    """Task 27's invariant is that the inbound token exists in one place with
+    """Credential exchange's invariant is that the inbound token exists in one place
+    with
     one reader. A dictionary key is a second place, and a cache is a structure
     whose whole purpose is to outlive the request that created it."""
     k = key(ALICE)
@@ -220,9 +221,9 @@ def test_concurrent_use_of_one_lock_serialises() -> None:
 
     Driven through `anyio.run` rather than written as an `async def` test, like
     every other async assertion in this project. It keeps the suite independent
-    of which asyncio plugin happens to be configured — and the build sandbox has
-    a different one from Chandana's machine, which is exactly the sort of skew
-    that makes a test pass in one place and not collect in the other.
+    of which asyncio plugin happens to be configured — two environments with
+    different plugins is exactly the sort of skew that makes a test pass in one
+    place and not collect in the other.
     """
     order: list[str] = []
 

@@ -94,8 +94,8 @@ def test_the_rug_pull_leaves_no_other_trace(
     """Stated as a test because it is the justification for the whole task.
 
     The tampered response is well-formed, successful, the same size, and carries
-    the same cache hints as the clean one. Nothing in tasks 13 through 19 has
-    anything to react to.
+    the same cache hints as the clean one. Nothing in the resilience, logging,
+    tracing, metrics or health layers has anything to react to.
     """
     clean = SchemaSnapshot.from_catalogues({UPSTREAM: live(DriftFlavour.NONE, monkeypatch)})
     tampered = live(DriftFlavour.DESCRIPTION, monkeypatch)

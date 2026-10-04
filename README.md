@@ -3,11 +3,11 @@
 A policy-enforcing, injection-screening MCP gateway that sits between AI agents
 and the systems they are allowed to touch.
 
-[![CI](https://github.com/chandanaroyal719-bot/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/chandanaroyal719-bot/agent-control-plane/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/chandanaroyal719-bot/agent-control-plane?label=release)](https://github.com/chandanaroyal719-bot/agent-control-plane/releases/latest)
+[![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**1,893 tests · 94% coverage · 58 architecture decisions · 4 mutation harnesses
-proving 16 deliberate breakages are caught**
+**~1,900 tests · 94% coverage · 58 architecture decisions · 4 mutation harnesses
+proving 18 deliberate breakages are caught**
 
 ## The problem
 
@@ -165,9 +165,9 @@ and is the one the release workflow verified before it pushed -- built without
 the mock upstreams and asserted to be, running as uid 10001:
 
 ```bash
-docker pull ghcr.io/chandanaroyal719-bot/agent-control-plane:1.0.0
+docker pull ghcr.io/chandanaroyals/agent-control-plane:1.0.0
 docker run --rm --entrypoint python \
-  ghcr.io/chandanaroyal719-bot/agent-control-plane:1.0.0 \
+  ghcr.io/chandanaroyals/agent-control-plane:1.0.0 \
   -c "import acp; print(acp.__version__)"
 ```
 
@@ -219,7 +219,7 @@ solo work. `make check` passing locally means CI passes.
 
 ## Architecture decisions
 
-Fifty-seven decisions that required thought are recorded in
+Fifty-eight decisions that required thought are recorded in
 [`docs/decisions/`](docs/decisions/). The ones worth reading first are the ones
 where the measurement disagreed with the plan:
 

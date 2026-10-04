@@ -59,7 +59,7 @@ A policy-enforcing, injection-screening MCP gateway. One request path:
   hit, measured at concurrency 1 with the switch settings printed above the
   number. Millisecond figures are quoted as ranges because two runs of the same
   harness disagree about them by 40% and about the ratio by 5%.
-- **Four mutation harnesses, 16 mutations**, all in CI: they break the
+- **Four mutation harnesses, 18 deliberate breakages**, all in CI: they break the
   no-passthrough invariant, the result cache's isolation, the firewall's
   refusal bar and the pre-dispatch check on purpose, and fail the build if the
   tests do not notice.
@@ -82,14 +82,14 @@ Stated here rather than left to be discovered:
 
 ### Published
 
-- Container image: `ghcr.io/chandanaroyal719-bot/agent-control-plane:1.0.0`.
+- Container image: `ghcr.io/chandanaroyals/agent-control-plane:1.0.0`.
   Built without the mock upstreams and asserted to be, runs as uid 10001, and
   reads `config/` from a read-only mount so a compromised gateway cannot
   silence its own alarm.
 - 58 architecture decision records, indexed in
   [`docs/decisions/README.md`](docs/decisions/README.md).
-- 1893 tests, 94% coverage, `mypy --strict` clean.
+- 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/chandanaroyal719-bot/agent-control-plane/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/chandanaroyal719-bot/agent-control-plane/releases/tag/v1.0.0
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.0.0
 

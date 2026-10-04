@@ -1,6 +1,6 @@
 """One policy per tenant, and the selection rule that keeps them apart.
 
-Task 58. The load-bearing assertions are the negative ones: an unknown tenant
+The load-bearing assertions are the negative ones: an unknown tenant
 gets DENY_ALL and **not** the default, and a missing policy file refuses to
 start rather than silently denying. Both are cases where a plausible fallback
 exists and is the wrong answer — the default policy is some other tenant's
@@ -30,7 +30,7 @@ GATED = Policy(rules=(Rule(name="hold-it", effect=Effect.REQUIRE_APPROVAL),))
 
 
 def test_no_tenant_gets_the_default_policy() -> None:
-    """The single-tenant gateway: task 58 changes nothing for it."""
+    """The single-tenant gateway: tenancy changes nothing for it."""
     policies = PolicySet(default=ALLOW_SEARCH, tenants={"acme": ACME_ONLY})
     assert policies.policy_for(None) is ALLOW_SEARCH
 

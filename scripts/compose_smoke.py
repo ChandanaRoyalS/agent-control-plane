@@ -15,7 +15,7 @@ spans for it arrived in a separate container's trace backend, and that the same
 request without a credential is refused, is asserting that the system is
 assembled rather than merely running.
 
-Since task 26 the composed gateway authenticates, so the request path here needs
+The composed gateway authenticates, so the request path here needs
 a real token from the composed Keycloak. That is deliberate rather than
 incidental: it means this file cannot pass against a stack whose authentication
 is broken, which is the only way a smoke test stays honest as the system grows a

@@ -299,7 +299,7 @@ def test_on_retry_is_called_with_attempt_delay_and_cause() -> None:
     """The hook exists so retries are observable rather than silent.
 
     A retry nobody can see turns a degraded upstream into unexplained latency.
-    Task 15 wires this to structured logging and task 17 to a metric.
+    Structured logging and the metrics layer both consume it.
     """
     recorder = Recorder()
     observed: list[tuple[int, float, str]] = []

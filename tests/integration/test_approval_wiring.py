@@ -1,7 +1,8 @@
-"""Settings to approvals — the half of task 55 that keeps not existing.
+"""Settings to approvals — the half of the approvals feature that keeps not existing.
 
 `gateway_from_settings` has silently dropped new wiring five separate times
-(tasks 22, 29, 43, 46 and 47's own subject). Each time the feature was built,
+(identity, stored credentials, result caching, provenance framing and the
+firewall). Each time the feature was built,
 tested, merged, and did nothing in a real deployment, because the only thing
 that could have noticed was a test of the *assembly* rather than of the parts.
 

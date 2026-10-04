@@ -137,7 +137,7 @@ class GuardedUpstreamClient:
 
     @property
     def breaker(self) -> CircuitBreaker:
-        """Exposed for the health endpoint in task 18, which withdraws an
+        """Exposed for the health monitor in `acp.health`, which withdraws an
         upstream from the catalogue while its circuit is open."""
         return self._breaker
 

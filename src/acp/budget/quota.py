@@ -1,6 +1,6 @@
 """A fixed-window quota, per principal, with time injected.
 
-Rate limiting (task 38) bounds the *rate* — how fast a principal may call. A
+Rate limiting bounds the *rate* — how fast a principal may call. A
 quota bounds the *total* over a longer window — how many calls in an hour, a day.
 The two are complementary: a slow drip that never trips the rate limit can still
 run up unbounded spend over a day, and a quota is what stops it.

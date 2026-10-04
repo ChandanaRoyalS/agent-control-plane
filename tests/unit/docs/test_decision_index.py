@@ -1,4 +1,4 @@
-"""Every decision is in the index, and the index invents none — task 66.
+"""Every decision is in the index, and the index invents none.
 
 *"Every decision you had to think about, ten minutes each. The highest
 return-per-minute artifact in the repository when someone asks 'why that
@@ -8,7 +8,7 @@ Fifty-seven of them is past the point where a reader can find the right one by
 listing a directory, so there is an index. And **an index is a hand-maintained
 list, which is a list somebody forgets to extend** — the exact failure that
 shipped six times as an unwired control (ADR 0055) and once as fourteen broken
-links (task 65).
+links (see `test_links`).
 
 So this checks both directions. A new ADR that nobody indexed fails; an index
 entry pointing at a file that was renamed fails. The relative links themselves

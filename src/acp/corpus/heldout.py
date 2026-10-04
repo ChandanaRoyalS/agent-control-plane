@@ -145,7 +145,7 @@ def load_split(root: Path | None = None) -> Split:
 
 def load_development_attacks(root: Path | None = None) -> AttackCorpus:
     """The attacks a detector may be built and tuned against — the held-out split
-    removed. This is the loader task 51's tuning should call instead of
+    removed. This is the loader detector tuning should call instead of
     ``load_attacks``, so a detector cannot be shaped by a sealed document without
     someone deliberately reaching past this function to do it.
     """

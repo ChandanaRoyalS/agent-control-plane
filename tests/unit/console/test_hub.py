@@ -1,4 +1,4 @@
-"""The hub, and the one rule it exists to keep — task 63.
+"""The hub, and the one rule it exists to keep.
 
 **A watcher must not be able to affect the thing it is watching.** The console
 is a demo aid; the audit write is the gateway's central guarantee. Every test

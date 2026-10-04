@@ -1,6 +1,6 @@
 """The chain itself: what each link proves, and the one thing it cannot.
 
-Task 56. Every entry carries the hash of the entry before it, so changing any
+Every entry carries the hash of the entry before it, so changing any
 record invalidates every link after it. That is the whole mechanism, and it is
 worth being precise about what it buys, because "tamper-evident" is a word people
 use much more loosely than it deserves.
@@ -143,7 +143,7 @@ class Chain:
 
 
 # ---------------------------------------------------------------------------
-# Verification (task 57's engine — the CLI is a thin wrapper over this)
+# Verification (the engine behind `acp audit verify` — the CLI is a thin wrapper over this)
 # ---------------------------------------------------------------------------
 
 

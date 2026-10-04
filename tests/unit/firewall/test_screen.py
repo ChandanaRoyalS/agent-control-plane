@@ -130,7 +130,7 @@ def test_truncation_anywhere_taints_the_whole_result() -> None:
 
 
 def test_every_detector_is_registered_and_named() -> None:
-    """The same alarm task 31 put on the `Upstream` protocol, for the same
+    """The same alarm that sits on the `Upstream` protocol, for the same
     reason: a security layer's coverage should not be able to shrink without
     somebody noticing. Write a detector and forget to register it — or register
     one and forget to name it — and this fails.

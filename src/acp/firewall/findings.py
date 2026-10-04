@@ -11,8 +11,9 @@ Three fields carry the weight.
 **Family** is what makes the numbers mean anything. A single detection rate over
 a mixed corpus tells you nothing actionable: 80% could be excellent coverage of
 every family, or perfect coverage of the easy ones and nothing at all on
-encoding attacks. Task 49's corpus is sliced by family precisely so the result
-can be read, and a finding that does not name its family cannot be sliced.
+encoding attacks. The adversarial corpus is sliced by family precisely so the
+result can be read, and a finding that does not name its family cannot be
+sliced.
 
 **Confidence, not severity.** A deliberate word. Severity asks "how bad would
 this be", which is a question about the *tool being called* and belongs to the
@@ -44,7 +45,7 @@ payload — a log line is not a place to reproduce an attack in full."""
 
 
 class Family(StrEnum):
-    """The attack families the corpus is sliced by (task 49).
+    """The attack families the corpus is sliced by.
 
     Named here rather than in the corpus so that a detector and the examples
     that test it cannot drift into describing different things.
@@ -75,7 +76,7 @@ class Family(StrEnum):
     BOUNDARY_ESCAPE = "boundary_escape"
     """Text impersonating the framing around it — fake system turns, fake
     delimiters, fake end-of-document markers. Aimed at whatever wraps the
-    content, which from task 46 is this gateway's own provenance envelope."""
+    content, which here is this gateway's own provenance envelope."""
 
 
 class Confidence(StrEnum):
@@ -171,7 +172,7 @@ DETECTOR_NAMES: Final = (
 
 The screener asserts its own registry against this tuple, so a detector added
 without being registered — or registered without being named — fails a test
-rather than silently never running. The same alarm task 31 put on the `Upstream`
-protocol, for the same reason: a security layer's coverage should not be able to
+rather than silently never running. The same alarm the `Upstream` protocol
+carries, for the same reason: a security layer's coverage should not be able to
 shrink quietly.
 """

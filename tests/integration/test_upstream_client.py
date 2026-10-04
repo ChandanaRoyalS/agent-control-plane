@@ -245,7 +245,7 @@ def test_read_timeout_raises_timeout_error_and_is_recoverable() -> None:
 def test_timeout_is_distinguished_from_unavailable() -> None:
     """Both are transport failures, but they mean different things downstream.
 
-    The circuit breaker in task 14 should weight a refused connection
+    The circuit breaker should weight a refused connection
     differently from a slow response, which it cannot do if both arrive as the
     same exception type.
     """

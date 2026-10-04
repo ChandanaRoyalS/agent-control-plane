@@ -1,10 +1,10 @@
 """One policy per tenant, selected by an identity nothing downstream can forge.
 
-Task 58. The plan asks for "isolated policy, budgets and credentials per
-tenant", and this module is the policy third. The other two need no module:
-budgets and the result cache isolate by *widening their keys* with the tenant
+The requirement is "isolated policy, budgets and credentials per tenant", and
+this module is the policy third. The other two need no module: budgets and the
+result cache isolate by *widening their keys* with the tenant
 (`acp.budget.account`, `acp.results.cache.key_for`), and credentials were
-tenant-safe before the task existed — the exchange goes to each registration's
+tenant-safe before multi-tenancy existed — the exchange goes to each registration's
 own token endpoint and its cache keys on a digest of the subject token itself,
 which no two tenants can share.
 
@@ -21,7 +21,7 @@ to another tenant's rules:
 
 - ``tenant=None`` — a principal from a registration with no tenant label. Gets
   the default policy: the single-tenant gateway, behaving exactly as it did
-  before task 58 existed.
+  before multi-tenancy existed.
 - a known tenant — gets its own policy and nothing else.
 - an unknown tenant — gets ``DENY_ALL``. This "cannot happen" (tenants come
   from issuer registrations, and every registered tenant is required to have a

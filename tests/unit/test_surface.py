@@ -250,7 +250,7 @@ def test_a_changed_default_is_caught() -> None:
     A renamed variable at least fails loudly somewhere eventually. A default
     that quietly moves from `True` to `False` is a security control switching
     itself off with no error, no warning and a passing test suite — this
-    project's most repeated bug (lesson 46).
+    project's most repeated bug.
     """
     captured = _surface()
     current = copy.deepcopy(captured)

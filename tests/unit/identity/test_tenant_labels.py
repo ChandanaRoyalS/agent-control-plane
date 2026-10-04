@@ -1,4 +1,4 @@
-"""Tenant labels on issuer registrations — task 58's root of trust.
+"""Tenant labels on issuer registrations — tenancy's root of trust.
 
 The tenant is a property of the *registration*, never of a claim. Most of
 these are configuration tests — what a label may be, and that the same

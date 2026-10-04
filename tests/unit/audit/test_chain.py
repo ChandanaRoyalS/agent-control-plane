@@ -1,6 +1,6 @@
 """What the chain proves, and the two attacks it provably cannot see.
 
-Task 56. Every test here is an attack, because "tamper-evident" is only worth
+Every test here is an attack, because "tamper-evident" is only worth
 what an attempt at tampering costs — and the two that *pass* are the most
 important assertions in the file. A chain that detected everything would be a
 chain whose claims nobody had checked.

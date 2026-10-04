@@ -6,7 +6,7 @@ These tests exist because a page that drifts from those is worse than no page â€
 it is a claim that cannot be checked, attached to a project whose entire
 argument is that everything can be.
 
-The README has gone stale twice already (lesson 67) and nothing in CI noticed
+The README has gone stale twice already and nothing in CI noticed
 either time. This is the same failure mode with a wider blast radius, because
 the site is what a stranger sees first.
 """

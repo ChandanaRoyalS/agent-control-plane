@@ -13,7 +13,7 @@ request as a diff somebody has to look at.
 breaking; a person does, when they see `ACP_QUOTA_LIMIT` disappear from a
 review. What the snapshot removes is the case where nobody sees it at all —
 which is how a gateway ships a renamed environment variable, starts with the
-old default, and reports nothing (lesson 46, six instances and counting).
+old default, and reports nothing (six instances and counting).
 
 This is the wiring; the decisions are in `acp.surface`, which is pure and
 tested. This file exists because enumerating the CLI means importing the module

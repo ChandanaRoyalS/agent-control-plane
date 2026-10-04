@@ -1,4 +1,4 @@
-"""What reaches the browser, and whether it claims to be a record — task 63.
+"""What reaches the browser, and whether it claims to be a record.
 
 The distinction between `RECORDED` and `OBSERVED` is the one thing in this
 module a bug could make dishonest, so most of these are about that.

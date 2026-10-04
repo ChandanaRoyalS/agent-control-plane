@@ -86,7 +86,7 @@ def test_the_document_names_the_resource_and_its_authorization_servers() -> None
 
 def test_absent_things_are_absent_rather_than_empty() -> None:
     """``"scopes_supported": []`` is a claim — that this resource has no scopes.
-    Until Phase 3 defines them, saying nothing is the more accurate statement,
+    Until the gateway defines any, saying nothing is the more accurate statement,
     and a client that reads an empty array may reasonably stop asking."""
     document = protected_resource(RESOURCE).document()
 

@@ -1,9 +1,9 @@
 """Evaluate a request against a policy: allow or deny, and why.
 
-Task 33 is the evaluator — a pure function over a loaded policy (task 32) and the
-identity of a request. It decides; it does not enforce. Wiring this into the
-request path so a denied call is actually refused is task 34, and keeping the two
-apart means the decision logic is testable without a running gateway, the same
+This is the evaluator — a pure function over a loaded policy and the identity
+of a request. It decides; it does not enforce. Wiring this into the request path
+so a denied call is actually refused is ``acp.policy.enforce``, and keeping the
+two apart means the decision logic is testable without a running gateway, the same
 split identity used between building a Principal and trusting one.
 
 The rules, spelled out because everything downstream assumes them:
@@ -36,7 +36,7 @@ from acp.policy.schema import Effect, Policy, Rule
 class Verdict(StrEnum):
     """What a policy decided, in the three values it can now take.
 
-    Introduced with approvals (task 54, ADR 0048) because ``allowed: bool`` had
+    Introduced with approvals (ADR 0048) because ``allowed: bool`` had
     stopped being a complete answer, and every place that *reads* a decision —
     the audit log, the simulator, the catalogue filter — needs to say which of
     the three it saw rather than which side of a boolean.

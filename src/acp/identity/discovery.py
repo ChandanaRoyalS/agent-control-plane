@@ -59,7 +59,7 @@ which keys the gateway will trust. Loopback is exempt because traffic that never
 leaves the machine has no in-flight to be rewritten in.
 
 Note what this does *not* cover: one container talking to another. When Keycloak
-arrived in Compose (task 26) the issuer became ``http://keycloak:8080`` — not
+arrived in Compose the issuer became ``http://keycloak:8080`` — not
 loopback, not TLS, and refused by this rule. That is the rule working correctly,
 and the answer is ``insecure_hosts`` below rather than a wider default.
 """
@@ -94,7 +94,7 @@ class ProviderMetadata:
     jwks_uri: str
     source: str
     token_endpoint: str = ""
-    """Where to exchange a token (RFC 8693, task 27).
+    """Where to exchange a token (RFC 8693, see `acp.identity.exchange`).
 
     Empty when the server publishes none, which is not fatal here — a gateway
     that only validates tokens never needs it. It becomes fatal in

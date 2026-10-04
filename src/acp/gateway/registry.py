@@ -7,7 +7,7 @@ the results under qualified names (ADR 0003). One upstream failing does not fail
 the whole catalogue — the failures come back alongside the tools and the caller
 decides what to do. A gateway that goes dark because one of five upstreams is
 down is worse than one serving the other four, and that is the same principle
-health-driven withdrawal (task 18) will build on.
+health-driven withdrawal will build on.
 
 **Routing.** ``call_tool`` takes a qualified name and finds the upstream and the
 real tool name. The upstream half is always exact. The tool half is exact too
@@ -112,9 +112,9 @@ class UpstreamRegistry:
 
     def __init__(self, clients: Iterable[Upstream], health: HealthMonitor | None = None) -> None:
         self._clients: dict[str, Upstream] = {c.config.name: c for c in clients}
-        # Optional on purpose. Without a monitor every upstream is attempted,
-        # which is exactly the behaviour before task 18 — so a registry built
-        # by a test, or by `build_app` directly, is unaffected.
+        # Optional on purpose. Without a monitor every upstream is attempted —
+        # so a registry built by a test, or by `build_app` directly, is
+        # unaffected.
         self._health = health
         # qualified name -> real tool name, populated as catalogues are read.
         # Only ever consulted for names that may have been truncated.

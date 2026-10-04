@@ -1,7 +1,7 @@
-"""`acp audit verify` and `acp audit checkpoint` — task 57.
+"""`acp audit verify` and `acp audit checkpoint`.
 
 **An audit log nobody can verify is just an expensive log**, which is the whole
-justification for this task existing as its own line in the plan. The chain is
+justification for these commands existing at all. The chain is
 worth exactly as much as the ease of checking it: a verification that requires
 writing a script is one that happens after an incident, and the point of
 tamper-evidence is to notice *before* anybody is looking for a reason to.

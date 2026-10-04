@@ -1,4 +1,4 @@
-"""The admin surface: metrics now, health checks in task 18.
+"""The admin surface: metrics, health and readiness, on their own listener.
 
 **On a separate port from the gateway itself.** That is the whole reason this is
 its own module rather than two more routes on the MCP app.
@@ -16,7 +16,7 @@ elsewhere becomes a deliberate act of configuration, which is the direction a
 security control should fail in.
 
 The cost is a second server in the process. It is about ten lines in
-``runtime``, and task 18's health endpoints land here for free.
+``runtime``, and the health endpoints land here for free.
 """
 
 from __future__ import annotations
@@ -62,8 +62,8 @@ async def _healthz(_request: Request) -> Response:
     Deliberately *not* a readiness check and deliberately not a report on the
     upstreams. A liveness probe that fails when a dependency is unhealthy gets
     the container restarted for someone else's outage — which turns one broken
-    upstream into a crash loop. Task 18 adds a real readiness endpoint that
-    reports upstream health without conflating the two.
+    upstream into a crash loop. ``/readyz`` below is the readiness endpoint,
+    and it reports upstream health without conflating the two.
     """
     return PlainTextResponse(f"ok {__version__}\n")
 
@@ -106,7 +106,7 @@ def build_readyz(health: HealthMonitor | None) -> Any:
 
 
 def build_schemas(detector: DriftDetector | None) -> Any:
-    """Current distance from the committed schema baseline (task 20).
+    """Current distance from the committed schema baseline.
 
     Always 200, including when there is drift. Drift is not an outage and must
     not read as one: a catalogue that changed is a thing for a human to look at,
@@ -142,7 +142,7 @@ def build_admin_app(
 ) -> Starlette:
     """The admin ASGI app. Small on purpose — it must not be able to fail.
 
-    The approval channel (task 55) is mounted here rather than on the gateway,
+    The approval channel is mounted here rather than on the gateway,
     and that placement is the security property: the agent addresses `:8080` and
     a person decides on `:9090`, so an agent cannot approve its own call because
     it cannot reach the thing that approves calls. See `acp.approvals.operator`.
@@ -164,7 +164,7 @@ def build_admin_app(
             Route(READY_PATH, build_readyz(health), methods=["GET"]),
             Route(SCHEMAS_PATH, build_schemas(drift), methods=["GET"]),
             *operator_routes(approvals, operator_credential, audit),
-            # Here for the same reason the approval channel is (task 63): this
+            # Here for the same reason the approval channel is: this
             # stream carries every principal's activity, so an agent that could
             # open it would read what every other caller is doing. It shares the
             # operator credential because it is the same trust boundary — a

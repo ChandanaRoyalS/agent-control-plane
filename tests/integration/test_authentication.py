@@ -86,7 +86,7 @@ def validator_for(keypair: Keypair, provider_status: int = 200) -> TokenValidato
         "https://idp.test/jwks",
         client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
     )
-    # A registry of one. Cross-issuer isolation is task 23's subject and lives
+    # A registry of one. Cross-issuer isolation is the issuer registry's subject and lives
     # in `tests/unit/identity/test_issuers.py`; what these tests are about is
     # what the *outside* of the gateway sees.
     return TokenValidator(
@@ -221,8 +221,8 @@ def test_a_broken_identity_provider_is_503_not_401(keypair: Keypair) -> None:
 
 
 def test_with_no_provider_configured_requests_pass_through_anonymously() -> None:
-    """How every task before this one behaved. It has to keep working, or the
-    gateway could not run at all until Phase 2 finishes."""
+    """How the gateway behaved before identity existed. It has to keep working, or
+    a gateway without an identity provider could not run at all."""
     body = get(build(None)).json()
 
     assert body == {"authenticated": False}
@@ -235,7 +235,7 @@ def emitted_lines(app: Starlette, headers: dict[str, str] | None = None) -> list
     captured record afterwards. The filter reads contextvars *at emit time*, in
     the task that logged the line — by the time a test looks at a stored record
     that context is gone, so a test that reached for it later would pass against
-    a pipeline wired the wrong way round. Exactly the shape of bug 14.
+    a pipeline wired the wrong way round. Exactly the shape of an earlier logging bug.
     """
     lines: list[str] = []
 
@@ -300,7 +300,7 @@ def test_the_inbound_token_is_not_reachable_from_the_principal(keypair: Keypair)
     """Stated as a test rather than as a comment, before there is any code that
     could violate it: **no inbound token is ever forwarded upstream.**
 
-    Task 25 mints a separate, narrowly scoped credential per upstream. The way
+    The gateway mints a separate, narrowly scoped credential per upstream. The way
     that guarantee gets quietly broken is somebody stashing the raw token on the
     principal "just in case" and a later layer helpfully passing it along — so
     the principal simply does not carry it, and this asserts as much.
@@ -333,7 +333,7 @@ def test_the_context_is_not_left_bound_between_requests(keypair: Keypair) -> Non
 
 
 # ---------------------------------------------------------------------------
-# Protected resource metadata — RFC 9728, task 24
+# Protected resource metadata — RFC 9728
 # ---------------------------------------------------------------------------
 
 RESOURCE = "https://gw.corp.test/mcp"
@@ -403,7 +403,8 @@ def test_an_invalid_token_gets_both_parameters(keypair: Keypair) -> None:
 
 
 def test_without_a_document_the_challenge_names_no_url(keypair: Keypair) -> None:
-    """Unchanged from task 22, and deliberately so. A challenge pointing at a
+    """Unchanged from the original token validation, and deliberately so. A challenge
+    pointing at a
     URL that answers 404 is worse than one pointing at nothing, because it
     sends the client down a discovery path that ends nowhere."""
     response = get(build(validator_for(keypair)))

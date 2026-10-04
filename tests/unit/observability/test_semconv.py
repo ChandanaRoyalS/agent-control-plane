@@ -164,7 +164,7 @@ def test_a_failure_with_no_protocol_code_omits_it() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Naming an outbound span so a fan-out can be read (task 21)
+# Naming an outbound span so a fan-out can be read
 # ---------------------------------------------------------------------------
 
 

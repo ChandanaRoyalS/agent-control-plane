@@ -1,6 +1,6 @@
 """The release: one version string, one changelog, and both agreeing.
 
-Task 67. A version lives in two files because packaging needs it in
+A version lives in two files because packaging needs it in
 `pyproject.toml` and the code needs it importable, and two sources of truth for
 one fact is a disagreement waiting for a release. So they are checked against
 each other, and both against the changelog.

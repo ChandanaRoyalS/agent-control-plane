@@ -60,7 +60,7 @@ def canonical_json(value: Any) -> str:
     themselves. That last choice matters: a zero-width joiner or a
     right-to-left override smuggled into a description is part of the string
     and must be part of the digest. Detecting such characters *as* an attack is
-    task 45's job — this layer only has to be unable to miss them.
+    the firewall detectors' job — this layer only has to be unable to miss them.
     """
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 

@@ -1,8 +1,8 @@
 """Holding an exchanged credential, and the one line that decides whether that is safe.
 
-Task 27 minted a credential per call and cached nothing, with a test asserting
-it. This is that test changing — deliberately, with the key argued over, rather
-than a behaviour nobody noticed.
+Token exchange originally minted a credential per call and cached nothing, with a
+test asserting it. This is that test changing — deliberately, with the key argued
+over, rather than a behaviour nobody noticed.
 
 **The key is the whole task.** Everything else here is a dictionary with a size
 limit. Get the key wrong and this is a privilege escalation with excellent p99:
@@ -27,7 +27,7 @@ the subject token's own scopes, by a claim nobody here has heard of. A key
 derived from the request cannot be wrong about any of them, because it does not
 guess.
 
-**A digest, never the token.** Task 27's invariant is that the inbound token
+**A digest, never the token.** The exchange invariant is that the inbound token
 exists in one place with one reader. Using it as a dictionary key would put it
 in a second, and a cache is a structure whose whole purpose is to outlive the
 request. SHA-256 of it is not a credential and cannot be replayed.
@@ -100,7 +100,7 @@ class CredentialCache:
 
     Bounded and least-recently-used. **Single-flight**: concurrent misses for the
     same key produce one exchange, not one each — the same defect the JWKS cache
-    shipped with in task 22, where twenty concurrent misses produced twenty-one
+    originally shipped with, where twenty concurrent misses produced twenty-one
     fetches. Here the consequence is worse than wasted work: a burst of calls
     from one agent would turn into a burst of token requests, and an
     authorization server that rate-limits the gateway takes the whole estate

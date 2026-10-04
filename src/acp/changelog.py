@@ -1,6 +1,6 @@
 """Reading `CHANGELOG.md` as data.
 
-Task 67. The release workflow needs one release's notes to put in a GitHub
+The release workflow needs one release's notes to put in a GitHub
 release, and the test suite needs to check that the file agrees with
 `acp.__version__`. Both are parsing, both are easy to get subtly wrong, and
 neither should be a shell pipeline inside a YAML file where it cannot be tested.

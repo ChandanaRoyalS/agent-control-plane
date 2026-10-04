@@ -91,7 +91,7 @@ def test_first_match_wins_through_enforcement() -> None:
     enforce_call(policy, _principal(), "mock-a__search")  # does not raise
 
 
-# --- argument-level enforcement (task 37) ---
+# --- argument-level enforcement ---
 
 
 def test_enforce_denies_when_an_argument_is_not_allowed() -> None:

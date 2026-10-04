@@ -16,7 +16,7 @@ def test_an_unlisted_tool_costs_the_default() -> None:
 
 
 def test_the_default_default_is_one() -> None:
-    """An empty table charges one per call — exactly task 38's behaviour, so
+    """An empty table charges one per call — exactly the uncosted behaviour, so
     turning cost accounting on with no costs configured changes nothing."""
     assert CostTable().cost_of("anything") == 1.0
 

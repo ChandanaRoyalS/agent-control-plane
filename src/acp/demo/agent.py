@@ -1,4 +1,4 @@
-"""An agent credulous enough to be worth defending — task 64.
+"""An agent credulous enough to be worth defending.
 
 *"Same agent twice: direct, it reads a poisoned document and exfiltrates;
 through the gateway, it is stripped, denied and logged."*

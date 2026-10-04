@@ -61,7 +61,7 @@ def test_limits_are_per_principal() -> None:
         enforce_rate_limit(limiter, "alice", T0)
 
 
-# --- cost-weighted enforcement (task 39) ---
+# --- cost-weighted enforcement ---
 
 
 def test_a_costly_call_debits_more_than_one() -> None:
@@ -81,7 +81,7 @@ def test_a_free_call_never_exhausts_the_budget() -> None:
 
 
 def test_the_default_cost_is_one() -> None:
-    """Called without a cost, enforcement charges one — task 38 behaviour."""
+    """Called without a cost, enforcement charges one — the uncosted behaviour."""
     limiter = RateLimiter(capacity=1, refill_per_second=0.0)
     enforce_rate_limit(limiter, "alice", T0)
     with pytest.raises(RateLimitExceededError):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The same agent twice: once alone, once behind the gateway — task 64.
+"""The same agent twice: once alone, once behind the gateway.
 
     make up
     make attack-demo
@@ -78,7 +78,8 @@ def firewall_mode() -> str:
     """What the *running* gateway was told, not what the compose file says.
 
     The two disagree the moment anybody sets the variable on the command line,
-    which `make attack-demo-enforce` does. Task 62 learned this the expensive
+    which `make attack-demo-enforce` does. The overhead measurement learned this the
+    expensive
     way and the reasoning is in ADR 0054; `parse_env` is that module's tested
     parser, reused rather than written a second time.
     """

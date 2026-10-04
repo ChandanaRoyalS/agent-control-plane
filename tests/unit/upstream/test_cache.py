@@ -4,7 +4,8 @@ Most of these are about the two rules that are not performance decisions.
 
 A ``private`` response is one the upstream computed for a particular caller.
 Holding it in a cache shared between callers would serve one principal the tool
-list belonging to another — the exact failure task 44 exists to prevent, arriving
+list belonging to another — the exact failure the result cache's principal key
+exists to prevent, arriving
 early and quietly. The MCP SDK's own client cache states the rule outright: only
 ``public`` entries may be shared across authorization contexts.
 
@@ -90,8 +91,8 @@ def cached(
 def test_a_private_catalogue_is_never_cached() -> None:
     """`private` means the upstream computed this for a particular caller.
 
-    This gateway has one shared cache and, until task 22, no notion of who is
-    asking — so there is exactly one safe thing to do with a private response,
+    This layer has one shared cache and no notion of who is asking — so there
+    is exactly one safe thing to do with a private response,
     and it is nothing.
     """
     up = FakeUpstream(catalogue(ttl_ms=60_000, scope="private"))
@@ -214,7 +215,7 @@ def test_a_failure_is_not_served_from_a_stale_entry() -> None:
     """No stale-on-error, deliberately.
 
     Serving a dead upstream's old catalogue would have the agent calling tools
-    that cannot work — exactly what task 18's withdrawal exists to prevent. A
+    that cannot work — exactly what health-based withdrawal exists to prevent. A
     cache entry is a claim about freshness, not a consolation prize.
     """
     clock = FakeClock()
@@ -261,7 +262,7 @@ def test_invalidate_reaches_the_layers_below() -> None:
 def test_a_tool_call_is_never_cached() -> None:
     """A tool call is an action with effects. A cache returning yesterday's
     answer to `create_ticket` is a bug with consequences, not a stale read.
-    Result caching for genuinely idempotent tools is task 43, and it needs the
+    Result caching for genuinely idempotent tools is `acp.results`, and it needs the
     per-principal key this layer deliberately does not have."""
     up = FakeUpstream(catalogue())
     client = cached(up)

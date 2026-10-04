@@ -16,7 +16,8 @@ has been compromised — is about the actor.
 for exactly this: a token whose ``sub`` is the user and whose ``act`` names the
 party acting on their behalf, nestable into a chain when a request passes
 through several. Using the standard claim rather than a bespoke one is what will
-let the token exchange in task 25 produce credentials another system can read.
+let the token exchange in `acp.identity.exchange` produce credentials another
+system can read.
 
 **Unauthenticated is ``None``, not a special Principal.** An "anonymous
 principal" object is a thing that looks like a principal to every caller that
@@ -80,7 +81,7 @@ class Principal:
     scopes: frozenset[str] = field(default_factory=frozenset)
     expires_at: int | None = None
     tenant: str | None = None
-    """Which tenant this principal belongs to (task 58).
+    """Which tenant this principal belongs to.
 
     Stamped by the validator from the *registration* that verified the token —
     never from a claim. A field here rather than a lookup at each use site,
@@ -242,13 +243,13 @@ _subject_token: ContextVar[str | None] = ContextVar("acp_subject_token", default
 """The raw inbound token, held apart from the principal on purpose.
 
 ``Principal`` deliberately carries no token, so that nothing holding an identity
-can accidentally forward a credential. Task 27 needs the token anyway: RFC 8693
+can accidentally forward a credential. Token exchange needs it anyway: RFC 8693
 token exchange presents it as the ``subject_token`` — to the **authorization
 server**, which issued it, and never to an upstream.
 
 Rather than weaken the principal, the token lives in its own variable with its
 own name, and exactly one component reads it: ``acp.identity.exchange``. That
-makes the invariant task 31 has to prove a statement about one call site rather
+makes the no-passthrough invariant the tests prove a statement about one call site rather
 than about a data structure that gets passed everywhere:
 
     the value in this variable is sent to the token endpoint of the issuer that

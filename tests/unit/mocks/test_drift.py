@@ -37,7 +37,7 @@ def test_the_default_is_no_drift(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_the_rug_pull_changes_the_description_and_nothing_else() -> None:
     """Same name, same arguments, same handler, same successful responses. The
     only difference is a sentence of prose that goes straight into the agent's
-    prompt — which is exactly why nothing in tasks 13 to 18 can detect it."""
+    prompt — which is exactly why nothing below the schema layer can detect it."""
     before = definitions()[0]
     after = apply_drift(definitions(), DriftFlavour.DESCRIPTION)[0]
 

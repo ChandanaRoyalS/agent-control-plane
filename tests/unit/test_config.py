@@ -169,7 +169,7 @@ def test_environment_overrides_defaults(monkeypatch: pytest.MonkeyPatch) -> None
 def test_allowed_hosts_can_be_set_from_the_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Required for any deployment behind a real hostname — see task 9."""
+    """Required for any deployment behind a real hostname."""
     monkeypatch.setenv("ACP_ALLOWED_HOSTS", '["gateway.internal", "localhost"]')
 
     settings = GatewaySettings(_env_file=None)  # type: ignore[call-arg]
@@ -222,7 +222,7 @@ def test_expansion_is_idempotent_in_effect() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Identity settings (task 22, ADR 0015)
+# Identity settings (ADR 0015)
 # ---------------------------------------------------------------------------
 
 IDENTITY = {
@@ -236,8 +236,8 @@ def settings(**overrides: Any) -> GatewaySettings:
 
 
 def test_no_identity_settings_means_unauthenticated() -> None:
-    """How every task before task 22 ran. It has to keep working, or the
-    gateway could not start at all until Phase 2 finishes."""
+    """How the gateway ran before identity existed. It has to keep working, or a
+    gateway without an identity provider could not start at all."""
     assert settings().authentication_configured is False
 
 
@@ -295,7 +295,7 @@ def test_a_global_jwks_url_alongside_an_issuers_file_is_refused() -> None:
 
 def test_the_default_is_to_insist_on_an_identity_provider() -> None:
     """The polarity is the point, and it is the opposite of the boolean this
-    module spent task 22 arguing against.
+    module originally argued against.
 
     `ACP_AUTH_ENABLED=false` would fail *open* when forgotten: a gateway serving
     everything while its config claimed otherwise. This fails *closed*. It does

@@ -1,7 +1,7 @@
 # Architecture
 
 How the system behaves. **[`decisions/`](decisions/README.md) is why it behaves
-that way** — 57 of them, indexed and grouped.
+that way** — 58 of them, indexed and grouped.
 
 Start with the request path below. It is nine stages, and two of their positions
 in that order are load-bearing enough that moving them would be a vulnerability
@@ -327,7 +327,7 @@ pull request. See [ADR 0023](decisions/0023-prove-the-invariant-and-prove-the-pr
 
 Everything above assumes an upstream can take part in RFC 8693. Plenty cannot —
 an API key issued out of band, an appliance that will never learn OAuth — and
-until task 29 those could not be configured at all, because `audience` is
+without a static credential path those could not be configured at all, because `audience` is
 mandatory once exchange is on.
 
 ```bash

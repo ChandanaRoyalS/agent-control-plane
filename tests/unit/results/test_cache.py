@@ -134,7 +134,7 @@ def test_a_short_key_is_safe_to_log() -> None:
 def test_the_key_is_versioned() -> None:
     """So the encoding can change without an entry written under the old scheme
     being read under the new one — the one failure a cache must never have."""
-    # v2: the tenant joined the key (task 58). This assertion exists so a
+    # v2: the tenant joined the key. This assertion exists so a
     # version change is always a deliberate edit here too — two files agreeing
     # is the point, not a redundancy.
     assert KEY_VERSION == "acp-result-v2"
@@ -323,7 +323,7 @@ def test_a_negative_ttl_stores_nothing(ttl: float) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tenancy (task 58): the key change that motivated KEY_VERSION v2
+# Tenancy: the key change that motivated KEY_VERSION v2
 # ---------------------------------------------------------------------------
 
 

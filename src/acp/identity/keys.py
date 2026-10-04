@@ -196,6 +196,13 @@ def _parse(document: dict[str, Any], url: str) -> dict[str, Any]:
 
     keys: dict[str, Any] = {}
     for index, jwk in enumerate(key_set.keys):
+        if jwk.public_key_use not in (None, "sig"):
+            # RFC 7517 §4.2: a key marked `enc` is for encryption, and a key set
+            # commonly carries one beside the signing keys. It must never be
+            # offered to `jwt.decode` as something a signature may verify
+            # against. Absent `use` is allowed — many providers omit it.
+            logger.debug("jwks.key_skipped", extra={"url": url, "kid": jwk.key_id, "use": "enc"})
+            continue
         try:
             keys[jwk.key_id or f"__unnamed_{index}"] = jwk.key
         except jwt.PyJWKError:  # pragma: no cover - one bad key must not poison the set

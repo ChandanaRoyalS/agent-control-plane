@@ -260,3 +260,20 @@ def test_the_error_does_not_disclose_which_keys_exist(keypair: Keypair) -> None:
         run(lambda: keys.key_for("who-knows"))
 
     assert keypair.kid not in str(caught.value.to_jsonrpc_error())
+
+
+def test_an_encryption_key_is_never_offered_for_signature_verification(keypair: Keypair) -> None:
+    """RFC 7517 §4.2: `use: enc` is for encryption. A key set commonly carries
+    one beside the signing keys, and it must not become something a signature
+    may verify against."""
+    signing = keypair.jwks()["keys"][0]
+    encryption = {**Keypair(kid="enc-key").jwks()["keys"][0], "use": "enc"}
+    provider = Provider({"keys": [signing, encryption]})
+    jwks = cache(provider)
+
+    async def _run() -> None:
+        assert await jwks.key_for(signing["kid"]) is not None
+        with pytest.raises(AuthenticationError):
+            await jwks.key_for("enc-key")
+
+    anyio.run(_run)

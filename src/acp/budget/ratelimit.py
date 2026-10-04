@@ -13,7 +13,16 @@ a real monotonic clock at the one call site; the logic here never depends on it.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
+from typing import Final
+
+DEFAULT_MAX_PRINCIPALS: Final = 10_000
+"""Distinct principals a limiter remembers before forgetting the least recent.
+
+Ten thousand buckets is under a megabyte. The number is a ceiling on memory an
+authenticated caller can make the gateway hold, not a sizing estimate.
+"""
 
 
 @dataclass
@@ -54,11 +63,21 @@ class TokenBucket:
         Returns ``True`` and debits the bucket when there are enough tokens,
         ``False`` and leaves it untouched otherwise.
         """
+        if not self.affords(now, cost):
+            return False
+        self.tokens -= cost
+        return True
+
+    def affords(self, now: float, cost: float = 1.0) -> bool:
+        """Refill to ``now`` and say whether ``cost`` could be spent — without
+        spending it.
+
+        The half of `take` that lets two budgets be checked before either is
+        debited (ADR 0044 §3): a call refused by the quota must not have spent
+        its rate-limit tokens on the way to being refused.
+        """
         self._refill(now)
-        if self.tokens >= cost:
-            self.tokens -= cost
-            return True
-        return False
+        return self.tokens >= cost
 
     def retry_after(self, cost: float = 1.0) -> float:
         """Seconds until the bucket would hold ``cost`` tokens, at the refill rate.
@@ -106,10 +125,16 @@ class RateLimiter:
     something the concept needs to be demonstrated.
     """
 
-    def __init__(self, capacity: float, refill_per_second: float) -> None:
+    def __init__(
+        self,
+        capacity: float,
+        refill_per_second: float,
+        max_principals: int = DEFAULT_MAX_PRINCIPALS,
+    ) -> None:
         self._capacity = capacity
         self._refill_per_second = refill_per_second
-        self._buckets: dict[str, TokenBucket] = {}
+        self._max_principals = max_principals
+        self._buckets: OrderedDict[str, TokenBucket] = OrderedDict()
 
     @property
     def capacity(self) -> float:
@@ -123,10 +148,25 @@ class RateLimiter:
         return self._capacity
 
     def _bucket(self, principal: str) -> TokenBucket:
+        """``principal``'s bucket, created full on first sight — and bounded.
+
+        **Bounded, because an authenticated caller chooses the keys.** The
+        subject space is whatever the identity provider mints, and a tenant's
+        IdP issuing short-lived per-session subjects would grow this dict
+        without limit. The result cache is bounded for exactly this reason; the
+        budgets were not. Least-recently-charged is evicted. An evicted
+        principal who returns gets a fresh, full bucket — a burst allowance,
+        not an escalation, and only after `max_principals` *others* have been
+        charged since they last were.
+        """
         bucket = self._buckets.get(principal)
         if bucket is None:
             bucket = TokenBucket(capacity=self._capacity, refill_per_second=self._refill_per_second)
             self._buckets[principal] = bucket
+            while len(self._buckets) > self._max_principals:
+                self._buckets.popitem(last=False)
+        else:
+            self._buckets.move_to_end(principal)
         return bucket
 
     def check(self, principal: str, now: float, cost: float = 1.0) -> bool:
@@ -137,9 +177,18 @@ class RateLimiter:
         """
         return self._bucket(principal).take(now, cost)
 
+    def affords(self, principal: str, now: float, cost: float = 1.0) -> bool:
+        """Whether ``check`` would succeed, without debiting."""
+        return self._bucket(principal).affords(now, cost)
+
     def retry_after(self, principal: str, cost: float = 1.0) -> float:
-        """How long ``principal`` should wait before retrying, in seconds."""
-        return self._bucket(principal).retry_after(cost)
+        """How long ``principal`` should wait before retrying, in seconds.
+
+        A principal never seen has a full bucket and owes nothing; asking does
+        not create state for them.
+        """
+        bucket = self._buckets.get(principal)
+        return 0.0 if bucket is None else bucket.retry_after(cost)
 
     def remaining(self, principal: str) -> float:
         """How much of ``principal``'s budget is available right now.
@@ -148,4 +197,5 @@ class RateLimiter:
         same question with the same word — a refused caller should not have to
         know which of the two stopped them to read the answer.
         """
-        return self._bucket(principal).remaining()
+        bucket = self._buckets.get(principal)
+        return self._capacity if bucket is None else bucket.remaining()

@@ -16,7 +16,7 @@ import httpx
 import pytest
 from starlette.applications import Starlette
 
-from acp.budget import QuotaCounter
+from acp.budget import QuotaCounter, RateLimiter, account
 from acp.gateway import UpstreamRegistry, build_app
 from acp.identity import AuthenticationMiddleware
 from acp.identity.issuers import single_issuer
@@ -126,3 +126,61 @@ def test_the_quota_is_not_shared_between_callers(keypair: Keypair) -> None:
     bob = keypair.sign(claims(sub="bob@example.test"))
     assert _call_codes(quota, keypair, alice, 2)[1] == QUOTA_CODE
     assert _call_codes(quota, keypair, bob, 1)[0] != QUOTA_CODE
+
+
+# ---------------------------------------------------------------------------
+# Check both, then debit both
+# ---------------------------------------------------------------------------
+
+
+def test_a_call_the_quota_refuses_does_not_spend_rate_limit_tokens(keypair: Keypair) -> None:
+    """ADR 0044 §3 says check-both-then-debit-both; the code debited the
+    bucket and then asked the quota, so a caller at their quota ceiling was
+    also drained of burst allowance for calls that never ran."""
+    quota = QuotaCounter(limit=1, window_seconds=86400.0)
+    limiter = RateLimiter(capacity=10, refill_per_second=0)
+    token = keypair.sign(claims())
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "mock-a__search", "arguments": {"query": "x"}},
+    }
+
+    async def _run() -> list[int | None]:
+        clients = [
+            UpstreamClient(
+                UpstreamConfig(name="mock-a", url="http://mock/mcp"),
+                httpx.AsyncClient(transport=httpx.ASGITransport(app=mock_a.app)),
+            )
+        ]
+        app: Starlette = build_app(
+            UpstreamRegistry(clients),
+            validator=_validator(keypair),
+            quota=quota,
+            limiter=limiter,
+        )
+        app.add_middleware(AuthenticationMiddleware, validator=_validator(keypair))
+        codes: list[int | None] = []
+        async with contextlib.AsyncExitStack() as stack:
+            await stack.enter_async_context(clients[0])
+            await stack.enter_async_context(app.router.lifespan_context(app))
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as agent:
+                for _ in range(4):
+                    resp = await agent.post(
+                        "/mcp",
+                        json=body,
+                        headers={**MCP_HEADERS, "authorization": f"Bearer {token}"},
+                    )
+                    parsed = _parse(resp)
+                    codes.append(parsed["error"]["code"] if "error" in parsed else None)
+        return codes
+
+    codes = anyio.run(_run)
+
+    assert codes[0] is None, "the first call is within both budgets"
+    assert codes[1:] == [QUOTA_CODE] * 3, "every later call is refused by the quota"
+    # One call ran, so exactly one token was spent. Before the fix this read 6:
+    # each refused call had debited the bucket on its way to the refusal.
+    assert limiter.remaining(account(None, "alice@example.test")) == 9

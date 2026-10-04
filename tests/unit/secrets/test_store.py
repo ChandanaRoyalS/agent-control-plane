@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import stat
 from pathlib import Path
 
@@ -69,14 +70,19 @@ def test_the_file_leaks_no_inventory(tmp_path: Path) -> None:
     assert b"hr-database" not in raw
 
 
-def test_a_missing_secret_names_what_is_there(tmp_path: Path) -> None:
-    """Safe to print and the only thing that makes the message useful — a typo
-    found in one reading rather than one bisection."""
+def test_a_missing_secret_names_only_itself(tmp_path: Path) -> None:
+    """The first version listed the store's contents in the error — "it holds
+    mock-a-key, mock-b-key" — which is the inventory the one-ciphertext design
+    exists to keep out of a log. The message names the missing one and a count;
+    `acp secrets list` is the authenticated way to read the names."""
     key_path, secrets_path, _ = store_at(tmp_path, {"mock-a-key": "x", "mock-b-key": "y"})
     store = EncryptedFileStore.open(secrets_path, read_key(key_path))
 
-    with pytest.raises(SecretNotFoundError, match="mock-a-key, mock-b-key"):
+    with pytest.raises(SecretNotFoundError, match="mock-c-key") as exc_info:
         anyio.run(store.get, "mock-c-key")
+    assert "2 secret" in str(exc_info.value)
+    assert "mock-a-key" not in str(exc_info.value)
+    assert "mock-b-key" not in str(exc_info.value)
 
 
 def test_names_are_listable_and_values_are_not(tmp_path: Path) -> None:
@@ -197,3 +203,24 @@ def test_an_empty_store_says_no_store_is_configured() -> None:
 
 def test_an_empty_store_lists_nothing_rather_than_failing() -> None:
     assert EmptyStore().names() == []
+
+
+def test_loading_logs_a_count_and_never_the_inventory(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The one-ciphertext design keeps the names out of the file; the startup
+    log then published them at INFO on every boot, to wherever logs go."""
+    key_path, secrets_path, _ = store_at(tmp_path, {"stripe-live-key": "x", "crm-api-key": "y"})
+
+    with caplog.at_level(logging.INFO, logger="acp.secrets.encrypted"):
+        EncryptedFileStore.open(secrets_path, read_key(key_path))
+
+    loaded = [r for r in caplog.records if r.getMessage() == "secrets.loaded"]
+    assert loaded, "the store announces that it loaded"
+    assert getattr(loaded[0], "count", None) == 2
+    # The structured formatter emits every `extra` field, so the check is on
+    # the record's attributes rather than on the rendered message.
+    for record in caplog.records:
+        if record.levelno >= logging.INFO:
+            assert not hasattr(record, "names"), "the inventory must not be at INFO or above"
+            assert "stripe-live-key" not in repr(vars(record))

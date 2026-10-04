@@ -246,3 +246,17 @@ def test_concurrent_use_of_one_lock_serialises() -> None:
         ["a-in", "a-out", "b-in", "b-out"],
         ["b-in", "b-out", "a-in", "a-out"],
     ), f"the two overlapped: {order}"
+
+
+def test_an_expired_entrys_lock_is_released_with_it() -> None:
+    """Locks were released only on LRU eviction, so a gateway that saw many
+    distinct subject tokens — a multi-tenant IdP with short-lived tokens —
+    accumulated one `anyio.Lock` per token it had ever seen, forever."""
+    cache = CredentialCache()
+    cache.put(key(), token(expires_at=0.0))
+    cache.lock_for(key())
+    assert len(cache._locks) == 1
+
+    assert cache.get(key()) is None
+
+    assert len(cache._locks) == 0

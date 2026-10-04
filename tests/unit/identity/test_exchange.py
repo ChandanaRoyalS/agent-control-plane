@@ -487,3 +487,20 @@ def test_a_credential_with_no_audience_at_all_is_refused() -> None:
 
     with pytest.raises(CredentialExchangeError, match="not for"):
         exchange_with_peers(server, PEERS)
+
+
+def test_startup_refuses_a_plaintext_token_endpoint() -> None:
+    """The exchange POSTs the client secret and the caller's token to this URL.
+    The https rule applied to the issuer and the key set and not here — the
+    same control on two of the three paths into one decision."""
+    with pytest.raises(ConfigurationError, match="must use https"):
+        require_token_endpoints(registry(token_endpoint="http://idp.corp.test/token"))
+
+
+def test_an_exempt_host_may_keep_a_plaintext_token_endpoint() -> None:
+    """The compose stack's Keycloak is `http://keycloak:8080`, named in
+    ACP_AUTH_INSECURE_ISSUER_HOSTS — the same exemption, logged at every start."""
+    require_token_endpoints(
+        registry(token_endpoint="http://keycloak:8080/realms/acp/token"),
+        insecure_hosts=("keycloak",),
+    )

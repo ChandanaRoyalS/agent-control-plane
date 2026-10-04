@@ -496,7 +496,9 @@ class GatewaySettings(BaseSettings):
     at boot — rather than from somewhere a person edits. The store's honest
     claim is that it turned many secrets into one; this is the one.
 
-    Refused at startup if readable beyond its owner.
+    Refused at startup if readable beyond its owner — so a Kubernetes or Docker
+    secret mount needs its mode set (`defaultMode: 0400` / `mode: 0400`); both
+    default to a readable file.
     """
 
     auth_credential_cache_max_entries: int = Field(default=1024, gt=0)

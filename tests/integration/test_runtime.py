@@ -15,12 +15,14 @@ from typing import Any
 import anyio
 import pytest
 
+from acp.budget import CostTable
 from acp.config import GatewaySettings
 from acp.exceptions import ConfigurationError
 from acp.identity import DEFAULT_ALGORITHMS
 from acp.runtime import (
     build_drift_detector,
     build_token_validator,
+    check_costs_are_payable,
     gateway_from_configs,
     gateway_from_settings,
 )
@@ -225,3 +227,31 @@ def test_an_unauthenticated_gateway_says_so_at_startup(
     anyio.run(_run)
 
     assert any(r.message == "auth.disabled" for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# A cost nobody could ever pay is a configuration error
+# ---------------------------------------------------------------------------
+
+
+def test_a_cost_above_the_rate_limit_capacity_is_refused_at_startup() -> None:
+    """Such a tool could never be called by anyone — the bucket is never that
+    full — and the refusal reported a finite `retry_after` for a moment that
+    would not arrive."""
+    settings = GatewaySettings(  # type: ignore[call-arg]
+        _env_file=None,
+        rate_limit_enabled=True,
+        rate_limit_capacity=5,
+    )
+    costs = CostTable(default=1.0, costs={"crm__nightly_export": 50.0})
+
+    with pytest.raises(ConfigurationError, match="crm__nightly_export"):
+        check_costs_are_payable(costs, settings)
+
+
+def test_a_cost_within_every_budget_is_accepted() -> None:
+    settings = GatewaySettings(  # type: ignore[call-arg]
+        _env_file=None, rate_limit_enabled=True, rate_limit_capacity=50, quota_enabled=True
+    )
+    check_costs_are_payable(CostTable(default=1.0, costs={"crm__export": 50.0}), settings)
+    check_costs_are_payable(None, settings)

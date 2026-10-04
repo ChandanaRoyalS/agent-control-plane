@@ -17,7 +17,10 @@ pure and tested by advancing ``now`` across boundaries by hand.
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 from dataclasses import dataclass, field
+
+from acp.budget.ratelimit import DEFAULT_MAX_PRINCIPALS
 
 
 @dataclass
@@ -33,8 +36,11 @@ class QuotaCounter:
 
     limit: float
     window_seconds: float
+    max_principals: int = DEFAULT_MAX_PRINCIPALS
     # Per principal: (window index that the tally belongs to, amount spent in it).
-    _spent: dict[str, tuple[int, float]] = field(default_factory=dict)
+    # Insertion-ordered, bounded; see `RateLimiter._bucket` for why a budget's
+    # per-principal state must not grow without limit.
+    _spent: OrderedDict[str, tuple[int, float]] = field(default_factory=OrderedDict)
 
     def __post_init__(self) -> None:
         if self.limit <= 0:
@@ -61,11 +67,18 @@ class QuotaCounter:
         Returns ``True`` and records the spend when it fits within the limit,
         ``False`` and records nothing when it would exceed it.
         """
-        used = self._used(principal, now)
-        if used + cost > self.limit:
+        if not self.affords(principal, now, cost):
             return False
+        used = self._used(principal, now)
         self._spent[principal] = (self._window_index(now), used + cost)
+        self._spent.move_to_end(principal)
+        while len(self._spent) > self.max_principals:
+            self._spent.popitem(last=False)
         return True
+
+    def affords(self, principal: str, now: float, cost: float = 1.0) -> bool:
+        """Whether ``check`` would succeed, without recording anything."""
+        return self._used(principal, now) + cost <= self.limit
 
     def remaining(self, principal: str, now: float) -> float:
         """How much of the quota is unspent in the current window."""

@@ -77,3 +77,19 @@ def test_a_non_positive_limit_is_rejected() -> None:
 def test_a_non_positive_window_is_rejected() -> None:
     with pytest.raises(ValueError, match="window must be positive"):
         QuotaCounter(limit=1, window_seconds=0)
+
+
+def test_the_quota_forgets_the_least_recently_charged_principal() -> None:
+    quota = QuotaCounter(limit=10, window_seconds=3600, max_principals=2)
+    assert quota.check("a", now=0.0, cost=1)
+    assert quota.check("b", now=0.0, cost=1)
+    assert quota.check("c", now=0.0, cost=1)  # evicts a
+
+    assert quota.remaining("a", now=0.0) == 10, "forgotten: the window reads as unspent"
+    assert quota.remaining("b", now=0.0) == 9
+
+
+def test_affords_records_nothing() -> None:
+    quota = QuotaCounter(limit=2, window_seconds=3600)
+    assert quota.affords("a", now=0.0, cost=2)
+    assert quota.remaining("a", now=0.0) == 2

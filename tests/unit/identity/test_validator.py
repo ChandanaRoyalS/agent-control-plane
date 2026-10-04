@@ -18,6 +18,7 @@ from typing import Any
 import anyio
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from acp.exceptions import AuthenticationError, ConfigurationError
 from acp.identity.issuers import single_issuer
@@ -333,3 +334,37 @@ def test_the_token_itself_never_appears_in_the_error(keypair: Keypair) -> None:
     rendered = str(caught.value.to_jsonrpc_error())
     assert token not in rendered
     assert token[:24] not in rendered
+
+
+# ---------------------------------------------------------------------------
+# Every way a token can be wrong is a 401, never a 500
+# ---------------------------------------------------------------------------
+
+
+class WrongKindOfKey:
+    """A key set that answers the token's `kid` with an EC key.
+
+    Any Keycloak realm with ES256 enabled serves one beside the RSA keys; a
+    token that names the EC key's `kid` while claiming `alg: RS256` hands PyJWT
+    a key of the wrong type, and the library raises `TypeError` rather than
+    `InvalidTokenError`.
+    """
+
+    async def key_for(self, _kid: str | None) -> Any:
+        return ec.generate_private_key(ec.SECP256R1()).public_key()
+
+
+def test_a_key_type_mismatch_is_rejected_not_raised(keypair: Keypair) -> None:
+    """Unauthenticated input used to produce a 500 with a traceback on every
+    request, before any credential was presented: a log-flooding oracle on the
+    one listener that faces agents. Fail-closed was never at risk; the status
+    and the noise were. Same rejection as any other bad token."""
+    keys: Any = WrongKindOfKey()
+    v = TokenValidator(issuers=single_issuer(TokenPolicy(issuer=ISSUER, audience=AUDIENCE), keys))
+    token = keypair.sign(claims())  # RS256, signed by a key the set does not hold
+
+    async def _run() -> None:
+        await v.validate(token)
+
+    with pytest.raises(AuthenticationError):
+        run(_run)

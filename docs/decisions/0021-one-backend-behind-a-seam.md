@@ -58,8 +58,10 @@ index is not.
 **The key lives in its own file, referenced by path.** So it can come from
 wherever a runtime puts secrets — a Kubernetes secret mount, a Docker secret, a
 tmpfs populated at boot — rather than from somewhere a person edits. Startup
-refuses a key readable beyond its owner, and *reports* rather than fixes the
-permissions: silently tightening a file the operator created is a change to
+refuses a key readable beyond its owner, which means the mount has to be told
+so: Kubernetes mounts secrets `0644` by default and Docker `0444`, and both
+accept a mode (`defaultMode: 0400`, `mode: 0400`). The gateway *reports* rather
+than fixes the permissions: silently tightening a file the operator created is a change to
 their system made by a program run for another reason, and it hides that
 whatever created it was wrong, which is the part that recurs next deploy.
 

@@ -13,7 +13,9 @@ from acp.budget.ratelimit import RateLimiter
 from acp.exceptions import RateLimitExceededError
 
 
-def enforce_rate_limit(limiter: RateLimiter, principal: str, now: float, cost: float = 1.0) -> None:
+def enforce_rate_limit(
+    limiter: RateLimiter, principal: str, now: float, cost: float = 1.0, *, debit: bool = True
+) -> None:
     """Consume ``cost`` units of ``principal``'s budget, or raise.
 
     Returns ``None`` when the call is within budget. Raises
@@ -30,7 +32,7 @@ def enforce_rate_limit(limiter: RateLimiter, principal: str, now: float, cost: f
     already hitting — nothing about other callers, and nothing about anyone
     else's budget.
     """
-    if limiter.check(principal, now, cost):
+    if (limiter.check if debit else limiter.affords)(principal, now, cost):
         return
     raise RateLimitExceededError(
         "rate limit exceeded; slow down",

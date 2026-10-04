@@ -123,9 +123,21 @@ Targets the stateless [2026-07-28 MCP specification](https://blog.modelcontextpr
 | benign documents **withheld** | **0 of 106** | [ADR 0047](docs/decisions/0047-a-baseline-not-a-threshold.md) |
 | benign documents flagged | 19.8% [13–27%] | ADR 0047 |
 | internal held-out split (7 attacks) | 3/7 detected, 0 withheld, all as predicted | [ADR 0060](docs/decisions/0060-the-held-out-split-scored-once-and-what-the-model-adds.md) |
-| gateway overhead, cache miss | 6.7–7.2x a direct call (+21 to +33 ms) p50 | [ADR 0054](docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md) |
-| gateway overhead, cache hit | 3.2–3.4x (+9 to +16 ms) p50 | ADR 0054 |
 | head-of-line blocking, found and fixed | p95 2819 ms → 35.7 ms | [ADR 0053](docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md) |
+
+What the gateway costs, generated from the newest committed run in
+[`perf/results/`](perf/results/) — the method is
+[ADR 0054](docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md),
+and a test fails if these rows and that file disagree:
+
+<!-- overhead:begin -->
+| gateway overhead | p50 | added at p95 | recorded |
+|---|---|---|---|
+| cache miss | 2.5x a direct call (+2 ms) | +2 ms | [2026-10-04, Darwin arm64](perf/results/overhead-2026-10-04-4af760c.json) |
+| cache hit | 1.8x a direct call (+1 ms) | +1 ms | [2026-10-04, Darwin arm64](perf/results/overhead-2026-10-04-4af760c.json) |
+
+Sequential, one request in flight, mock upstreams; commit `4af760c`; switches `auth=on exchange=on cache=on costs=on ratelimit=on quota=on screening=on framing=on tracing=on fsync=on probing=on`.
+<!-- overhead:end -->
 
 Every number comes from a harness in this repository, and two of them gate CI:
 the firewall cannot get worse on the internal corpus or on InjecAgent without a

@@ -1,0 +1,47 @@
+{
+  "commit": "4af760cd53870fac4d5208c57b85e9782a923ff0",
+  "dirty": false,
+  "machine": {
+    "cpus": 10,
+    "machine": "arm64",
+    "python": "3.14.7",
+    "release": "25.6.0",
+    "system": "Darwin"
+  },
+  "measurement": {
+    "flags": "auth=on exchange=on cache=on costs=on ratelimit=on quota=on screening=on framing=on tracing=on fsync=on probing=on",
+    "rows": [
+      {
+        "direct": {
+          "50": 1.0705830063670874,
+          "95": 1.25966701307334,
+          "99": 1.5657079929951578
+        },
+        "gateway": {
+          "50": 2.722042001551017,
+          "95": 3.5517080104909837,
+          "99": 4.0253330080304295
+        },
+        "label": "cache miss",
+        "samples": 150,
+        "tool": "mock-a__search"
+      },
+      {
+        "direct": {
+          "50": 1.157833990873769,
+          "95": 1.6638330125715584,
+          "99": 2.0454170007724315
+        },
+        "gateway": {
+          "50": 2.053083007922396,
+          "95": 2.795125008560717,
+          "99": 3.885667014401406
+        },
+        "label": "cache hit",
+        "samples": 150,
+        "tool": "mock-a__search"
+      }
+    ]
+  },
+  "recorded": "2026-10-04T23:03:45+00:00"
+}

@@ -541,6 +541,16 @@ model — the same absolute cost sits under a much larger number, and the
 added figure is the one to quote; the multiple is the one that would flatter or
 damn depending on what it was measured against.
 
+## Amendment — 2026-10-05: the number is a committed file
+
+The figures this decision produced were quoted in the README and on the site by
+hand, so nothing tied them to a run anyone could inspect. `make overhead-record`
+now writes every measurement to `perf/results/` with the commit it ran against,
+whether the tree was dirty, the machine, and the switch settings read from the
+running container — the configuration this decision says a number is
+meaningless without. The README rows and the site tile are generated from the
+newest file, and a test fails when they disagree with it.
+
 ## References
 
 - ADR 0035 — the result cache and what its key covers

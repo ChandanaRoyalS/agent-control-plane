@@ -21,6 +21,7 @@ Operational and verification scripts. None is part of the shipped package
 | `keycloak_token.py` | `make token` | Obtains an access token from the composed Keycloak (also a library). |
 | `attack_demo.py` | `make attack-demo` | Runs the same credulous agent twice against a poisoned document: directly, then through the gateway. |
 | `measure_overhead.py` | `make overhead` | Measures what the gateway adds over a direct upstream call, printing the switch settings it ran under. |
+| `record_overhead.py` | `make overhead-record` | Runs `measure_overhead.py`, writes the result with its commit, machine and switch settings to `perf/results/`, and regenerates the README's overhead rows from it; `--check` verifies they match. |
 | `ablate_overhead.py` | `make overhead-ablate` | Itemises the gateway's fixed cost by switching one control off at a time. |
 | `probe_resource_indicator.py` | `make probe-resource` | Measures what Keycloak does with RFC 8707 `resource` (ADR 0020). |
 | `probe_cimd.py` | `make probe-cimd` | Measures whether Keycloak accepts a Client ID Metadata Document (ADR 0024). |

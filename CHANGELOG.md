@@ -15,7 +15,11 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- The README leads with the held-out external result for each layer, is about a
+  quarter shorter, and says how the project was built and how its claims are
+  checked.
 
 ## [1.2.0] - 2026-10-04
 

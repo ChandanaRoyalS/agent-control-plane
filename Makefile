@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install check fmt lint types test cov clean image up down logs smoke \
-        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check
+        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check eval-classifier
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -192,6 +192,9 @@ eval:  ## Measure the firewall: false positives first, then recall and precision
 
 eval-check:  ## Fail if any measured count got worse than corpus/eval-baseline.json
 	uv run python scripts/evaluate.py --check
+
+eval-classifier:  ## Score the Ollama classifier on its own (needs a local Ollama)
+	uv run python scripts/evaluate_classifier.py
 
 probe-resource:  ## Measure what Keycloak does with RFC 8707's `resource`
 	uv run python scripts/probe_resource_indicator.py

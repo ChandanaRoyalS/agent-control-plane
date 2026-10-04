@@ -545,7 +545,7 @@ make audit-verify       # walk the chain it just wrote</pre>
 
 <footer>
   <a href="%%REPO%%">Repository</a> &middot;
-  <a href="%%REPO%%/blob/main/docs/decisions/README.md">58 architecture decisions</a> &middot;
+  <a href="%%REPO%%/blob/main/docs/decisions/README.md">%%ADRS%% architecture decisions</a> &middot;
   <a href="%%REPO%%/blob/main/docs/THREAT_MODEL.md">Threat model</a> &middot;
   <a href="%%REPO%%/releases/tag/v1.1.1">v1.1.1</a>
   <p style="margin-top:10px;color:var(--faint)">This page is generated from files in the
@@ -672,6 +672,12 @@ make audit-verify       # walk the chain it just wrote</pre>
 """
 
 
+def adr_count() -> int:
+    """Counted from the directory, because a hand-typed count was already wrong once."""
+    decisions = (ROOT / "docs" / "decisions").glob("[0-9][0-9][0-9][0-9]-*.md")
+    return sum(1 for path in decisions if not path.name.startswith("0000-"))
+
+
 def render_trace(records: list[dict[str, Any]]) -> str:
     rows = []
     for entry in records:
@@ -713,6 +719,7 @@ def build() -> str:
     page = TEMPLATE
     page = page.replace("%%REPO%%", REPO)
     page = page.replace("%%IMAGE%%", IMAGE)
+    page = page.replace("%%ADRS%%", str(adr_count()))
     page = page.replace("%%ADR57%%", adr_link(57, "the demo"))
     page = page.replace("%%ADR50%%", adr_link(50, "ADR 0050"))
     page = page.replace("%%TRACE%%", render_trace(records))

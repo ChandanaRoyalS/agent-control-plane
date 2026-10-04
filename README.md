@@ -165,9 +165,9 @@ and is the one the release workflow verified before it pushed -- built without
 the mock upstreams and asserted to be, running as uid 10001:
 
 ```bash
-docker pull ghcr.io/chandanaroyals/agent-control-plane:1.0.0
+docker pull ghcr.io/chandanaroyals/agent-control-plane:1.0.1
 docker run --rm --entrypoint python \
-  ghcr.io/chandanaroyals/agent-control-plane:1.0.0 \
+  ghcr.io/chandanaroyals/agent-control-plane:1.0.1 \
   -c "import acp; print(acp.__version__)"
 ```
 
@@ -247,7 +247,7 @@ where the measurement disagreed with the plan:
 | 7 · Audit | **complete** | Hash-chained log with external anchoring, multi-tenancy, threat model |
 | 8 · Performance | **complete** | Load harness, a head-of-line defect found and fixed, published overhead with its switch settings |
 | 9 · Demo | **complete** | Live trace console over SSE, scripted attack demo |
-| 10 · Release | **v1.0.0 released** | Tagged and published to ghcr; architecture map, an index of all 58 decisions, and a machine-checked release surface |
+| 10 · Release | **v1.0.1 released** | Tagged and published to ghcr; architecture map, an index of all 58 decisions, and a machine-checked release surface |
 
 ## What this does not do
 

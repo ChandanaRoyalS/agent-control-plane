@@ -15,6 +15,10 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.0.1] - 2026-10-04
+
 ### Fixed
 
 - **A cancelled half-open probe no longer wedges the circuit breaker.** The
@@ -52,6 +56,8 @@ without somebody accepting the change.
 
 - Removed the author's internal task-plan numbering and one-shot patch scripts
   from the repository; corrected every URL to the repository's current home.
+- Container image: `ghcr.io/chandanaroyals/agent-control-plane:1.0.1` — the
+  first image published under the repository's current namespace.
 
 ## [1.0.0] - 2026-08-14
 
@@ -126,6 +132,7 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.0.1
 [1.0.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.0.0
 

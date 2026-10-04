@@ -1,6 +1,6 @@
 # Architecture decisions
 
-Fifty-eight decisions, each about ten minutes to read, each with the
+Fifty-nine decisions, each about ten minutes to read, each with the
 alternatives that were rejected and why.
 
 **Where a decision was made because something was measured, the measurement is
@@ -109,6 +109,7 @@ If you have ten minutes and want the ones that carry the most weight:
 | [0049](0049-the-operator-channel-is-not-the-agents-channel.md) | the agent addresses `:8080`, a person addresses `:9090`, and that placement *is* the control |
 | [0050](0050-an-audit-record-is-not-a-log-line.md) | a separate sink, a separate guarantee, and exactly what the chain does and does not detect |
 | [0051](0051-a-tenant-is-an-issuer-not-a-claim.md) | a tenant comes from the registration that verified the token, never from a claim |
+| [0059](0059-an-operator-is-a-verified-subject-not-a-shared-secret.md) | an operator proves who they are with a JWT for its own audience, so the audit row names a verified subject rather than whoever held a shared token |
 
 ## Performance, measured
 

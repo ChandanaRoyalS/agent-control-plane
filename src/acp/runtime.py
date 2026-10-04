@@ -114,6 +114,7 @@ async def gateway_from_configs(
     approval_ttl: float = DEFAULT_TTL_SECONDS,
     audit: AuditLog | None = None,
     console: TraceHub | None = None,
+    operator_validator: TokenValidator | None = None,
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
@@ -260,6 +261,10 @@ async def gateway_from_configs(
         # two are: the signature every existing caller depends on is unchanged.
         app.state.approvals = approvals
         app.state.audit = audit
+        # The validator for *operator* tokens — the request path's issuers,
+        # re-targeted at the operator audience (ADR 0059). Shares the key
+        # caches with `validator`, so it is never closed on its own.
+        app.state.operator_validator = operator_validator
         # Read by `acp serve` to mount the trace console on the admin
         # listener, beside the operator channel and behind the same credential.
         #
@@ -393,11 +398,13 @@ def build_approval_store(
     if policy is None or not policy.gates_calls:
         return None
 
-    if not settings.approval_operator_token:
+    if not (settings.approval_operator_token or settings.approval_operator_audience):
         logger.warning(
             "approval.no_operator_channel",
             extra={
-                "reason": "ACP_APPROVAL_OPERATOR_TOKEN is not set",
+                "reason": (
+                    "neither ACP_APPROVAL_OPERATOR_AUDIENCE nor ACP_APPROVAL_OPERATOR_TOKEN is set"
+                ),
                 "consequence": (
                     "the policy holds calls for a human, and nothing on this gateway "
                     "can answer one: every gated call waits out its TTL and is then "
@@ -412,9 +419,26 @@ def build_approval_store(
             "gated_rules": sorted(_gated_rule_names(policy)),
             "ttl_seconds": settings.approval_ttl_seconds,
             "max_pending": settings.approval_max_pending,
-            "operator_channel": bool(settings.approval_operator_token),
+            "operator_channel": bool(
+                settings.approval_operator_token or settings.approval_operator_audience
+            ),
+            "operator_jwt": bool(settings.approval_operator_audience),
+            "shared_token": bool(settings.approval_operator_token),
         },
     )
+    if settings.approval_operator_token and not settings.approval_operator_audience:
+        # Named at startup, every start, like `ACP_AUTH_INSECURE_ISSUER_HOSTS`:
+        # a channel on a shared secret records `shared-token` as the operator
+        # on every decision, which is the honest row and not the useful one.
+        logger.warning(
+            "approval.shared_token_only",
+            extra={
+                "consequence": (
+                    "the audit row cannot name who approved; set "
+                    "ACP_APPROVAL_OPERATOR_AUDIENCE so operators present a JWT"
+                ),
+            },
+        )
     return InMemoryApprovalStore(max_pending=settings.approval_max_pending)
 
 
@@ -580,6 +604,33 @@ async def build_token_validator(settings: GatewaySettings) -> TokenValidator | N
         },
     )
     return TokenValidator(issuers=registry)
+
+
+def build_operator_validator(
+    settings: GatewaySettings, validator: TokenValidator | None
+) -> TokenValidator | None:
+    """The validator for operator JWTs on the approval channel, or ``None``.
+
+    Derived from the request path's validator rather than built again: the same
+    authorization servers, keys, issuer binding and tenant stamping, with one
+    field changed — the audience (`IssuerRegistry.for_audience`). A token for
+    the gateway therefore cannot open the channel and an operator's token cannot
+    call a tool, and there is exactly one set of trusted issuers to reason
+    about rather than two that have to agree.
+
+    ``None`` when no operator audience is configured. The settings model has
+    already refused an audience with no issuers behind it, so ``validator`` is
+    never ``None`` when the audience is set; the guard is for the type checker
+    and for callers that build settings by hand.
+    """
+    audience = settings.approval_operator_audience
+    if not audience or validator is None:
+        return None
+    logger.info(
+        "approval.operator_jwt_enabled",
+        extra={"audience": audience, "issuers": validator.issuers.issuers},
+    )
+    return TokenValidator(issuers=validator.issuers.for_audience(audience))
 
 
 def build_protected_resource(
@@ -926,6 +977,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             approval_ttl=settings.approval_ttl_seconds,
             audit=audit,
             console=console,
+            operator_validator=build_operator_validator(settings, validator),
         ) as app:
             yield app
     finally:

@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import urlsplit
 
 from acp.exceptions import AuthenticationError, ConfigurationError
@@ -142,6 +142,26 @@ class IssuerRegistry:
             # caller can ask this question as many times as they like.
             raise AuthenticationError("the presented token is not valid")
         return registration
+
+    def for_audience(self, audience: str) -> IssuerRegistry:
+        """The same authorization servers, trusted for a *different* audience.
+
+        The operator channel accepts tokens from the issuers this gateway
+        already trusts — the same keys, the same issuer binding, the same
+        tenant stamping — but a token minted for the gateway must not open the
+        approval channel, and an operator's token must not call a tool. The
+        audience is what keeps the two apart (RFC 8707: a credential names
+        what it is for), so the only thing that differs between the two
+        registries is that one field.
+
+        The key caches are *shared*, not copied: one JWKS fetch per issuer
+        serves both listeners, and `aclose` on the original closes both. The
+        derived registry must therefore never be closed on its own.
+        """
+        return IssuerRegistry(
+            replace(registration, policy=replace(registration.policy, audience=audience))
+            for registration in self._by_issuer.values()
+        )
 
     async def aclose(self) -> None:
         for registration in self._by_issuer.values():

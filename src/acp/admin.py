@@ -35,6 +35,7 @@ from acp.audit import AuditLog
 from acp.console.app import console_routes
 from acp.console.hub import TraceHub
 from acp.health import HealthMonitor
+from acp.identity import TokenValidator
 from acp.observability import metrics
 from acp.schema import DriftDetector
 
@@ -139,6 +140,7 @@ def build_admin_app(
     audit: AuditLog | None = None,
     *,
     console: TraceHub | None = None,
+    operator_validator: TokenValidator | None = None,
 ) -> Starlette:
     """The admin ASGI app. Small on purpose — it must not be able to fail.
 
@@ -163,7 +165,7 @@ def build_admin_app(
             Route(HEALTH_PATH, _healthz, methods=["GET"]),
             Route(READY_PATH, build_readyz(health), methods=["GET"]),
             Route(SCHEMAS_PATH, build_schemas(drift), methods=["GET"]),
-            *operator_routes(approvals, operator_credential, audit),
+            *operator_routes(approvals, operator_credential, audit, operator_validator),
             # Here for the same reason the approval channel is: this
             # stream carries every principal's activity, so an agent that could
             # open it would read what every other caller is doing. It shares the

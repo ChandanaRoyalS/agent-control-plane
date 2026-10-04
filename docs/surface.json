@@ -32,6 +32,11 @@
       "default": "256"
     },
     {
+      "variable": "ACP_APPROVAL_OPERATOR_AUDIENCE",
+      "type": "str",
+      "default": "''"
+    },
+    {
       "variable": "ACP_APPROVAL_OPERATOR_TOKEN",
       "type": "str",
       "default": "''"

@@ -1,0 +1,3 @@
+# Locust writes CRLF. Stored as LF so a patch that touches a recorded run
+# applies with a plain `git am` (the first one did not).
+perf/results/**/*.csv text eol=lf

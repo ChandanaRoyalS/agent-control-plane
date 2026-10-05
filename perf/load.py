@@ -38,6 +38,15 @@ LEVELS: Final = (20, 50)
 """Concurrent users per recorded run: the review asked for 20 to 50."""
 RUN_SECONDS: Final = 30
 UNRECORDED: Final = "No concurrent run has been recorded yet: `make up && make load-record`."
+DISQUALIFYING: Final = ("throttled", "upstream", "unrecorded", "failed")
+"""Outcomes that mean a run measured something other than the gateway: the rate
+limiter or quota, a mock that could not keep up, an audit sink that could not,
+or a defect. The harness already warns on each; the recorder refuses them."""
+BUDGETS_OFF: Final = {"ACP_RATE_LIMIT_ENABLED": "false", "ACP_QUOTA_ENABLED": "false"}
+"""How the recorder runs the gateway. The compose stack's budgets are sized for
+a demo, and 20 agents at up to 30 requests a second each exceed them, so a run
+with them on measures the limiter. Switched off for the run, said so in the
+switches line, and restored afterwards."""
 
 
 class LoadRecordError(ValueError):
@@ -98,6 +107,14 @@ def runs(record: Mapping[str, Any]) -> list[Mapping[str, Any]]:
                 f"the one it claims. Is the stack up and Keycloak reachable? Re-record."
             )
             raise LoadRecordError(msg)
+        bad = {o: run["outcomes"][o]["count"] for o in DISQUALIFYING if o in run["outcomes"]}
+        if bad:
+            what = "the rate limiter" if "throttled" in bad else "something other than the gateway"
+            msg = (
+                f"a run at {requested} users had {bad}: it measured {what}, "
+                f"not the request path. Nothing was written."
+            )
+            raise LoadRecordError(msg)
         if run.get("failed_to_start"):
             msg = (
                 f"a run lost {run['failed_to_start']} user(s) at startup; its concurrency "
@@ -142,15 +159,14 @@ def block(found: tuple[Path, Mapping[str, Any]] | None, *, root: Path) -> str:
     raw = path.with_suffix("").relative_to(root).as_posix()
     lines = [
         BEGIN,
-        "| concurrent agents | throughput | served p50 | served p95 | served p99 | failed |",
+        "| concurrent agents | throughput | served p50 | served p95 | served p99 | listed p95 |",
         "|---|---|---|---|---|---|",
     ]
     for run in sorted(recorded, key=lambda r: int(r.get("users_requested") or 0)):
-        failed = run["outcomes"].get(Outcome.FAILED.value, {}).get("count", 0)
         lines.append(
             f"| {run['users_started']} | {run['throughput_rps']:.0f} req/s | "
             f"{_cell(run, 'served', 'p50_ms')} | {_cell(run, 'served', 'p95_ms')} | "
-            f"{_cell(run, 'served', 'p99_ms')} | {failed} |"
+            f"{_cell(run, 'served', 'p99_ms')} | {_cell(run, 'listed', 'p95_ms')} |"
         )
     commit = str(record.get("commit", "?"))[:7]
     dirty = " (uncommitted changes)" if record.get("dirty") else ""
@@ -160,7 +176,8 @@ def block(found: tuple[Path, Mapping[str, Any]] | None, *, root: Path) -> str:
             "",
             f"{record.get('run_seconds', RUN_SECONDS)}s per level, first "
             f"{record.get('warmup_seconds', '?')}s discarded, 0-50 ms think time per agent, "
-            f"mock upstreams; [{when}, {where}]({path.relative_to(root).as_posix()}), "
+            f"mock upstreams, no request throttled or failed (a run with either is refused); "
+            f"[{when}, {where}]({path.relative_to(root).as_posix()}), "
             f"raw locust CSVs in [`{raw}/`]({raw}/); commit `{commit}`{dirty}; "
             f"switches `{flags}`.",
             END,

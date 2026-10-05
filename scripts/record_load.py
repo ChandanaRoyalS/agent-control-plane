@@ -12,8 +12,15 @@ harness headless for `RUN_SECONDS`, keeps locust's raw CSVs under
 from it. Commit the directory, the summary and README together: the CSVs are
 the evidence, the summary is the reading, the README is the quote.
 
-Refuses a dirty tree unless `--allow-dirty`, as `record_overhead.py` does, and
-refuses to write a run that lost users at startup or served nothing.
+Runs the gateway with its rate limit and quota switched off (`perf.load.
+BUDGETS_OFF`) and restores the compose defaults afterwards: the stack's
+budgets are sized for a demo, and a run they throttle measures the limiter.
+The switches line in the README says so.
+
+Refuses a dirty tree unless `--allow-dirty`, as `record_overhead.py` does;
+refuses a gateway container that is not running; and refuses to write a run
+that lost users at startup, served nothing, or had any request throttled,
+failed, unrecorded or failed upstream.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ import datetime as dt
 import json
 import os
 import platform
+import shutil
 import subprocess  # fixed argv, no shell
 import sys
 import tempfile
@@ -32,6 +40,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from perf.load import (  # noqa: E402
+    BUDGETS_OFF,
     LEVELS,
     RESULTS,
     RUN_SECONDS,
@@ -61,19 +70,54 @@ def git(*args: str) -> str:
     return completed.stdout.strip()
 
 
-def gateway_flags() -> str:
-    """The running gateway's switch settings, as the overhead record states them."""
+def inspect(template: str) -> object:
     completed = subprocess.run(  # noqa: S603 — fixed argv, shell=False
-        ["docker", "inspect", CONTAINER, "--format", "{{json .Config.Env}}"],  # noqa: S607
+        ["docker", "inspect", CONTAINER, "--format", template],  # noqa: S607
         capture_output=True,
         text=True,
         timeout=20,
         check=False,
     )
     if completed.returncode != 0:
-        msg = f"cannot read the `{CONTAINER}` container's environment; is `make up` running?"
+        msg = f"cannot inspect the `{CONTAINER}` container; is `make up` running?"
         raise SystemExit(msg)
-    return flags(parse_env(json.loads(completed.stdout)))
+    return json.loads(completed.stdout)
+
+
+def gateway_flags() -> str:
+    """The running gateway's switch settings, as the overhead record states them.
+
+    Refuses unless the container is actually running. A container that was
+    created and never started still has an environment to inspect — which is
+    how the first recorded run measured 73,617 refused connections to a
+    gateway that `make up` had failed to start (port 9090 was taken).
+    """
+    state = inspect("{{json .State}}")
+    if not isinstance(state, dict) or not state.get("Running"):
+        msg = (
+            f"the `{CONTAINER}` container is not running (did `make up` fail? "
+            f"another stack on :8080 or :9090?). Nothing was recorded."
+        )
+        raise SystemExit(msg)
+    env = inspect("{{json .Config.Env}}")
+    return flags(parse_env([e for e in env if isinstance(e, str)] if isinstance(env, list) else []))
+
+
+def gateway_with(overrides: dict[str, str]) -> None:
+    """Restart only the gateway with ``overrides`` on top of the compose
+    defaults, and wait for it to be healthy. Empty restores the defaults."""
+    completed = subprocess.run(
+        ["docker", "compose", "up", "-d", "--wait", "gateway"],  # noqa: S607
+        cwd=ROOT,
+        env={**os.environ, **overrides},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        sys.stderr.write(completed.stderr[-2000:])
+        msg = "could not restart the gateway; nothing was recorded"
+        raise SystemExit(msg)
 
 
 def run_level(users: int, raw: Path) -> dict[str, object]:
@@ -165,14 +209,30 @@ def main() -> int:
     now = dt.datetime.now(dt.UTC)
     commit = git("rev-parse", "HEAD")
     stem = f"load-{now:%Y-%m-%d}-{commit[:7]}"
-    raw = RESULTS / stem
-    raw.mkdir(parents=True, exist_ok=True)
-    switches = gateway_flags()
+    print("Restarting the gateway with rate limit and quota off for the run ...")
+    gateway_with(BUDGETS_OFF)
+    try:
+        switches = gateway_flags()
+        record, scratch = measure(now, commit, dirty, switches)
+    finally:
+        print("Restoring the gateway's defaults ...")
+        gateway_with({})
+    return write(record, scratch, stem)
 
+
+def measure(
+    now: dt.datetime, commit: str, dirty: bool, switches: str
+) -> tuple[dict[str, object], Path]:
+    """Every level, into a scratch directory; the record and where its raw
+    output is. Refuses, deleting the scratch, if the README could not quote it."""
+    # The raw CSVs go to a scratch directory and move into perf/results/ only
+    # once the summary has been accepted. A refused run leaves nothing behind
+    # that could be committed as though it were evidence.
+    scratch = Path(tempfile.mkdtemp(prefix="acp-load-"))
     measured = []
     for users in LEVELS:
         print(f"=== {users} concurrent agents, {RUN_SECONDS}s. Do not use the machine. ===")
-        measured.append(run_level(users, raw))
+        measured.append(run_level(users, scratch))
 
     record = {
         "recorded": now.isoformat(timespec="seconds"),
@@ -190,7 +250,20 @@ def main() -> int:
         },
         "runs": measured,
     }
-    runs(record)  # refuse to write what the README could not honestly quote
+    try:
+        runs(record)  # refuse to write what the README could not honestly quote
+    except LoadRecordError as exc:
+        shutil.rmtree(scratch, ignore_errors=True)
+        msg = f"refused: {exc}"
+        raise SystemExit(msg) from exc
+    return record, scratch
+
+
+def write(record: dict[str, object], scratch: Path, stem: str) -> int:
+    """Move the accepted run's raw output into perf/results/ beside its summary."""
+    raw = RESULTS / stem
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(scratch), raw)
     path = RESULTS / f"{stem}.json"
     path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     render()

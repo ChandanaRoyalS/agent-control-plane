@@ -17,6 +17,14 @@ without somebody accepting the change.
 
 ### Added
 
+- `ACP_APPROVAL_STORE_URL` (ADR 0066). Set it to a Redis URL and held
+  approvals live there, shared by every replica: a caller told to wait by one
+  gateway may retry against another, an operator may answer from a third, and
+  a restart forgets nothing. The gateway refuses to start if the store is
+  unreachable. Empty keeps the in-memory store, which remains the default;
+  `ACP_APPROVAL_MAX_PENDING` does not apply to a shared store, whose bound is
+  the record TTL. `redis` is a new runtime dependency.
+
 - Tool descriptions are screened (ADR 0065). Every description, and every
   `description` string in a tool's input schema, passes the same detectors and
   the same bar as a tool result; in enforce mode a tool that crosses it is
@@ -33,6 +41,14 @@ without somebody accepting the change.
 
 ### Changed
 
+- An approved token is spent exactly once, however many retries carry it at
+  the same moment: `consume` moves only an `APPROVED` record and reports
+  whether this call did, and a retry that read `APPROVED` but lost that race
+  is refused as "approval already used". Previously two retries on two
+  replicas of a shared store could both proceed; with the in-memory store
+  nothing could interleave, so nothing observable changes there.
+- `approval.enabled` names the store (`memory` | `redis`) and logs
+  `max_pending` as `null` when it does not apply.
 - `firewall_decisions_total` carries a new `surface` label (`result` or
   `catalogue`); dashboards summing the metric should sum over it.
 - The site said 16 deliberate breakages; the four mutation harnesses check 18.

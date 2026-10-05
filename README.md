@@ -207,7 +207,8 @@ somebody looking for gaps.
 - **Tool descriptions are screened but cannot be fenced.** A description with
   a detectable payload is withheld from the catalogue; a politely worded one
   reaches the model, and only the policy stands between it and the call.
-- **Pending approvals live in memory**; a restart loses them.
+- **Pending approvals live in memory unless `ACP_APPROVAL_STORE_URL` is set**;
+  by default a restart loses them and a second replica cannot see them.
 
 ## Roadmap
 

@@ -389,7 +389,7 @@ async def _audit_call(
     )
 
 
-def _await_approval(
+async def _await_approval(
     store: ApprovalStore | None,
     principal: Principal,
     params: types.CallToolRequestParams,
@@ -417,7 +417,7 @@ def _await_approval(
         )
         raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
 
-    outcome = gate(
+    outcome = await gate(
         store,
         token=params.request_state,
         tenant=principal.tenant,
@@ -585,7 +585,7 @@ def build_server(
                 # charged, before the cache is consulted and before anything
                 # reaches an upstream — a call that has not happened must not
                 # spend, must not be answered from memory, and must not run.
-                awaiting = _await_approval(
+                awaiting = await _await_approval(
                     approvals, principal, params, decision.rule, approval_ttl
                 )
                 if awaiting is not None:

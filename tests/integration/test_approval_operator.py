@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Coroutine
 from dataclasses import replace
 from typing import Any
 
@@ -59,7 +60,7 @@ GATED = Policy(
 )
 
 
-def held_store(*, arguments: dict[str, Any] | None = None) -> InMemoryApprovalStore:
+async def held_store(*, arguments: dict[str, Any] | None = None) -> InMemoryApprovalStore:
     """A store with exactly one pending request in it."""
     store = InMemoryApprovalStore()
     request = request_for(
@@ -72,11 +73,11 @@ def held_store(*, arguments: dict[str, Any] | None = None) -> InMemoryApprovalSt
         now=time.time(),
     )
     assert request is not None
-    store.create(request)
+    await store.create(request)
     return store
 
 
-def admin(
+async def admin(
     method: str,
     path: str,
     *,
@@ -94,12 +95,18 @@ def admin(
         async with httpx.AsyncClient(transport=transport, base_url="http://admin") as client:
             return await client.request(method, path, headers=headers, json=body)
 
-    response: httpx.Response = anyio.run(_run)
+    response: httpx.Response = await _run()
     return response
 
 
 def approval_path(token: str) -> str:
     return f"{APPROVALS_PATH}/{token}"
+
+
+def run_sync[T](coro: Coroutine[Any, Any, T]) -> T:
+    """Drive one store call from a synchronous test that already owns its own
+    `anyio.run` for the gateway round-trip; two event loops cannot nest."""
+    return anyio.run(lambda: coro)
 
 
 # ---------------------------------------------------------------------------
@@ -127,17 +134,17 @@ def test_the_gateway_listener_has_no_approval_routes(keypair: Keypair) -> None:
     assert anyio.run(_run) != 200
 
 
-def test_no_credential_means_no_channel() -> None:
+async def test_no_credential_means_no_channel() -> None:
     """A feature nobody configured does not exist. The store is present and the
     routes are still absent, because the missing half is the entitlement."""
-    response = admin("GET", APPROVALS_PATH, store=held_store(), credential="")
+    response = await admin("GET", APPROVALS_PATH, store=await held_store(), credential="")
 
     assert response.status_code == 404
 
 
-def test_no_store_means_no_channel() -> None:
+async def test_no_store_means_no_channel() -> None:
     """The other way to have nothing to decide about."""
-    response = admin("GET", APPROVALS_PATH, store=None)
+    response = await admin("GET", APPROVALS_PATH, store=None)
 
     assert response.status_code == 404
 
@@ -147,35 +154,35 @@ def test_no_store_means_no_channel() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_listing_without_a_credential_is_refused() -> None:
-    response = admin("GET", APPROVALS_PATH, store=held_store(), bearer=None)
+async def test_listing_without_a_credential_is_refused() -> None:
+    response = await admin("GET", APPROVALS_PATH, store=await held_store(), bearer=None)
 
     assert response.status_code == 401
     assert response.headers["www-authenticate"].startswith("Bearer")
 
 
-def test_listing_with_the_wrong_credential_is_refused() -> None:
-    response = admin("GET", APPROVALS_PATH, store=held_store(), bearer="not-it")
+async def test_listing_with_the_wrong_credential_is_refused() -> None:
+    response = await admin("GET", APPROVALS_PATH, store=await held_store(), bearer="not-it")
 
     assert response.status_code == 401
 
 
-def test_deciding_without_a_credential_is_refused() -> None:
+async def test_deciding_without_a_credential_is_refused() -> None:
     """The read is authenticated because of what it discloses; the write is
     authenticated because of what it grants."""
-    store = held_store()
-    token = store.pending()[0].token
+    store = await held_store()
+    token = (await store.pending())[0].token
 
-    response = admin(
+    response = await admin(
         "POST", approval_path(token), store=store, bearer=None, body={"approved": True}
     )
 
     assert response.status_code == 401
-    assert store.pending()[0].state is State.PENDING
+    assert (await store.pending())[0].state is State.PENDING
 
 
-def test_a_refused_credential_does_not_leak_the_pending_list() -> None:
-    response = admin("GET", APPROVALS_PATH, store=held_store(), bearer="not-it")
+async def test_a_refused_credential_does_not_leak_the_pending_list() -> None:
+    response = await admin("GET", APPROVALS_PATH, store=await held_store(), bearer="not-it")
 
     assert TOOL not in response.text
     assert ALICE not in response.text
@@ -186,12 +193,12 @@ def test_a_refused_credential_does_not_leak_the_pending_list() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_pending_list_shows_the_call_being_approved() -> None:
+async def test_the_pending_list_shows_the_call_being_approved() -> None:
     """An approval you cannot read is not an approval. The operator sees the
     subject, the tool, the rule that held it — and the arguments."""
-    store = held_store(arguments={"query": "delete the production dataset"})
+    store = await held_store(arguments={"query": "delete the production dataset"})
 
-    payload = admin("GET", APPROVALS_PATH, store=store).json()
+    payload = (await admin("GET", APPROVALS_PATH, store=store)).json()
 
     [held] = payload["pending"]
     assert held["subject"] == ALICE
@@ -201,7 +208,7 @@ def test_the_pending_list_shows_the_call_being_approved() -> None:
     assert held["arguments_shown"] is True
 
 
-def test_what_is_displayed_is_what_is_fingerprinted() -> None:
+async def test_what_is_displayed_is_what_is_fingerprinted() -> None:
     """The property the whole design turns on, asserted rather than asserted-of.
 
     The bytes shown to the operator are the bytes the binding was taken over, so
@@ -209,23 +216,23 @@ def test_what_is_displayed_is_what_is_fingerprinted() -> None:
     apart. A second encoder for display would be the one place they could.
     """
     arguments = {"z": 1, "a": [2, 3]}
-    store = held_store(arguments=arguments)
+    store = await held_store(arguments=arguments)
 
-    payload = admin("GET", APPROVALS_PATH, store=store).json()
+    payload = (await admin("GET", APPROVALS_PATH, store=store)).json()
 
     [held] = payload["pending"]
     assert json.dumps(held["arguments"], sort_keys=True, separators=(",", ":")) == (
-        store.pending()[0].arguments_json
+        (await store.pending())[0].arguments_json
     )
 
 
-def test_arguments_too_large_to_show_are_withheld_rather_than_truncated() -> None:
+async def test_arguments_too_large_to_show_are_withheld_rather_than_truncated() -> None:
     """Truncating would display a *different* call from the one being approved —
     the exact confusion this module exists to prevent, in the one place a human
     is looking. So they are withheld, and the response says so."""
-    store = held_store(arguments={"blob": "x" * (MAX_DISPLAYED_ARGUMENT_BYTES + 1)})
+    store = await held_store(arguments={"blob": "x" * (MAX_DISPLAYED_ARGUMENT_BYTES + 1)})
 
-    payload = admin("GET", APPROVALS_PATH, store=store).json()
+    payload = (await admin("GET", APPROVALS_PATH, store=store)).json()
 
     [held] = payload["pending"]
     assert held["arguments"] is None
@@ -233,22 +240,22 @@ def test_arguments_too_large_to_show_are_withheld_rather_than_truncated() -> Non
     assert held["arguments_bytes"] > MAX_DISPLAYED_ARGUMENT_BYTES
 
 
-def test_every_response_carries_the_untrusted_notice() -> None:
+async def test_every_response_carries_the_untrusted_notice() -> None:
     """The last place an injection can land is a person's screen. Whatever
     renders this is told, in the payload, that the agent chose these words."""
-    payload = admin("GET", APPROVALS_PATH, store=held_store()).json()
+    payload = (await admin("GET", APPROVALS_PATH, store=await held_store())).json()
 
     assert "instructions" in payload["notice"]
 
 
-def test_an_expired_request_is_marked_as_such_in_the_list() -> None:
+async def test_an_expired_request_is_marked_as_such_in_the_list() -> None:
     """Or the channel's first act is to invite somebody to approve a dead call
     and believe they unblocked it."""
-    store = held_store()
-    stale = replace(store.pending()[0], expires_at=time.time() - 1)
-    store.create(stale)
+    store = await held_store()
+    stale = replace((await store.pending())[0], expires_at=time.time() - 1)
+    await store.create(stale)
 
-    payload = admin("GET", APPROVALS_PATH, store=store).json()
+    payload = (await admin("GET", APPROVALS_PATH, store=store)).json()
 
     assert payload["pending"][0]["expired"] is True
 
@@ -258,101 +265,103 @@ def test_an_expired_request_is_marked_as_such_in_the_list() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_an_approval_is_recorded() -> None:
-    store = held_store()
-    token = store.pending()[0].token
+async def test_an_approval_is_recorded() -> None:
+    store = await held_store()
+    token = (await store.pending())[0].token
 
-    response = admin("POST", approval_path(token), store=store, body={"approved": True})
+    response = await admin("POST", approval_path(token), store=store, body={"approved": True})
 
     assert response.status_code == 200
-    held = store.get(token)
+    held = await store.get(token)
     assert held is not None
     assert held.state is State.APPROVED
 
 
-def test_a_denial_is_recorded_with_its_reason() -> None:
-    store = held_store()
-    token = store.pending()[0].token
+async def test_a_denial_is_recorded_with_its_reason() -> None:
+    store = await held_store()
+    token = (await store.pending())[0].token
 
-    admin(
+    await admin(
         "POST",
         approval_path(token),
         store=store,
         body={"approved": False, "reason": "not this dataset"},
     )
 
-    held = store.get(token)
+    held = await store.get(token)
     assert held is not None
     assert held.state is State.DENIED
     assert held.reason == "not this dataset"
 
 
-def test_a_request_cannot_be_decided_twice() -> None:
+async def test_a_request_cannot_be_decided_twice() -> None:
     """Without this, anything holding the operator credential could re-approve a
     consumed token and hand out the same permission again."""
-    store = held_store()
-    token = store.pending()[0].token
-    admin("POST", approval_path(token), store=store, body={"approved": False})
+    store = await held_store()
+    token = (await store.pending())[0].token
+    await admin("POST", approval_path(token), store=store, body={"approved": False})
 
-    response = admin("POST", approval_path(token), store=store, body={"approved": True})
+    response = await admin("POST", approval_path(token), store=store, body={"approved": True})
 
     assert response.status_code == 409
-    held = store.get(token)
+    held = await store.get(token)
     assert held is not None
     assert held.state is State.DENIED
 
 
-def test_an_expired_request_is_refused_rather_than_decided() -> None:
+async def test_an_expired_request_is_refused_rather_than_decided() -> None:
     """`store.decide` would record it happily and the retry would be refused on
     expiry anyway — correct, and completely opaque. The operator would see their
     approval accepted and the caller still blocked."""
-    store = held_store()
-    stale = replace(store.pending()[0], expires_at=time.time() - 1)
-    store.create(stale)
+    store = await held_store()
+    stale = replace((await store.pending())[0], expires_at=time.time() - 1)
+    await store.create(stale)
 
-    response = admin("POST", approval_path(stale.token), store=store, body={"approved": True})
+    response = await admin("POST", approval_path(stale.token), store=store, body={"approved": True})
 
     assert response.status_code == 409
     assert response.json()["error"] == "expired"
-    held = store.get(stale.token)
+    held = await store.get(stale.token)
     assert held is not None
     assert held.state is State.PENDING
 
 
-def test_deciding_an_unknown_token_is_a_404() -> None:
-    response = admin("POST", approval_path("invented"), store=held_store(), body={"approved": True})
+async def test_deciding_an_unknown_token_is_a_404() -> None:
+    response = await admin(
+        "POST", approval_path("invented"), store=await held_store(), body={"approved": True}
+    )
 
     assert response.status_code == 404
 
 
-def test_a_body_that_does_not_say_which_way_is_refused() -> None:
+async def test_a_body_that_does_not_say_which_way_is_refused() -> None:
     """No default, for the reason `Rule.effect` has none: the two readings are
     "let it run" and "stop it", and a missing field is not a vote."""
-    store = held_store()
-    token = store.pending()[0].token
+    store = await held_store()
+    token = (await store.pending())[0].token
 
-    response = admin("POST", approval_path(token), store=store, body={"reason": "ok I guess"})
+    response = await admin("POST", approval_path(token), store=store, body={"reason": "ok I guess"})
 
     assert response.status_code == 400
-    assert store.pending()[0].state is State.PENDING
+    assert (await store.pending())[0].state is State.PENDING
 
 
-def test_a_non_boolean_answer_is_refused() -> None:
+async def test_a_non_boolean_answer_is_refused() -> None:
     """`"approved": "no"` is truthy in every language that would parse it."""
-    store = held_store()
-    token = store.pending()[0].token
+    store = await held_store()
+    token = (await store.pending())[0].token
 
-    response = admin("POST", approval_path(token), store=store, body={"approved": "no"})
+    response = await admin("POST", approval_path(token), store=store, body={"approved": "no"})
 
     assert response.status_code == 400
-    assert store.pending()[0].state is State.PENDING
+    assert (await store.pending())[0].state is State.PENDING
 
 
-def test_a_non_string_reason_is_refused() -> None:
-    store = held_store()
-    token = store.pending()[0].token
+async def test_a_non_string_reason_is_refused() -> None:
+    store = await held_store()
+    token = (await store.pending())[0].token
 
-    response = admin(
+    response = await admin(
         "POST", approval_path(token), store=store, body={"approved": True, "reason": 7}
     )
 
@@ -360,8 +369,8 @@ def test_a_non_string_reason_is_refused() -> None:
 
 
 def test_a_body_that_is_not_json_is_refused() -> None:
-    store = held_store()
-    token = store.pending()[0].token
+    store = run_sync(held_store())
+    token = (run_sync(store.pending()))[0].token
 
     async def _run() -> httpx.Response:
         app = build_admin_app(None, None, store, CREDENTIAL)
@@ -378,12 +387,12 @@ def test_a_body_that_is_not_json_is_refused() -> None:
     assert response.status_code == 400
 
 
-def test_a_decided_request_leaves_the_pending_list() -> None:
-    store = held_store()
-    token = store.pending()[0].token
-    admin("POST", approval_path(token), store=store, body={"approved": True})
+async def test_a_decided_request_leaves_the_pending_list() -> None:
+    store = await held_store()
+    token = (await store.pending())[0].token
+    await admin("POST", approval_path(token), store=store, body={"approved": True})
 
-    payload = admin("GET", APPROVALS_PATH, store=store).json()
+    payload = (await admin("GET", APPROVALS_PATH, store=store)).json()
 
     assert payload["pending"] == []
 
@@ -471,7 +480,7 @@ def test_a_denial_on_the_admin_port_stops_the_call(keypair: Keypair) -> None:
 # ---------------------------------------------------------------------------
 
 
-def held_store_for_agent(actor: str, tenant: str | None) -> tuple[InMemoryApprovalStore, str]:
+async def held_store_for_agent(actor: str, tenant: str | None) -> tuple[InMemoryApprovalStore, str]:
     store = InMemoryApprovalStore()
     request = request_for(
         tenant=tenant,
@@ -483,17 +492,17 @@ def held_store_for_agent(actor: str, tenant: str | None) -> tuple[InMemoryApprov
         now=time.time(),
     )
     assert request is not None
-    store.create(request)
+    await store.create(request)
     return store, request.token
 
 
-def test_the_operator_is_shown_which_agent_is_asking() -> None:
+async def test_the_operator_is_shown_which_agent_is_asking() -> None:
     """The actor was always in the fingerprint — an approval could never be
     spent by a different agent — but the person deciding was never told which
     of alice's agents was asking. Both identities, always (ADR 0015)."""
-    store, _ = held_store_for_agent("agent-ticket-bot", "acme")
+    store, _ = await held_store_for_agent("agent-ticket-bot", "acme")
 
-    body = admin("GET", APPROVALS_PATH, store=store).json()
+    body = (await admin("GET", APPROVALS_PATH, store=store)).json()
 
     (shown,) = body["pending"]
     assert shown["subject"] == ALICE
@@ -508,7 +517,7 @@ def test_the_decision_row_names_the_agent_and_tenant_and_never_the_token() -> No
     widely readable (ADR 0045)."""
     sink = MemoryAuditSink()
     audit = AuditLog(sink, required=True)
-    store, token = held_store_for_agent("agent-ticket-bot", "acme")
+    store, token = run_sync(held_store_for_agent("agent-ticket-bot", "acme"))
 
     async def _run() -> httpx.Response:
         app = build_admin_app(None, None, store, CREDENTIAL, audit)
@@ -528,7 +537,7 @@ def test_the_decision_row_names_the_agent_and_tenant_and_never_the_token() -> No
     assert row["subject"] == ALICE
     assert row["actor"] == "agent-ticket-bot"
     assert row["tenant"] == "acme"
-    assert row["detail"]["fingerprint"] == store.get(token).fingerprint  # type: ignore[union-attr]
+    assert row["detail"]["fingerprint"] == (run_sync(store.get(token))).fingerprint  # type: ignore[union-attr]
     assert "request_state" not in row["detail"]
     assert token not in json.dumps(row), "the live request_state must not reach the chain"
     # Answered with the shared token, and the row says exactly that rather than
@@ -540,7 +549,7 @@ def test_the_decision_row_names_the_agent_and_tenant_and_never_the_token() -> No
 def test_a_non_ascii_bearer_is_a_401_not_a_500() -> None:
     """`compare_digest` over `str` raises `TypeError` for non-ASCII input, which
     made an unauthenticated request carrying one a 500 on the admin listener."""
-    store = held_store(arguments={"query": "x"})
+    store = run_sync(held_store(arguments={"query": "x"}))
 
     async def _run() -> httpx.Response:
         app = build_admin_app(None, None, store, CREDENTIAL)
@@ -585,7 +594,7 @@ def operator_token(keypair: Keypair, subject: str = "oncall@example.test") -> st
     return keypair.sign(claims(sub=subject, aud=OPERATOR_AUDIENCE, act=None))
 
 
-def admin_with_jwt(
+async def admin_with_jwt(
     method: str,
     path: str,
     *,
@@ -604,18 +613,18 @@ def admin_with_jwt(
                 method, path, headers={"authorization": f"Bearer {bearer}"}, json=body
             )
 
-    response: httpx.Response = anyio.run(_run)
+    response: httpx.Response = await _run()
     return response
 
 
-def test_a_verified_operator_decides_and_the_row_names_them(keypair: Keypair) -> None:
+async def test_a_verified_operator_decides_and_the_row_names_them(keypair: Keypair) -> None:
     """The point of the whole change: the audit row records a subject an
     authorization server vouched for, not a label a config file asserted."""
     sink = MemoryAuditSink()
     audit = AuditLog(sink, required=True)
-    store, token = held_store_for_agent("agent-ticket-bot", "acme")
+    store, token = await held_store_for_agent("agent-ticket-bot", "acme")
 
-    response = admin_with_jwt(
+    response = await admin_with_jwt(
         "POST",
         approval_path(token),
         store=store,
@@ -632,14 +641,14 @@ def test_a_verified_operator_decides_and_the_row_names_them(keypair: Keypair) ->
     assert row["detail"]["operator_verified"] is True
 
 
-def test_an_agents_token_cannot_open_the_operator_channel(keypair: Keypair) -> None:
+async def test_an_agents_token_cannot_open_the_operator_channel(keypair: Keypair) -> None:
     """Same issuer, same keys, correctly signed — minted for the *gateway*.
     The audience is what keeps "may call tools" and "may approve them" apart,
     and a token that is one must not be the other."""
-    store, token = held_store_for_agent("agent-7", None)
+    store, token = await held_store_for_agent("agent-7", None)
     agents_token = keypair.sign(claims())  # aud = the gateway's audience
 
-    response = admin_with_jwt(
+    response = await admin_with_jwt(
         "POST",
         approval_path(token),
         store=store,
@@ -649,16 +658,16 @@ def test_an_agents_token_cannot_open_the_operator_channel(keypair: Keypair) -> N
     )
 
     assert response.status_code == 401
-    assert store.get(token).state is State.PENDING  # type: ignore[union-attr]
+    assert (await store.get(token)).state is State.PENDING  # type: ignore[union-attr]
 
 
-def test_an_operator_from_another_tenant_is_refused(keypair: Keypair) -> None:
+async def test_an_operator_from_another_tenant_is_refused(keypair: Keypair) -> None:
     """acme's operator, however valid their token, does not approve globex's
     delete. The tenant comes from the issuer registration (ADR 0051), so it is
     not something the token can claim its way across."""
-    store, token = held_store_for_agent("agent-7", "globex")
+    store, token = await held_store_for_agent("agent-7", "globex")
 
-    response = admin_with_jwt(
+    response = await admin_with_jwt(
         "POST",
         approval_path(token),
         store=store,
@@ -668,10 +677,10 @@ def test_an_operator_from_another_tenant_is_refused(keypair: Keypair) -> None:
     )
 
     assert response.status_code == 403
-    assert store.get(token).state is State.PENDING  # type: ignore[union-attr]
+    assert (await store.get(token)).state is State.PENDING  # type: ignore[union-attr]
 
 
-def test_the_listing_shows_an_operator_only_their_tenants_queue(keypair: Keypair) -> None:
+async def test_the_listing_shows_an_operator_only_their_tenants_queue(keypair: Keypair) -> None:
     store = InMemoryApprovalStore()
     for tenant in ("acme", "globex", "acme"):
         request = request_for(
@@ -684,14 +693,16 @@ def test_the_listing_shows_an_operator_only_their_tenants_queue(keypair: Keypair
             now=time.time(),
         )
         assert request is not None
-        store.create(request)
+        await store.create(request)
 
-    body = admin_with_jwt(
-        "GET",
-        APPROVALS_PATH,
-        store=store,
-        validator=operator_validator(keypair, tenant="acme"),
-        bearer=operator_token(keypair),
+    body = (
+        await admin_with_jwt(
+            "GET",
+            APPROVALS_PATH,
+            store=store,
+            validator=operator_validator(keypair, tenant="acme"),
+            bearer=operator_token(keypair),
+        )
     ).json()
 
     assert body["operator"] == "oncall@example.test"
@@ -699,7 +710,7 @@ def test_the_listing_shows_an_operator_only_their_tenants_queue(keypair: Keypair
 
 
 def test_with_neither_token_nor_validator_the_routes_are_absent() -> None:
-    store = held_store()
+    store = run_sync(held_store())
 
     async def _run() -> int:
         app = build_admin_app(None, None, store, "", None, operator_validator=None)
@@ -735,7 +746,7 @@ def test_a_decision_the_audit_log_refuses_is_not_made() -> None:
     `record` on the event loop, which both bypassed the writer's serialisation
     and, on failure, left an approval nobody could account for."""
     audit = AuditLog(_FullDisk(), required=True)  # type: ignore[arg-type]
-    store, token = held_store_for_agent("agent-7", "acme")
+    store, token = run_sync(held_store_for_agent("agent-7", "acme"))
 
     async def _run() -> httpx.Response:
         app = build_admin_app(None, None, store, CREDENTIAL, audit)
@@ -750,4 +761,4 @@ def test_a_decision_the_audit_log_refuses_is_not_made() -> None:
     response: httpx.Response = anyio.run(_run)
 
     assert response.status_code == 503
-    assert store.get(token).state is State.PENDING  # type: ignore[union-attr]
+    assert (run_sync(store.get(token))).state is State.PENDING  # type: ignore[union-attr]

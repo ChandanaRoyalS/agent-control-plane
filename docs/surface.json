@@ -42,6 +42,11 @@
       "default": "''"
     },
     {
+      "variable": "ACP_APPROVAL_STORE_URL",
+      "type": "str",
+      "default": "''"
+    },
+    {
       "variable": "ACP_APPROVAL_TTL_SECONDS",
       "type": "float",
       "default": "300.0"

@@ -21,6 +21,8 @@ import anyio
 import pytest
 
 from acp.audit import AuditLog, FileAuditSink, verify
+from acp.audit.record import Category, Outcome
+from acp.audit.signing import generate, load_verifier
 from acp.config import GatewaySettings
 from acp.exceptions import AuditUnavailableError, ConfigurationError
 from acp.policy import Effect, Policy, Rule
@@ -294,9 +296,6 @@ def test_a_call_that_cannot_be_recorded_is_refused(keypair: Keypair, tmp_path: P
 def test_a_configured_signing_key_signs_the_chain(tmp_path: Path) -> None:
     """ADR 0078's setting, end to end: the key file reaches the sink, and the
     public key verifies what it wrote."""
-    from acp.audit.record import Category, Outcome  # noqa: PLC0415
-    from acp.audit.signing import generate, load_verifier  # noqa: PLC0415
-
     private, public = tmp_path / "audit.pem", tmp_path / "audit.pub"
     generate(private, public)
     path = tmp_path / "audit.jsonl"

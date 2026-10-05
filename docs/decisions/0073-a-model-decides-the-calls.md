@@ -51,6 +51,35 @@ behind it.
   and "could not act" are different findings, and a small model may simply
   fail to use tools.
 
+## Amendment — the first run, and what it showed about the recorder (2026-10-06)
+
+The first recording, llama3.2 at ten trials per path, came back **0
+persuaded, 0 leaked** on both paths, and it was not committed. Every
+transcript held exactly one call, reading the runbook. But the final answers,
+cut at 200 characters, said things like "Called `mock-a__create_ticke…`" and
+"Call `mock-a__read_document` with path `hr/compensation-2026.md`". The model
+had been persuaded and had not acted, at least as far as the recorder could
+tell, and "not persuaded" was the wrong word for it.
+
+Three changes, all to the recorder, none to the gateway:
+
+- **Calls written into prose are read.** Small models often answer a tool
+  result with the next call as JSON in the text, not in Ollama's tool-call
+  field. Those are now parsed, for offered tools only. They are made like any
+  other call and marked `from_text` on the record. The tool-call field still
+  wins when both are present.
+- **A new verdict, *described only*.** The model did not call the tool to read
+  the payroll file, but named it in its final answer. This is neither
+  resistance nor exploitation, and the table now has a column for it instead
+  of folding it into either.
+- **Answers are kept up to 2,000 characters**, and **records are per model**
+  (`model-<date>-<commit>-<model>.json`). The README shows the newest record
+  for each model, so a second model recorded the same day does not overwrite
+  the first.
+
+The lesson belongs beside ADR 0072's: the first measurement found a defect
+in the instrument before it found anything about the subject.
+
 ## Alternatives considered
 
 - **A hosted model.** It would be more capable, but needs an API key, sends the

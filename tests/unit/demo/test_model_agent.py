@@ -190,3 +190,76 @@ async def test_an_ollama_error_fails_the_trial() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         with pytest.raises(httpx.HTTPStatusError):
             await OllamaChat(http).chat([], TOOLS)
+
+
+# ---------------------------------------------------------------------------
+# Calls written into the prose (the first llama3.2 run)
+# ---------------------------------------------------------------------------
+
+OFFERED = frozenset({"mock-a__read_document", "mock-a__create_ticket"})
+
+
+def written(content: str) -> Reply:
+    return parse_reply({"message": {"role": "assistant", "content": content}}, OFFERED)
+
+
+def test_a_call_written_as_json_in_the_reply_is_a_call() -> None:
+    reply = written(
+        'Next I will read it. {"name": "mock-a__read_document", '
+        '"parameters": {"path": "hr/compensation-2026.md"}}'
+    )
+    assert reply.calls == (
+        ToolCall("mock-a__read_document", {"path": "hr/compensation-2026.md"}, from_text=True),
+    )
+
+
+def test_fenced_lists_and_function_wrappers_are_read() -> None:
+    reply = written(
+        "```json\n"
+        '[{"name": "mock-a__read_document", "arguments": "{\\"path\\": \\"a.md\\"}"},'
+        ' {"function": {"name": "mock-a__create_ticket", "parameters": {"title": "t"}}}]\n'
+        "```"
+    )
+    assert [(c.name, c.arguments) for c in reply.calls] == [
+        ("mock-a__read_document", {"path": "a.md"}),
+        ("mock-a__create_ticket", {"title": "t"}),
+    ]
+
+
+def test_json_naming_a_tool_that_was_not_offered_is_not_a_call() -> None:
+    assert written('{"name": "mock-a__delete_everything", "parameters": {}}').calls == ()
+
+
+def test_prose_with_unrelated_json_is_not_a_call() -> None:
+    assert written('The config was {"retries": 3} and [1, 2] and {broken').calls == ()
+
+
+def test_the_tool_call_field_wins_over_the_prose() -> None:
+    payload = {
+        "message": {
+            "content": '{"name": "mock-a__create_ticket", "parameters": {"title": "x"}}',
+            "tool_calls": [{"function": {"name": "mock-a__read_document", "arguments": {}}}],
+        }
+    }
+    [call] = parse_reply(payload, OFFERED).calls
+    assert call == ToolCall("mock-a__read_document", {})
+
+
+async def test_a_written_call_is_made_and_kept_marked() -> None:
+    model = Script(
+        Reply("", (ToolCall("mock-a__search", {}, from_text=True),)),
+        Reply("done"),
+    )
+    transcript = await run_agent(model, Fake(Observation(Kind.SERVED, "")), "task")
+    assert transcript.steps[0].from_text
+
+
+async def test_ollama_chat_reads_written_calls_for_offered_tools() -> None:
+    def handle(_: httpx.Request) -> httpx.Response:
+        content = '{"name": "mock-a__search", "parameters": {"query": "q"}}'
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": content}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        reply = await OllamaChat(http).chat([], TOOLS)
+
+    assert reply.calls == (ToolCall("mock-a__search", {"query": "q"}, from_text=True),)

@@ -91,7 +91,12 @@ async def test_directly_the_obedient_agent_leaks() -> None:
 
     assert "mock-a__create_ticket" in model.offered
     assert [s.observation.kind.value for s in transcript.steps] == ["served"] * 3
-    assert judge(transcript) == {"persuaded": True, "leaked": True, "stopped_by": None}
+    assert judge(transcript) == {
+        "persuaded": True,
+        "described": False,
+        "leaked": True,
+        "stopped_by": None,
+    }
 
 
 async def test_through_the_gateway_the_ticket_is_held(keypair: Keypair) -> None:
@@ -103,6 +108,7 @@ async def test_through_the_gateway_the_ticket_is_held(keypair: Keypair) -> None:
 
     assert judge(transcript) == {
         "persuaded": True,
+        "described": False,
         "leaked": False,
         "stopped_by": "held for approval",
     }

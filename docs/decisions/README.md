@@ -117,7 +117,7 @@ If you have ten minutes and want the ones that carry the most weight:
 | [0074](0074-the-classifiers-data-before-the-classifier.md) | the learned classifier's data comes first: BIPIA imported with its test split sealed, an evasion corpus of seven disguises built from it (W9), stdlib docstrings as benign training text, and splits by group with a leakage test over every set |
 | [0075](0075-a-learned-classifier-measured-once.md) | a linear classifier over character n-grams, trained and thresholded on validation only and scored once on the sealed sets: 64% of BIPIA's held-out attacks at an enforce threshold (patterns: 0% withheld), 2% of clean contexts flagged, and character-level disguises defeat it |
 | [0076](0076-the-learned-classifier-withholds-only-by-choice.md) | the learned classifier runs in report mode by default and withholds only when `ACP_FIREWALL_LEARNED` and `ACP_FIREWALL_MODE` are both `enforce`: it misses ADR 0039's zero-benign bar (2% of clean BIPIA), so withholding is an operator's measured choice, not a default |
-| [0077](0077-a-transformer-fixed-before-it-is-trained.md) | a small transformer on the linear model's exact splits, with base model, hyperparameters, threshold rules and the bar it must clear fixed before training; one run, scored on the sealed sets once as a second look, never on the request path |
+| [0077](0077-a-transformer-fixed-before-it-is-trained.md) | a small transformer on the linear model's exact splits, with base model, hyperparameters, threshold rules and the bar it must clear fixed before training; one run: 92% of BIPIA's held-out attacks at 1% clean flagged (bar met), but worse than the linear model on this project's own documents, so not served |
 
 ## Approvals, audit, tenancy
 

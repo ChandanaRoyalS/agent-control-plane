@@ -27,6 +27,10 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+          # One cache per job: they install different sets (the floor Python,
+          # the image job's few tools), and parallel jobs sharing one key race
+          # to save it.
+          cache-suffix: ${{ github.job }}
 
       - name: Set up Python
         run: uv python install
@@ -129,6 +133,10 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+          # One cache per job: they install different sets (the floor Python,
+          # the image job's few tools), and parallel jobs sharing one key race
+          # to save it.
+          cache-suffix: ${{ github.job }}
 
       - name: Install the floor version
         run: uv python install 3.12
@@ -172,6 +180,10 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+          # One cache per job: they install different sets (the floor Python,
+          # the image job's few tools), and parallel jobs sharing one key race
+          # to save it.
+          cache-suffix: ${{ github.job }}
 
       - name: Install the verifier
         # `--no-dev`: this job runs exactly one command. pytest, mypy and ruff

@@ -1,15 +1,8 @@
-"""Policy: the rulebook that decides what an authenticated caller may do.
+"""Policy: what an authenticated caller may do.
 
-`acp.identity` answers *who is asking*. This package answers *what they may do* — in
-halves. `schema` is the rulebook: loaded and validated at startup,
-deny-by-default, and it evaluates nothing. The engine that turns a policy plus a
-request into an allow/deny decision is `evaluate`. Wiring that decision into the
-request path so a denied call is refused is `enforce`.
-
-Keeping load/validate separate from evaluate mirrors how identity was built
-(a config that fails fast, and an enforcement path that trusts it), and it means
-a malformed policy is a boot failure with a filename rather than a surprise on
-the first request.
+`schema` loads and validates the deny-by-default rulebook at startup, so a malformed
+policy fails boot with a filename. `evaluate` turns a policy and a request into a
+decision, and `enforce` refuses denied calls on the request path.
 """
 
 from acp.policy.enforce import enforce_call

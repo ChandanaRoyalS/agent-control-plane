@@ -1,34 +1,9 @@
-"""Asking an authorization server where its keys are, and checking it answered for itself.
+"""Authorization server metadata discovery, verifying the server answered for itself.
 
-Configuring a JWKS URL by hand works and quietly permits the exact confusion
-this phase is about: nothing anywhere checks that the key set you pointed at
-belongs to the issuer you said you trust. Paste the wrong line into the wrong
-environment file and the gateway will happily verify tokens from one
-authorization server while believing they came from another — a mix-up achieved
-without an attacker, by a copy-paste.
-
-Discovery closes that, and the closing move is one sentence of RFC 8414 §3.3:
-the ``issuer`` in the metadata document **must be identical** to the issuer
-identifier the URL was built from. The document is fetched from a location
-derived from the issuer, and it has to name that same issuer back. A server
-cannot claim to be somebody else without also being hosted where that somebody
-else's metadata lives.
-
-**Two URL shapes, because there are two specifications.** RFC 8414 *inserts*
-the well-known segment between the host and the path, so
-``https://host/realms/acp`` becomes
-``https://host/.well-known/oauth-authorization-server/realms/acp``. OpenID
-Connect Discovery *appends* it, giving
-``https://host/realms/acp/.well-known/openid-configuration``. Real deployments
-serve one, the other, or both — Keycloak serves both — and a client that knows
-only one form fails against half the world for a reason that looks like a
-network problem.
-
-**Identical means identical.** No trailing-slash normalisation, no case folding.
-Normalising would mean this gateway's notion of "the same authorization server"
-differs from the specification's, which is precisely the disagreement the check
-exists to detect. It does cost a confusing failure for the commonest typo, so
-the error message calls that case out by name.
+RFC 8414 §3.3: the metadata ``issuer`` must be identical to the configured issuer, so a
+key set cannot be attributed to the wrong server. Both URL forms are tried (RFC 8414
+inserts the well-known segment, OIDC Discovery appends it). Comparison is exact, with no
+slash or case normalisation; the error names the trailing-slash case.
 """
 
 from __future__ import annotations
@@ -51,35 +26,19 @@ OIDC_SEGMENT = ".well-known/openid-configuration"
 """OpenID Connect Discovery 1.0 §4 — appended to the issuer."""
 
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
-"""Hosts allowed to serve metadata over plain HTTP without anyone asking.
+"""Hosts that may serve metadata over plain HTTP; others need https (RFC 8414 §2).
 
-RFC 8414 §2 requires the issuer to use ``https``, and it is right to: metadata
-fetched over HTTP can be rewritten in flight, and this document is what decides
-which keys the gateway will trust. Loopback is exempt because traffic that never
-leaves the machine has no in-flight to be rewritten in.
-
-Note what this does *not* cover: one container talking to another. When Keycloak
-arrived in Compose the issuer became ``http://keycloak:8080`` — not
-loopback, not TLS, and refused by this rule. That is the rule working correctly,
-and the answer is ``insecure_hosts`` below rather than a wider default.
+Container hosts such as ``keycloak`` are not loopback and must be named in ``insecure_hosts``.
 """
 
 DEFAULT_TIMEOUT = 5.0
 
 
 def plaintext_permitted(hostname: str | None, insecure_hosts: Iterable[str] = ()) -> bool:
-    """Whether this host may serve its metadata over plain HTTP.
+    """Return whether this host may serve its metadata over plain HTTP.
 
-    ``insecure_hosts`` is an operator-named list, empty by default, and it is the
-    escape hatch built on purpose so that nobody builds a worse one by accident.
-    The alternatives actually on the table when Keycloak arrived were adding
-    ``keycloak`` to ``LOOPBACK_HOSTS`` — a lie, and one that would ship to every
-    deployment — or turning certificate verification off, which is broader than
-    this, quieter than this, and invisible in a config file. See ADR 0018.
-
-    Naming a host here is a decision rather than a default: it appears in
-    configuration as a hostname somebody typed, and startup logs a warning for
-    every entry.
+    ``insecure_hosts`` is an explicit operator list, empty by default; startup warns for
+    every entry. See ADR 0018.
     """
     if hostname is None:
         return False
@@ -94,41 +53,26 @@ class ProviderMetadata:
     jwks_uri: str
     source: str
     token_endpoint: str = ""
-    """Where to exchange a token (RFC 8693, see `acp.identity.exchange`).
+    """Token endpoint for RFC 8693 exchange; empty if the server publishes none.
 
-    Empty when the server publishes none, which is not fatal here — a gateway
-    that only validates tokens never needs it. It becomes fatal in
-    ``build_token_exchanger``, at the point where somebody has asked for
-    exchange and there is nowhere to send the request.
-
-    Taken from discovery rather than configured, for the reason the key set is:
-    the metadata document has already been proved to belong to this issuer
-    (RFC 8414 §3.3), so an endpoint read from it inherits that proof. A token
-    endpoint pasted into a config file inherits nothing.
+    Taken from verified metadata (RFC 8414 §3.3), never configured. Missing is fatal only
+    in ``build_token_exchanger``.
     """
-    """Which URL answered. Logged, because "discovery worked" and "discovery
-    worked *via the OIDC form*" are different facts when debugging a server that
-    only implements one of them."""
+    """Which URL answered (logged)."""
 
 
 async def discover(
     issuer: str,
     *,
     client: httpx.AsyncClient | None = None,
-    # Named `request_timeout` rather than `timeout`: ruff's ASYNC109 flags a
-    # `timeout` parameter on an async function, on the reasonable grounds that
-    # it usually means somebody is reimplementing cancellation by hand. Here it
-    # is an httpx connection timeout being passed to a client, which is the
-    # thing ASYNC109 tells you to use instead.
+    # Not `timeout`, which trips ruff ASYNC109; this is an httpx client timeout.
     request_timeout: float = DEFAULT_TIMEOUT,
     insecure_hosts: Iterable[str] = (),
 ) -> ProviderMetadata:
     """Fetch and validate an authorization server's metadata.
 
-    Raises ``ConfigurationError`` for everything, because this runs at startup
-    and every failure here is a deployment that must not begin serving. A
-    gateway that starts with an unverified idea of which keys to trust has
-    already lost the property this module exists to provide.
+    Raises:
+        ConfigurationError: On any failure; this runs at startup and must stop it.
     """
     _reject_unusable_issuer(issuer, insecure_hosts)
 
@@ -159,12 +103,7 @@ async def discover(
 
 
 def candidate_urls(issuer: str) -> list[str]:
-    """Both well-known forms, RFC 8414's first.
-
-    RFC 8414's is tried first because it is the OAuth specification and this is
-    an OAuth resource server; the OpenID form is the fallback for the many
-    servers that only implement OIDC Discovery.
-    """
+    """Return both well-known URLs, RFC 8414's first and the OIDC form as fallback."""
     parts = urlsplit(issuer)
     path = parts.path.rstrip("/")
 
@@ -176,8 +115,7 @@ def candidate_urls(issuer: str) -> list[str]:
 def _reject_unusable_issuer(issuer: str, insecure_hosts: Iterable[str] = ()) -> None:
     parts = urlsplit(issuer)
     if parts.query or parts.fragment:
-        # RFC 8414 §2. A query string in an identifier means two spellings of
-        # the same server compare unequal, and equality is the whole mechanism.
+        # RFC 8414 §2: a query breaks identifier equality.
         msg = f"issuer {issuer!r} must not contain a query string or fragment (RFC 8414 §2)"
         raise ConfigurationError(msg)
     if not parts.netloc:
@@ -198,12 +136,10 @@ def _reject_unusable_issuer(issuer: str, insecure_hosts: Iterable[str] = ()) -> 
 async def _fetch(
     client: httpx.AsyncClient, url: str, failures: list[str]
 ) -> dict[str, object] | None:
-    """One candidate URL. ``None`` means try the next one.
+    """Fetch one candidate URL; ``None`` means try the next.
 
-    Redirects are not followed. A metadata document reached by redirect is a
-    document served from somewhere other than where the issuer's identity says
-    it should be, which is the property being checked — so following one would
-    quietly undo the check.
+    Redirects are not followed, since a redirected document is not served where the
+    issuer says.
     """
     try:
         response = await client.get(url)
@@ -228,13 +164,9 @@ async def _fetch(
 
 
 def _validate(document: dict[str, object], issuer: str, url: str) -> ProviderMetadata:
-    """RFC 8414 §3.3, and the one field this gateway needs.
+    """Check RFC 8414 §3.3 and extract the fields used.
 
-    A mismatch here is fatal rather than a reason to try the next candidate URL.
-    A server that answered *and named somebody else* is not a server that failed
-    to answer — it is the exact condition this function exists to detect, and
-    moving on to the next URL would be looking for a server willing to agree
-    with us.
+    An issuer mismatch is fatal, not a reason to try the next URL.
     """
     declared = document.get("issuer")
     if declared != issuer:
@@ -262,8 +194,7 @@ def _mismatch_message(declared: object, issuer: str, url: str) -> str:
         f"issuer being trusted."
     )
     if isinstance(declared, str) and declared.rstrip("/") == issuer.rstrip("/"):
-        # By far the commonest way to hit this, and the least informative if
-        # left unexplained — the two strings look the same in a terminal.
+        # Commonest case, and invisible in a terminal.
         return (
             base + " These differ only by a trailing slash: use the exact string "
             "the server publishes."

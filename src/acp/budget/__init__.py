@@ -1,9 +1,6 @@
-"""Budget controls: keep an agent's spending bounded.
+"""Budget controls that bound an agent's spending.
 
-The first control is rate limiting — a token bucket per principal, so a runaway
-or compromised agent draws from a bucket that refills at a fixed rate rather than
-calling without bound. Quotas, cost accounting, and result caching join here as
-the phase lands.
+Per-principal token-bucket rate limits, fixed-window quotas and per-tool costs.
 """
 
 from acp.budget.account import account, parties

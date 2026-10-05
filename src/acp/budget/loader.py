@@ -1,9 +1,7 @@
 """Load a cost table from a YAML document, or raise ConfigurationError.
 
-The file is a mapping: a ``costs`` map of qualified tool name to cost, and an
-optional ``default`` for tools not named. Absent file means no weighting — the
-caller supplies the default table (every call costs one), so a deployment
-without a costs file behaves exactly as the unweighted limiter did.
+The file holds a ``costs`` map of qualified tool name to cost and an optional
+``default``. With no file the caller uses the default table (every call costs one).
 """
 
 from __future__ import annotations
@@ -28,11 +26,7 @@ def _validate_cost(name: str, value: object, path: Path) -> float:
 
 
 def load_costs(path: Path) -> CostTable:
-    """Read and validate the costs document, or raise ``ConfigurationError``.
-
-    Errors name the file and the offending entry — the account a human reads
-    when a deploy fails, so a bare "invalid" is not enough.
-    """
+    """Read and validate the costs document, or raise ``ConfigurationError`` naming the entry."""
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -46,8 +40,7 @@ def load_costs(path: Path) -> CostTable:
         raise ConfigurationError(msg) from exc
 
     if document is None:
-        # An empty file is ambiguous: no costs, or a truncated mount? Rather than
-        # guess, make the deployer say `costs: {}` to mean "no weighting".
+        # Empty may mean a truncated mount; require an explicit `costs: {}`.
         msg = (
             f"costs file {str(path)!r} is empty. Write `costs: {{}}` to mean "
             f"'no per-tool weighting', or add costs."

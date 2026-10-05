@@ -1,44 +1,10 @@
-"""The evaluation corpus: the documents that turn a claim into a number.
+"""The evaluation corpus that turns firewall claims into numbers.
 
-Everything in `acp.firewall` is a mechanism. None of it says how often it is
-right, and until something does, "injection firewall" is a description of an
-intention. This package is the other half.
-
-**Benign first, deliberately** (ADR 0039). The tempting order is to
-collect attacks, count how many are caught, and publish that — a number anybody
-can reach by refusing everything. The number that decides whether a security
-control survives a real deployment is how often it is wrong about a document
-somebody legitimately needed. Building that half first meant the first
-measurement this project ever produced was one that made it weaker: it demoted
-two detectors within an hour, including the one described as having a
-false-positive rate near zero.
-
-**Then the attacks, sliced by family** (ADR 0040). A single detection
-rate over mixed attacks is unreadable, so every attack names its family — and
-the taxonomy deliberately includes families no pattern can catch, because a
-taxonomy containing only what you can catch is a taxonomy that flatters you.
-Every attack also records what the firewall is expected to do with it, including
-`undetected`, and the build fails when an expectation is wrong in *either*
-direction.
-
-**Then the split that may not be tuned against** (ADR 0041) and a
-model classifier behind the same detector interface (ADR 0042).
-
-**Then the harness that turns all of it into numbers** (ADR 0046).
-False-positive rate first, then recall sliced by the family the
-corpus assigned, then precision sliced by the family the firewall reported —
-two different questions over two different populations, reported as two tables
-so nobody divides one by the other. Every rate carries a bootstrap interval,
-because a rate over 106 documents and a rate over 106,000 read identically and
-are not the same claim. There is still no aggregate detection rate, and the
-held-out split is named and counted on every run and scored on none of them
-without a deliberate flag.
-
-**And finally the gate that keeps the numbers from quietly getting worse**
-(ADR 0047). A committed baseline rather than a threshold, compared by
-counts rather than rates, so accepting a regression stays possible and stops
-being invisible — it becomes a diff in a pull request with a person's name on
-it.
+Benign documents first (ADR 0039), attacks sliced by family with an expected
+outcome each (ADR 0040), a held-out split not tuned against (ADR 0041), a model
+classifier (ADR 0042), a harness reporting FP rate, recall and precision with
+bootstrap intervals and no aggregate rate (ADR 0046), and a committed baseline
+compared by counts (ADR 0047).
 """
 
 from acp.corpus.attack import Attack, AttackFamily, Expectation, parse_attack

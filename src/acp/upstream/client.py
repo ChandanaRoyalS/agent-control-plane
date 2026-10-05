@@ -1,13 +1,7 @@
 """An async JSON-RPC client for one upstream MCP server.
 
-Scope note: this deliberately contains no retries, no circuit breaker and no
-health checking. Those are separate layers (`retry`, `breaker`, `acp.health`),
-and they wrap this rather than living inside it — a client that silently retries
-is a client you cannot build a correct circuit breaker on top of, because the
-breaker can no longer see how many attempts actually failed.
-
-What it does own: connection pooling, layered timeouts, and turning every
-possible failure into a member of the exception taxonomy.
+Owns pooling, layered timeouts and mapping every failure into the exception
+taxonomy. Retries, breaker and health checks are wrapping layers (ADR 0006).
 """
 
 from __future__ import annotations
@@ -38,23 +32,19 @@ from acp.upstream.protocol import Credentials
 logger = logging.getLogger(__name__)
 
 _TRANSIENT_STATUSES: Final = frozenset({408, 429})
-"""The two 4xx codes that describe the upstream's state rather than this request's
-correctness: a request timeout and a rate limit. Both pass on their own."""
+"""4xx codes describing the upstream's state, not the request: timeout, rate limit."""
 
 _SERVER_ERROR_FLOOR: Final = 500
 
 CLIENT_NAME = "agent-control-plane"
-"""Identity sent in every request's envelope, since there is no handshake to
-introduce ourselves in."""
+"""Identity sent in every request's envelope."""
 
 
 class UpstreamClient:
     """Talks JSON-RPC to a single upstream MCP server.
 
-    Construct with an injected ``httpx.AsyncClient`` — or use :meth:`connect`,
-    which builds a correctly configured one and closes it on exit. Injection is
-    what lets tests drive a mock upstream in-process through ``ASGITransport``
-    with no sockets, without this class needing any test-only branches.
+    Takes an injected ``httpx.AsyncClient`` (tests use ``ASGITransport``), or use
+    :meth:`connect` to build a configured one.
     """
 
     def __init__(
@@ -66,20 +56,11 @@ class UpstreamClient:
     ) -> None:
         self.config = config
         self._http = http
-        # Resolved once, at startup, by whoever built this client — not looked
-        # up per request. A store lookup on the request path would put a failure
-        # mode (missing secret) somewhere it cannot be fixed, and startup is
-        # where every other configuration problem in this project surfaces.
+        # Resolved at startup, so a missing secret fails there, not per request.
         self._secret = secret
-        # `None` when no exchange is configured, which is every deployment
-        # without an identity provider and every test of the transport. Typed
-        # structurally (see `protocol.Credentials`) so this module never
-        # imports identity.
+        # `None` when no token exchange is configured.
         self._credentials = credentials
-        # Monotonic per-client request IDs. JSON-RPC only requires that an id be
-        # unique among in-flight requests on a connection, so a simple counter
-        # is sufficient and makes correlating a response to a request trivial
-        # when reading a packet capture or a log.
+        # JSON-RPC ids need only be unique among in-flight requests.
         self._ids = itertools.count(1)
 
     # -- lifecycle ---------------------------------------------------------
@@ -119,22 +100,9 @@ class UpstreamClient:
     async def _credential(self) -> tuple[str, str] | None:
         """The header and value this call carries, if any.
 
-        Two mechanisms, and the config model makes them mutually exclusive
-        (`UpstreamConfig._one_way_to_be_credentialed`), so the order here decides
-        nothing — it is written static-first only because that branch is the one
-        that cannot fail.
-
-        A *static* credential was resolved from the store at startup. It goes in
-        whatever header this upstream wants, because an API key that insists on
-        `X-API-Key` is not an unusual upstream, it is most of them.
-
-        An *exchanged* credential is minted now, per call, and always in
-        `Authorization` — RFC 6750 defines exactly one place for a bearer token
-        and an upstream that wanted it elsewhere would not be speaking OAuth.
-
-        Neither means no credential. Startup refuses that combination once
-        exchange is configured; the branch stays because a default that silently
-        drops a credential is worse than one that cannot be reached.
+        A static secret goes in the configured header; an exchanged credential is
+        minted per call and always sent in `Authorization` (RFC 6750). The two are
+        mutually exclusive in config.
         """
         if self._secret is not None:
             scheme = self.config.credential_scheme
@@ -173,12 +141,7 @@ class UpstreamClient:
     async def call_tool(
         self, name: str, arguments: Mapping[str, Any] | None = None
     ) -> CallToolResult:
-        """Invoke one tool.
-
-        A tool that runs and fails returns normally with ``is_error`` set — that
-        is a result, not an exception. Only transport and protocol failures
-        raise.
-        """
+        """Invoke one tool; a tool failure returns ``is_error``, transport errors raise."""
         result = await self._request(
             "tools/call",
             {"name": name, "arguments": dict(arguments or {})},
@@ -202,11 +165,7 @@ class UpstreamClient:
         *,
         tool_name: str | None = None,
     ) -> dict[str, Any]:
-        """Send one JSON-RPC request and return its ``result`` object.
-
-        Every failure path out of this method raises a member of the exception
-        taxonomy. Nothing else escapes.
-        """
+        """Send one JSON-RPC request and return its ``result``; failures raise ``ACPError``s."""
         request_id = next(self._ids)
         attributes = semconv.client_attributes(
             method=method,
@@ -216,10 +175,8 @@ class UpstreamClient:
             request_id=request_id,
             protocol_version=PROTOCOL_VERSION,
         )
-        # The span is opened *before* the body is built, and that ordering is
-        # the point: the trace context injected below is this span's, so the
-        # upstream's own server span nests underneath this client span rather
-        # than beside it. Open it afterwards and the trace loses its shape.
+        # Span opened before the body is built, so the injected trace context is
+        # this span's and the upstream's span nests under it.
         span_name = semconv.span_name(method, semconv.client_target(self.config.name, tool_name))
         with tracing.client_span(span_name, attributes) as span:
             return await self._send(method, params, tool_name, request_id, span)
@@ -232,14 +189,8 @@ class UpstreamClient:
         request_id: int,
         span: Any,
     ) -> dict[str, Any]:
-        # The envelope lives in `params._meta`, so `params` is always present
-        # — even for a method that takes no arguments. A `tools/list` with no
-        # params is not a valid 2026-07-28 request, and a real server rejects
-        # it with -32602 before the method is ever dispatched.
-        #
-        # The W3C trace context rides in the same `_meta`, unprefixed, per
-        # SEP-414. Empty when nothing is being traced, in which case the request
-        # is byte-for-byte what it was before tracing existed.
+        # `params` is always present (it holds the envelope); without it a real
+        # server rejects with -32602. Trace context rides in `_meta` (SEP-414).
         body: dict[str, Any] = {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -248,21 +199,11 @@ class UpstreamClient:
                 params, CLIENT_NAME, __version__, tracing.current_trace_context()
             ),
         }
-        # Derived from the body rather than assembled alongside it, so the
-        # headers cannot drift from what they are asserting about. A server
-        # rejects a request whose header and body disagree.
+        # Derived from the body so headers cannot disagree with it.
         headers = routing_headers(method, body["params"])
 
-        # The credential is minted per call and lives only as long as this
-        # request. Obtained *before* the timer starts because a slow
-        # authorization server is not a slow upstream, and folding one into the
-        # other would put an identity outage in this upstream's latency
-        # histogram and, worse, on the way to opening its circuit breaker.
-        #
-        # `CredentialExchangeError` propagates from here untouched. It is
-        # neither a timeout nor an unavailability, so the guard does not count
-        # it as an upstream failure — which is right: the upstream has done
-        # nothing wrong and has not been contacted.
+        # Minted before the timer starts, so identity latency is not upstream
+        # latency. `CredentialExchangeError` propagates; the breaker ignores it.
         credential = await self._credential()
         if credential is not None:
             headers[credential[0]] = credential[1]
@@ -279,9 +220,7 @@ class UpstreamClient:
                 details={"method": method},
             ) from exc
         except httpx.HTTPError as exc:
-            # Covers connection refused, DNS failure, TLS errors, and a
-            # connection dropped mid-response. All mean "could not complete the
-            # exchange", which is a different thing from "answered badly".
+            # Refused, DNS, TLS, or dropped mid-response: no exchange completed.
             self._observe(method, tool_name, started, "unavailable")
             tracing.mark_failed(span, semconv.error_attributes(exc), "unavailable")
             raise UpstreamUnavailableError(
@@ -312,14 +251,7 @@ class UpstreamClient:
         outcome: str,
         **fields: object,
     ) -> None:
-        """One event per upstream call, whatever happened.
-
-        This is the layer that actually touches the network, so it is the only
-        place that can time it honestly — a wrapper further out would be timing
-        its own retries and backoff as well. It is also why `httpx` itself is
-        turned down to WARNING: an INFO line per request from the library would
-        say the same thing with less context.
-        """
+        """Log and record one event per upstream call; only this layer times the network alone."""
         elapsed = time.perf_counter() - started
         logger.info(
             "upstream.call",
@@ -328,8 +260,7 @@ class UpstreamClient:
                 "operation": method,
                 "tool": tool_name,
                 "outcome": outcome,
-                # Milliseconds in the log because a human reads it; seconds in
-                # the histogram because Prometheus convention is base units.
+                # ms for humans here; the histogram uses seconds.
                 "duration_ms": round(elapsed * 1000, 2),
                 **fields,
             },
@@ -337,9 +268,7 @@ class UpstreamClient:
         metrics.record_upstream_call(
             upstream=self.config.name,
             method=method,
-            # Already resolved against this upstream's catalogue by the registry
-            # before it reached here, so it is a bounded value rather than
-            # whatever the agent typed.
+            # Bounded: the registry resolved it against the catalogue.
             tool=metrics.tool_label(tool_name),
             outcome=outcome,
             duration_seconds=elapsed,
@@ -350,20 +279,14 @@ class UpstreamClient:
         if response.is_error:  # httpx: any 4xx or 5xx
             status = response.status_code
             if status in _TRANSIENT_STATUSES or status >= _SERVER_ERROR_FLOOR:
-                # The upstream is there and is struggling — or something in
-                # front of it is. Recoverable, retried, and evidence for the
-                # breaker.
+                # Upstream struggling: recoverable, retried, counted by the breaker.
                 raise UpstreamUnavailableError(
                     f"{self.config.name} returned HTTP {status}",
                     upstream=self.config.name,
                     details={"method": method, "status": status},
                 )
-            # Any other 4xx is the upstream answering, deliberately, that *this
-            # request* is wrong: a bad credential, a wrong path, a method it
-            # does not serve. Retrying sends the same request; counting it
-            # toward the breaker would let one misconfigured API key withdraw a
-            # healthy upstream from every caller's catalogue. Not recoverable,
-            # not retried, not a failure the breaker counts.
+            # Other 4xx: this request is wrong. Not retried or counted by the
+            # breaker, so one bad API key cannot withdraw a healthy upstream.
             raise UpstreamProtocolError(
                 f"{self.config.name} returned HTTP {status}",
                 upstream=self.config.name,
@@ -388,10 +311,8 @@ class UpstreamClient:
 
         if "error" in payload:
             error = payload["error"]
-            # JSON-RPC requires an integer code. A missing one, or a string,
-            # null or float in its place, is a malformed error object rather than
-            # a rejection — and must not escape as a `TypeError` or `ValueError`
-            # from a cast, which would leave the taxonomy on a hostile body.
+            # A non-integer code is a malformed error object; checked rather
+            # than cast so nothing escapes the taxonomy.
             if (
                 not isinstance(error, dict)
                 or not isinstance(error.get("code"), int)

@@ -1,33 +1,9 @@
-"""A committed record of what the firewall caught, and a diff against it.
+"""A committed baseline of what the firewall caught, and a diff against it (ADR 0047).
 
-The requirement is to "fail the build when detection drops or false positives
-rise beyond threshold", and the word to argue with is **threshold**.
-
-**A threshold is a number somebody picked once, and it can be raised by whoever
-the build is annoying that week.** "False positives must stay under 25%" survives
-exactly until a change pushes it to 26%, at which point the cheapest fix is to
-edit the 25. Nothing about that shows up as a decision; it shows up as a
-one-character diff in a config file that no reviewer reads as *"we accepted more
-false positives"*.
-
-So this is a **baseline**, not a threshold — the same shape as
-`config/schema-baseline.json` and for the same reason (ADR 0013). The current
-counts are committed to the repository, the gate compares against them, and every
-change to the numbers is a line in a pull request with a person's name on it.
-Accepting a regression stays possible and stops being invisible.
-
-**Counts, not rates.** A rate hides its own denominator: 19.8% and 20.7% look
-like drift and are one document out of 106. Worse, adding a benign document
-changes every rate in the report without anything about the firewall changing at
-all. Counts make the corpus size part of the comparison, so a corpus that grew is
-detected as *the ruler changed* rather than silently absorbed into a percentage.
-
-**Three outcomes, not two.** A comparison can find a regression (fail), an
-improvement (pass, and say the baseline is now stale), or a *structural* change —
-the corpus grew, a family appeared, the deployment moved — where the two runs are
-not comparable at all. Reporting that third case as a regression would be a lie
-about what happened, and reporting it as a pass would let a corpus change smuggle
-one through.
+A baseline rather than a threshold, like `config/schema-baseline.json` (ADR 0013),
+so accepting a regression is a reviewed diff. Compared by counts, since rates hide
+their denominator. A comparison yields regressions, improvements, or a structural
+change (corpus, families or deployment moved) where the runs are not comparable.
 """
 
 from __future__ import annotations
@@ -76,13 +52,7 @@ class Baseline:
     reported: dict[str, ReportedCounts]
 
     def to_json(self) -> str:
-        """Rendered for a human reading a diff, not for a parser.
-
-        Sorted keys and two-space indent, so a change to one number is a
-        one-line diff. A minified baseline would make every regression look like
-        the whole file changed, and a reviewer who cannot see what moved will
-        approve whatever moved.
-        """
+        """Sorted, indented JSON so a changed number is a one-line diff."""
         payload: dict[str, Any] = {
             "version": self.version,
             "deployment": self.deployment,
@@ -189,9 +159,7 @@ class Comparison:
     """What changed between the committed baseline and this run."""
 
     structural: tuple[str, ...] = field(default_factory=tuple)
-    """The two runs are not comparable — the corpus, the families or the
-    deployment moved. Not a regression and not a pass: a statement that the
-    ruler changed, which needs a deliberate re-capture rather than a fix."""
+    """Why the runs are not comparable; needs a deliberate re-capture, not a fix."""
 
     regressions: tuple[str, ...] = field(default_factory=tuple)
     improvements: tuple[str, ...] = field(default_factory=tuple)
@@ -203,12 +171,7 @@ class Comparison:
 
     @property
     def stale(self) -> bool:
-        """The firewall improved, so the committed numbers understate it.
-
-        Not a failure — but worth saying, because a baseline nobody refreshes
-        drifts into recording a state the firewall left months ago, and a gate
-        against a stale baseline would not notice a regression back to it.
-        """
+        """The firewall improved, so the baseline should be re-captured (not a failure)."""
         return bool(self.improvements)
 
 
@@ -230,14 +193,7 @@ def _compare_counts(
 
 
 def compare(baseline: Baseline, report: Report) -> Comparison:
-    """Diff a run against the committed baseline.
-
-    Structural differences are collected *first and exclusively*: when the corpus
-    or the deployment has changed there is no meaningful count comparison to
-    make, and producing a list of "regressions" from incomparable numbers would
-    send somebody looking for a bug in the firewall that is really a document
-    they added.
-    """
+    """Diff a run against the baseline; any structural change is returned alone."""
     current = baseline_from(report)
 
     structural: list[str] = []
@@ -306,10 +262,7 @@ def compare(baseline: Baseline, report: Report) -> Comparison:
         )
 
     for name in sorted(baseline.reported.keys() | current.reported.keys()):
-        # A reported family with no row is one nothing fired for. Zero is the
-        # right reading, and it is a real change worth catching in both
-        # directions — a detector that stopped reporting entirely is a
-        # regression even when no per-family total moved.
+        # A missing row means nothing fired: count it as zero, in both directions.
         old_reported = baseline.reported.get(name, ReportedCounts(0, 0))
         new_reported = current.reported.get(name, ReportedCounts(0, 0))
         _compare_counts(
@@ -333,10 +286,5 @@ def compare(baseline: Baseline, report: Report) -> Comparison:
 
 
 def default_baseline_path(root: Path | None = None) -> Path:
-    """Where the baseline lives: beside the corpus it describes.
-
-    Not in `config/`, which holds a deployment's settings. This is a property of
-    the corpus and the detectors together, and it is meaningless without the
-    documents next to it.
-    """
+    """The baseline path, beside the corpus it describes (not in `config/`)."""
     return (root or default_root()) / "eval-baseline.json"

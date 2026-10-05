@@ -1,14 +1,7 @@
-"""One file, no build step, no framework.
+"""The console page: one file, no build step, no framework, no CDN (works offline).
 
-*"Minimal styling, no framework ceremony — it exists to be watched for thirty
-seconds."*
-
-Taken literally. No npm, no bundler, no CDN: a CDN import would make the console
-fail on a laptop with no network, which is exactly the machine a demo runs on.
-
-The one thing this page works hard at is the distinction between a **recorded**
-event and an **observed** one, because that is the honest part and a console that
-rendered them identically would quietly claim the breaker line is in the chain.
+It renders recorded and observed events distinctly, so live-only lines are not
+mistaken for chain entries.
 """
 
 from __future__ import annotations

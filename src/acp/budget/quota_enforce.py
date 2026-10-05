@@ -1,10 +1,6 @@
 """Turn a quota decision into a refused call, or let it pass.
 
-The quota counterpart to ``enforce_rate_limit``: a pure boundary the request
-path calls in one place. The quota decides whether the principal has budget left
-in the current window; this raises ``QuotaExceededError`` when they do not,
-carrying both halves of what a refused agent needs: when the window resets, and
-how much of the allowance is left when it does.
+The quota counterpart to ``enforce_rate_limit``, called in one place on the request path.
 """
 
 from __future__ import annotations
@@ -18,18 +14,12 @@ def enforce_quota(
 ) -> None:
     """Spend ``cost`` of ``principal``'s quota, or raise.
 
-    Returns ``None`` when the spend fits within the window's limit. Raises
-    ``QuotaExceededError`` when it would exceed it, carrying the same three
-    fields as the rate-limit refusal — ``retry_after``, ``remaining`` and
-    ``limit`` — spelled identically on purpose. A refused agent should not have
-    to work out *which* budget stopped it before it can read the answer.
+    With ``debit=False`` only checks affordability.
 
-    ``remaining`` is usually non-zero here where it is zero for a rate limit: a
-    quota refuses a call that would *exceed* the window's limit, so a caller
-    with two units left asking for a call that costs ten is refused with two
-    still available. That is exactly the case where the number earns its place —
-    the agent can spend the two on something cheaper instead of waiting out the
-    window.
+    Raises:
+        QuotaExceededError: with the same ``retry_after``, ``remaining`` and ``limit``
+            fields as the rate-limit refusal. ``remaining`` may be non-zero, since a
+            call is refused when it would exceed the limit.
     """
     if (quota.check if debit else quota.affords)(principal, now, cost):
         return

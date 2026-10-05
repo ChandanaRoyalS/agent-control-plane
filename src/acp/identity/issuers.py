@@ -1,36 +1,9 @@
 """Trusted authorization servers, each bound to its own keys and audience.
 
-The validator alone trusts exactly one issuer, and with one issuer there is nothing to
-cross. The moment a gateway trusts two — a corporate directory and a partner's,
-say, or a tenant per authorization server — a new class of mistake becomes
-available, and it is the resource-server form of the **authorization server
-mix-up** attack.
-
-The mistake looks like this. Collect every trusted key into one bag. Verify the
-signature against whichever key in the bag matches. *Then* read ``iss`` and
-apply that issuer's rules. A token genuinely signed by the partner's key, but
-claiming ``iss`` of the corporate directory, sails through: the signature is
-valid, and every decision after it is made against the wrong authorization
-server's registration. The partner can now mint corporate principals.
-
-**A registration is indivisible.** Issuer, audience, key set and permitted
-algorithms are configured together and used together. The ``iss`` claim selects
-one registration and everything after that comes from *that* registration —
-never from a merged view, never from a default.
-
-**Selection reads an unverified claim, and that is safe here.** You cannot know
-which key set to verify against without first looking at who the token says
-issued it, and at that point nothing has been checked. The safety does not come
-from the peek being trustworthy; it comes from what happens next. Having chosen
-registration ``A`` because the token said ``A``, the signature must verify
-against ``A``'s keys and ``iss`` must equal ``A``'s issuer. A token that lies
-about its issuer selects a registration whose keys will not verify it. A token
-that tells the truth gets the rules that belong to it. There is no ordering of
-those two steps that lets them disagree.
-
-Contrast the broken version, which is the same three facts in the wrong order:
-verify first against anything, read ``iss`` after. That is a bag of keys, and a
-bag of keys has no opinion about which server a token came from.
+Defends against authorization server mix-up. A registration (issuer, audience, keys,
+algorithms) is indivisible, and the token's unverified ``iss`` selects exactly one. That
+peek is safe because the signature must then verify against that registration's keys and
+``iss`` must equal its issuer, so a lying token selects keys that will not verify it.
 """
 
 from __future__ import annotations
@@ -52,36 +25,21 @@ from acp.identity.validator import TokenPolicy
 
 @dataclass(frozen=True, slots=True)
 class IssuerRegistration:
-    """One authorization server, and everything that belongs to it.
-
-    A dataclass rather than a tuple of arguments passed around together,
-    precisely so there is no call site where the audience of one server can be
-    combined with the keys of another. The type makes crossing them a thing you
-    would have to construct deliberately.
-    """
+    """One authorization server and everything that belongs to it, kept together."""
 
     policy: TokenPolicy
     keys: JwksCache
     tenant: str | None = None
-    """Which tenant this authorization server's principals belong to.
+    """Tenant for this server's principals; ``None`` means not multi-tenant.
 
-    On the *registration*, deliberately, rather than read from a token claim.
-    Lying about ``iss`` already fails signature verification, so a token cannot
-    claim its way into another tenant — the tenant boundary inherits the
-    strength of the mix-up defence this whole module exists for, and no new
-    trust is placed in anything a token says about itself. ``None`` means this
-    gateway is not multi-tenant on this issuer, and everything downstream
-    behaves exactly as it did before the field existed.
+    Set on the registration, never read from a token claim, so a token cannot claim its
+    way into another tenant.
     """
 
     token_endpoint: str = ""
-    """Where this server exchanges tokens (RFC 8693, see `acp.identity.exchange`).
+    """RFC 8693 token endpoint (see `acp.identity.exchange`).
 
-    Part of the registration rather than a single gateway-wide setting, and for
-    the reason everything else here is: the exchange has to go back to the server
-    that issued the subject token. One shared endpoint would mean presenting one
-    authorization server's token to another's — the mix-up attack, arrived at by
-    a convenience rather than by an attacker.
+    Per registration, since an exchange must go back to the server that issued the token.
     """
 
     @property
@@ -100,10 +58,7 @@ class IssuerRegistry:
         self._by_issuer: dict[str, IssuerRegistration] = {}
         for registration in registrations:
             if registration.issuer in self._by_issuer:
-                # Two registrations for one issuer means the second silently
-                # wins, and which one that is depends on file ordering. When the
-                # thing being chosen between is "which audience must a token
-                # carry", ambiguity is not a tie to be broken.
+                # A duplicate would silently win by file order.
                 msg = (
                     f"issuer {registration.issuer!r} is registered more than once; "
                     f"each authorization server must appear exactly once"
@@ -117,13 +72,8 @@ class IssuerRegistry:
 
         unlabelled = sorted(r.issuer for r in self._by_issuer.values() if r.tenant is None)
         if len(unlabelled) > 1:
-            # Two issuers with no tenant label both stamp `tenant=None`, and
-            # everything downstream keys on (tenant, subject): the result
-            # cache, the budget account, the approval binding. Issuer A's
-            # "alice" would be served issuer B's alice's cached results and
-            # drain her budget. That is ADR 0051's failure, reachable through
-            # configuration, and refusing it here is cheaper than keying on
-            # the issuer everywhere (ADR 0070).
+            # Unlabelled issuers would share the (tenant, subject) namespace in cache,
+            # budgets and approvals: ADR 0051's failure via config (ADR 0070).
             msg = (
                 f"issuers {unlabelled!r} have no `tenant` label: principals from "
                 f"different authorization servers would share one namespace in the "
@@ -143,45 +93,28 @@ class IssuerRegistry:
         return sorted(self._by_issuer)
 
     def registration_for(self, issuer: str | None) -> IssuerRegistration:
-        """The registration for this issuer, or an authentication failure.
+        """Return the registration for this issuer.
 
-        Matched by exact string equality. RFC 8414 §2 defines the issuer as an
-        identifier compared as a string, and normalising it here — trimming a
-        trailing slash, lowercasing a host — would mean this gateway's idea of
-        "the same authorization server" differed from the token's. Two systems
-        disagreeing about identity is the whole subject of this module.
+        Matched by exact string equality (RFC 8414 §2), with no normalisation.
+
+        Raises:
+            AuthenticationError: The issuer is not registered.
         """
         registration = self._by_issuer.get(issuer or "")
         if registration is None:
-            # Deliberately does not name the issuers that *are* registered.
-            # Which authorization servers an organisation trusts is a useful map
-            # for somebody deciding where to attack next, and an unauthenticated
-            # caller can ask this question as many times as they like.
+            # Never name the trusted issuers to an unauthenticated caller.
             raise AuthenticationError("the presented token is not valid")
         return registration
 
     def for_audience(self, audience: str) -> IssuerRegistry:
-        """The same authorization servers, trusted for a *different* audience.
+        """Return the same authorization servers, trusted for a different audience.
 
-        The operator channel accepts tokens from the issuers this gateway
-        already trusts — the same keys, the same issuer binding, the same
-        tenant stamping — but a token minted for the gateway must not open the
-        approval channel, and an operator's token must not call a tool. The
-        audience is what keeps the two apart (RFC 8707: a credential names
-        what it is for), so the only thing that differs between the two
-        registries is that one field.
+        Used for the operator channel; the audience keeps operator and agent tokens apart
+        (RFC 8707). Key caches are shared, so never close the derived registry alone.
 
-        The key caches are *shared*, not copied: one JWKS fetch per issuer
-        serves both listeners, and `aclose` on the original closes both. The
-        derived registry must therefore never be closed on its own.
-
-        Refused when any registered issuer already mints tokens for
-        ``audience``: such a token would be a valid agent token on the gateway
-        and a valid operator token on the channel, and an agent could approve
-        its own call — the one thing the two-listener design exists to prevent
-        (ADR 0049). The settings model checks the single-issuer environment
-        variables; this is the same check for a registry loaded from a file
-        (ADR 0070).
+        Raises:
+            ConfigurationError: An issuer already mints tokens for ``audience``, which
+                would let an agent approve its own call (ADR 0049, ADR 0070).
         """
         colliding = sorted(
             r.issuer for r in self._by_issuer.values() if r.policy.audience == audience
@@ -204,7 +137,7 @@ class IssuerRegistry:
 
 
 def single_issuer(policy: TokenPolicy, keys: JwksCache) -> IssuerRegistry:
-    """A registry of one, for the common deployment and for tests."""
+    """Return a registry of one issuer."""
     return IssuerRegistry([IssuerRegistration(policy=policy, keys=keys)])
 
 
@@ -219,9 +152,7 @@ def registry_from_documents(
 ) -> list[IssuerRegistration]:
     """Build registrations from parsed configuration, without touching the network.
 
-    Split out from the loader so the shape of the configuration and the reading
-    of a file are testable apart from each other, and so a `jwks_url` that has
-    to be discovered can be filled in by the caller before this runs.
+    A `jwks_url` needing discovery must be filled in by the caller first.
     """
     registrations: list[IssuerRegistration] = []
     for index, document in enumerate(documents):
@@ -254,23 +185,17 @@ def registry_from_documents(
 
 
 TENANT_LABEL = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-"""Lowercase slug, 64 characters, nothing else.
+"""Lowercase slug, at most 64 characters.
 
-Restrictive on purpose. A tenant label becomes part of budget accounts, cache
-keys, audit records and — with per-tenant policy — a *filename*. A label that
-can carry ``/``, ``..``, a quote or a newline is a label that can traverse a
-directory or forge a key boundary, and validating once at configuration time is
-cheaper than defending four downstream encodings forever.
+Labels end up in budget accounts, cache keys, audit records and policy filenames, so they
+are validated once here rather than escaped downstream.
 """
 
 
 def tenant_labels(documents: Iterable[Mapping[str, object]]) -> frozenset[str]:
-    """Every tenant the issuer documents declare, validated.
+    """Return every tenant the issuer documents declare, validated.
 
-    The startup question "which tenants must have a policy file" is asked
-    before registrations are built (policy loads first; key discovery is
-    async and later), so this reads the same documents through the same
-    validation — one rule for what a label is, applied on both paths.
+    Used at startup before registrations are built, since policy loads first.
     """
     labels = set()
     for index, document in enumerate(documents):
@@ -281,7 +206,7 @@ def tenant_labels(documents: Iterable[Mapping[str, object]]) -> frozenset[str]:
 
 
 def _tenant_label(value: object, label: object) -> str | None:
-    """The issuer's tenant label, validated, or ``None`` when not multi-tenant."""
+    """Return the validated tenant label, or ``None`` when not multi-tenant."""
     if value is None:
         return None
     if not isinstance(value, str) or not TENANT_LABEL.fullmatch(value):
@@ -297,15 +222,7 @@ def _tenant_label(value: object, label: object) -> str | None:
 
 
 def _reject_plaintext_keys(jwks_url: str, label: object, insecure_hosts: Iterable[str]) -> None:
-    """The same https rule discovery applies to metadata, applied to the keys.
-
-    Discovery already refuses a plaintext issuer, but a configured `jwks_url`
-    skips discovery entirely — without this check the rule would exist on only one
-    of the two paths into the same decision, which is the shape of a control that
-    looks present and is not. A key set fetched over plain HTTP can be replaced in
-    transit by an attacker's key set, and every token afterwards verifies
-    perfectly against it.
-    """
+    """Apply discovery's https rule to a configured `jwks_url`, which skips discovery."""
     parts = urlsplit(jwks_url)
     if parts.scheme == "https" or plaintext_permitted(parts.hostname, insecure_hosts):
         return

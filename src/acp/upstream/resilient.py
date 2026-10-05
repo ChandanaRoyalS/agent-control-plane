@@ -1,14 +1,7 @@
 """An upstream client that retries, wrapped around one that does not.
 
-Deliberately a wrapper rather than logic inside ``UpstreamClient``. A client
-that silently retries is a client you cannot build a correct circuit breaker on
-top of, because the breaker can no longer see how many attempts
-actually failed — three retries of one call would look like one failure, and the
-breaker would take three times too long to open. Keeping the retrying separate
-means each layer sees the truth.
-
-It also keeps ``UpstreamClient`` honest: one call in, one request out, which is
-what makes its own tests meaningful.
+A separate layer so the breaker beneath it counts each attempt, and
+``UpstreamClient`` stays one call in, one request out (ADR 0006).
 """
 
 from __future__ import annotations
@@ -39,11 +32,7 @@ def policy_for(config: UpstreamConfig) -> RetryPolicy:
 class RetryingUpstreamClient:
     """Wraps any ``Upstream``, retrying only what is safe to retry.
 
-    Typed against the protocol rather than the concrete client so it can sit on
-    top of the guard layer as well as directly on a client. It satisfies the
-    same protocol itself, which is what makes the layers stack in the first
-    place — see ``acp.upstream.factory`` for the order they are built in and
-    why that order is load-bearing.
+    Layer order is set in ``acp.upstream.factory``.
     """
 
     def __init__(self, inner: Upstream, policy: RetryPolicy | None = None) -> None:
@@ -86,10 +75,8 @@ class RetryingUpstreamClient:
     ) -> CallToolResult:
         """Retried only if this upstream declares the tool idempotent.
 
-        The unsafe case is worth stating plainly: a timeout means the gateway
-        got no answer, *not* that nothing happened. The upstream may have run
-        the tool and failed to reply. Retrying then performs the action twice,
-        and neither the gateway nor the agent can tell.
+        A timeout does not mean the tool did not run, so retrying others could
+        perform the action twice.
         """
         if name not in self.config.idempotent_tools:
             return await self._inner.call_tool(name, arguments)
@@ -102,13 +89,7 @@ class RetryingUpstreamClient:
         )
 
     def _log_retry(self, operation: str, tool: str | None = None) -> Any:
-        """A retry nobody can see turns a degraded upstream into mystery latency.
-
-        An event with fields rather than a sentence: `upstream.retry` can be
-        counted per upstream and per error type without anyone writing a regular
-        expression against a message that will eventually be reworded. The
-        metrics module turns exactly these fields into a metric.
-        """
+        """Build a callback that records each retry as a metric and an ``upstream.retry`` event."""
 
         def observe(attempt: int, delay: float, exc: BaseException) -> None:
             metrics.record_retry(upstream=self.config.name, method=operation)

@@ -1,35 +1,9 @@
-"""One corpus document, and the metadata that makes it evidence rather than data.
+"""One benign corpus document and the front matter that makes it checkable evidence.
 
-A corpus is the only thing that can turn "this firewall works" into a number, so
-every document in it is a claim somebody has to be able to check. Three fields
-carry that weight, and each exists because a corpus without it can be read as
-proving more than it does.
-
-**``why``.** Why this document is here. For an ordinary one that is
-uninteresting; for a *hard* one it is the whole point — "contains 'ignore
-previous instructions' as prose about the attack" is what tells a reviewer this
-file is load-bearing rather than filler, and stops somebody deleting it when it
-starts failing.
-
-**``source``.** Whether the text was excerpted from this repository or written
-for the corpus. This is the honesty field. A corpus invented by the same author
-as the detectors has a ceiling on what it can prove — the author knows what the
-patterns look for and will, without meaning to, write around them. Naming which
-documents are real lets a reader discount the rest, and gives the corpus
-somewhere to grow: replacing synthetic documents with real ones is a measurable
-improvement that anybody can make.
-
-**``hard``.** Whether this is a deliberate near-miss. A benign corpus of tidy
-text has a false-positive rate near zero and the number is fraudulent. The hard
-documents are the ones that legitimately trip a detector — a security advisory
-quoting a payload, an emoji family joined by zero-width characters, Arabic with
-directional marks, a JWT, a page with a logo on it. A test asserts there are
-enough of them, so "this corpus is realistic" is a property the build checks
-rather than a claim in a README.
-
-The front-matter parsing here is shared with `acp.corpus.attack`, which needs the
-same fencing and the same strictness over a different set of keys. See ADR 0039
-for the benign half and ADR 0040 for the adversarial one.
+``why`` says why it is here, ``source`` whether it is real repository text or
+synthetic (weaker evidence), and ``hard`` marks deliberate near-misses, whose
+minimum count a test asserts. Front-matter parsing is shared with
+`acp.corpus.attack`. See ADR 0039 and ADR 0040.
 """
 
 from __future__ import annotations
@@ -45,12 +19,7 @@ import yaml
 from acp.exceptions import ConfigurationError
 
 DELIMITER: Final = "---"
-"""Front matter is fenced the way every static site generator fences it, and
-for the same reason: the document below stays exactly what it is, with no
-escaping, no quoting and no encoding. That matters more here than anywhere —
-many of these documents contain zero-width joiners, directional overrides and
-base64 payloads on purpose, and a format that turned those into ``\\u200d``
-would be storing a description of the document instead of the document."""
+"""Front-matter fence, so the body is stored verbatim (invisible characters included)."""
 
 REQUIRED: Final = frozenset({"why", "source"})
 UNDERSTOOD: Final = REQUIRED | {"hard"}
@@ -60,15 +29,10 @@ class Source(StrEnum):
     """Where a document's text came from."""
 
     REPOSITORY = "repository"
-    """Excerpted from this repository, unaltered. The most valuable kind: it was
-    written to be read by humans rather than to be screened, so it cannot have
-    been shaped around a detector even accidentally. It also means the firewall
-    is tested against the documents its own authors read every day."""
+    """Excerpted unaltered from this repository, so not shaped around a detector."""
 
     SYNTHETIC = "synthetic"
-    """Written for this corpus, in the shape of the real thing. Honest about its
-    limit: whoever wrote it knew what the detectors match, so a clean result on
-    synthetic text is weaker evidence than a clean result on found text."""
+    """Written for this corpus; weaker evidence, since its author knew the detectors."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,13 +40,11 @@ class Document:
     """One benign document, and why it is in the corpus."""
 
     id: str
-    """``<kind>/<slug>``, derived from the path. Not a field in the file — a
-    name that can disagree with its own location is a name that eventually
-    does."""
+    """``<kind>/<slug>``, derived from the path."""
 
     kind: str
-    """The directory it sits in: runbook, incident, advisory, adr, code, ticket,
-    db_row, log, email, doc, chat, i18n, spec. Derived, for the same reason."""
+    """The containing directory (runbook, incident, advisory, adr, code, ticket,
+    db_row, log, email, doc, chat, i18n, spec)."""
 
     why: str
     source: Source
@@ -101,13 +63,12 @@ def front_matter(
     required: AbstractSet[str],
     understood: AbstractSet[str],
 ) -> tuple[dict[str, Any], str]:
-    """Split a corpus file into its metadata and its body, or refuse it by name.
+    """Split a corpus file into metadata and body.
 
-    Strict about unknown keys, and shared by both corpora so they cannot become
-    strict in different ways. A corpus is edited by hand over months, and a
-    typo'd ``hardd: true`` that silently means "not hard" — or ``expects:``
-    where ``expect:`` was meant — is a document quietly leaving the set the
-    numbers are computed from, with nothing anywhere to say so.
+    Raises:
+        ConfigurationError: on a missing fence, invalid YAML, a missing required
+            key, an unknown key (so typos cannot silently change meaning), or an
+            empty body.
     """
     if not text.startswith(DELIMITER):
         msg = f"corpus file {str(path)!r} does not begin with a `---` front matter block"

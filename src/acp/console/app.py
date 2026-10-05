@@ -1,25 +1,9 @@
-"""The routes a watcher talks to.
+"""The console routes, on the admin listener behind the operator credential.
 
-**On the admin listener, never the gateway's.** The same argument as the
-operator channel (ADR 0049): this stream carries *every principal's* activity,
-so an agent that could open it would read what every other caller is doing. An
-agent cannot address the thing that watches it, for the same reason it cannot
-address the thing that approves its calls.
-
-**And behind the operator credential**, because "loopback only" is a default
-somebody changes and a trace of every call is a better prize than most.
-
-**Why `fetch`, and not `EventSource`.**
-
-`EventSource` is the browser API built for this, and it **cannot set request
-headers**. The usual workaround is a credential in the query string, which puts
-a secret into browser history, into the referrer of anything the page loads, and
-into every access log between here and the tab.
-
-So the page uses `fetch()` with an `Authorization` header and reads the response
-body as a stream. That is more code in the page and the correct amount of code
-in the log. The wire format stays Server-Sent Events — the plan asks for SSE and
-the framing is genuinely good — it is only the client that is hand-rolled.
+Never on the gateway's listener, since the stream carries every principal's
+activity (ADR 0049). The page reads the SSE stream with `fetch()` and an
+`Authorization` header, because `EventSource` cannot set headers and a query-string
+secret would leak into history and logs.
 """
 
 from __future__ import annotations
@@ -40,24 +24,11 @@ CONSOLE_PATH = "/console"
 STREAM_PATH = "/console/stream"
 
 KEEPALIVE_SECONDS = 15.0
-"""How often to send an SSE comment when nothing is happening.
-
-Not decoration: an idle connection through a proxy or a laptop's NAT is closed
-somewhere between here and the browser, usually silently, and the console then
-shows nothing for a reason that looks exactly like "no traffic". A colon-prefixed
-line is a comment in the SSE grammar — it keeps the connection warm and is
-ignored by the parser.
-"""
+"""Seconds between SSE comment lines on an idle stream, so proxies and NAT keep it open."""
 
 
 def _authorized(request: Request, credential: str) -> bool:
-    """Whether this request carries the operator credential.
-
-    `compare_digest` rather than `==`, and for the reason the operator channel
-    gives: a short-circuiting comparison against a secret leaks its prefix one
-    request at a time, and this is a listener somebody will eventually expose
-    beyond loopback whatever the default says.
-    """
+    """Whether this request carries the operator credential (constant-time compare)."""
     header = request.headers.get("authorization", "")
     scheme, _, presented = header.partition(" ")
     if scheme.lower() != "bearer":
@@ -76,12 +47,8 @@ def _unauthorized() -> Response:
 def build_page() -> Any:
     """The console itself: one file, no build step, no framework.
 
-    Served **unauthenticated on purpose**, and that is a decision rather than an
-    oversight: it contains no data. It is markup and a fetch loop, and the stream
-    it talks to is the thing that checks a credential. Gating the page as well
-    would mean a browser cannot open it at all — `fetch` can carry a header and
-    an address bar cannot — so the only effect would be to make the console
-    unreachable while protecting nothing.
+    Unauthenticated on purpose: it holds no data, and an address bar cannot send
+    the header. The stream checks the credential.
     """
 
     async def page(_request: Request) -> Response:
@@ -98,19 +65,12 @@ def build_stream(hub: TraceHub, credential: str) -> Any:
             return _unauthorized()
 
         async def body() -> AsyncIterator[str]:
-            # `with`, so a browser that disappears mid-stream cannot leave a
-            # subscriber attached to the hub receiving events forever. The
-            # generator is closed when the response is, and `__exit__`
-            # unsubscribes — which is the only thing standing between a demo
-            # and a slow leak of dead watchers.
+            # `with`, so a vanished browser is unsubscribed when the generator closes.
             with hub.subscribe() as subscription:
                 yield ": connected\n\n"
                 reported = 0
                 while True:
-                    # Not `async for`: a quiet stream has to emit something
-                    # periodically or an idle connection is dropped in the
-                    # middle somewhere, and the console then shows nothing for
-                    # a reason indistinguishable from "no traffic".
+                    # Not `async for`: an idle stream must still send keepalives.
                     event = None
                     with anyio.move_on_after(KEEPALIVE_SECONDS):
                         try:
@@ -119,11 +79,7 @@ def build_stream(hub: TraceHub, credential: str) -> Any:
                             return
                     yield ": keepalive\n\n" if event is None else event.as_sse()
 
-                    # Reported *while streaming*, not at the end — there is no
-                    # end, and a first version of this put the notice after the
-                    # loop where mypy's unreachable check found it. A trace
-                    # console that quietly omits events is worse than no
-                    # console, because it is read as complete.
+                    # Report drops while streaming; the loop has no end.
                     if subscription.dropped > reported:
                         missed = subscription.dropped - reported
                         reported = subscription.dropped
@@ -134,11 +90,7 @@ def build_stream(hub: TraceHub, credential: str) -> Any:
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-store",
-                # Nginx and friends buffer proxied responses by default, which
-                # turns a live stream into a batch delivered when the buffer
-                # fills. There is no proxy in the compose stack; this is here
-                # because the first thing anybody does with a demo is put one
-                # in front of it.
+                # Stops Nginx-style proxies from buffering the stream.
                 "X-Accel-Buffering": "no",
             },
         )
@@ -149,11 +101,8 @@ def build_stream(hub: TraceHub, credential: str) -> Any:
 def console_routes(hub: TraceHub | None, credential: str) -> Sequence[Route]:
     """The console's routes, or none at all.
 
-    Two ways to get nothing, and they are the same answer to different
-    questions: nothing to watch (no hub), or nobody entitled to watch it (no
-    credential). Either way the routes are **absent rather than present and
-    closed**, following the operator channel: a route that exists and always
-    refuses still tells an unauthenticated caller what this deployment runs.
+    Without a hub or a credential the routes are absent, not closed, so nothing
+    reveals what this deployment runs.
     """
     if hub is None or not credential:
         return ()

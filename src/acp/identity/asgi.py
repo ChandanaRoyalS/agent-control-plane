@@ -1,34 +1,10 @@
-"""The ASGI middleware that turns a bearer token into a principal.
+"""ASGI middleware that turns a bearer token into a bound principal.
 
-Raw ASGI rather than Starlette's ``BaseHTTPMiddleware``, for the reasons already
-argued in ``acp.observability.middleware`` — the base class runs the downstream
-app in a *different task*, and this middleware's entire job is to bind something
-into the context that the downstream handler must be able to read.
-
-**401, not a JSON-RPC error.** Authentication happens before anything parses a
-body, and OAuth's answer to "you are not who you say" is an HTTP 401 with a
-``WWW-Authenticate`` header (RFC 6750 §3). Returning a JSON-RPC error would also
-mean returning 200, which tells every proxy and client in the path that the
-request succeeded.
-
-**The reason never crosses the wire.** ``error="invalid_token"`` and nothing
-else. The specific cause is already in the log, where the operator can read it
-and an attacker cannot.
-
-**One path is public, and it is derived rather than configured.** RFC 9728's
-protected resource metadata answers "how do I authenticate here", so requiring
-authentication to read it would be a loop with no entry. The exemption is taken
-from the ``ProtectedResource`` this middleware is given — exactly
-``metadata_path``, matched by exact string equality — rather than from a list
-somebody can extend. See ``acp.identity.resource``.
-
-**Unauthenticated mode is a real mode, and it is loud.** With no identity
-provider configured, this middleware binds ``None`` and lets the request
-through. A gateway with no identity provider can still run — pretending
-otherwise would make local development impossible.
-What it must never be is *quiet*: startup warns, and every log line for every
-request carries ``principal: anonymous``, so no one can read a log and fail to
-notice.
+Raw ASGI, because ``BaseHTTPMiddleware`` runs the app in another task and the bound
+context would not reach the handler (see ``acp.observability.middleware``). Failures are an
+HTTP 401 with ``WWW-Authenticate`` (RFC 6750 §3) carrying only ``invalid_token``; the cause
+goes to the log. Only the RFC 9728 metadata path is public (see ``acp.identity.resource``).
+With no validator every request runs as ``anonymous``, which startup and every log line say.
 """
 
 from __future__ import annotations
@@ -52,16 +28,10 @@ AUTHORIZATION_HEADER = b"authorization"
 BEARER = "bearer"
 
 MAX_TOKEN_LENGTH = 8192
-"""Longest bearer token this will even look at.
-
-A JWT with a large key set reference runs to a couple of kilobytes; eight is
-generous. Unbounded, the header is a way to make the gateway allocate and
-base64-decode megabytes before deciding the caller is anonymous.
-"""
+"""Longest bearer token examined; bounds decode work on an oversized header."""
 
 ANONYMOUS = "anonymous"
-"""What the log says when a request carried no identity. A literal, so that
-searching for it finds every unauthenticated request in the estate."""
+"""Log value for a request with no identity; a literal so it is searchable."""
 
 
 class AuthenticationMiddleware:
@@ -76,13 +46,7 @@ class AuthenticationMiddleware:
         self._app = app
         self._validator = validator
         self._resource = resource
-        # The one unauthenticated path, and it is *derived* rather than
-        # configured. There is deliberately no `public_paths` argument: an
-        # allow-list is a place where a second entry can be added later by
-        # somebody who does not have this file open, and "which routes skip
-        # authentication" is not a question that should be answerable by editing
-        # a config file. The exemption exists because the protected resource
-        # document exists, and it covers exactly that document.
+        # Derived from the resource, never configured: no `public_paths` list to grow.
         self._public: frozenset[str] = (
             frozenset({resource.metadata_path}) if resource is not None else frozenset()
         )
@@ -92,12 +56,8 @@ class AuthenticationMiddleware:
             await self._app(scope, receive, send)
             return
 
-        # Exact string equality against a one-element set, never a prefix test.
-        # `startswith` on an allow-listed path is a classic bypass — the guard
-        # says "public" and the router says "admin" about the same string — and
-        # exact matching fails closed for every encoding trick, dot segment and
-        # trailing slash, because anything the path is not spelled as simply
-        # does not match and gets authenticated like everything else.
+        # Exact equality, never a prefix test: encodings, dot segments and trailing
+        # slashes fail closed into normal authentication.
         if scope.get("path", "") in self._public:
             bind_principal(None)
             bind_subject_token(None)
@@ -106,9 +66,7 @@ class AuthenticationMiddleware:
             return
 
         if self._validator is None:
-            # No identity provider configured. Bound explicitly rather than left
-            # unset, so `current_principal()` returns None because somebody
-            # decided it should, not because nothing ran.
+            # Bound explicitly so None in `current_principal()` is a decision.
             bind_principal(None)
             bind_subject_token(None)
             context.bind(principal=ANONYMOUS)
@@ -117,9 +75,7 @@ class AuthenticationMiddleware:
 
         token = _bearer_token(scope)
         if token is None:
-            # No credentials at all. RFC 6750 §3: challenge without an `error`
-            # code, because there is nothing wrong with the credentials — there
-            # are none.
+            # RFC 6750 §3: no credentials means a challenge without an `error` code.
             await self._challenge(send, error=None)
             return
 
@@ -129,19 +85,14 @@ class AuthenticationMiddleware:
             await self._challenge(send, error="invalid_token")
             return
         except ACPError:
-            # The identity provider is unreachable or answering nonsense. This
-            # is not the caller's fault and must not be reported as though their
-            # token were bad — 503 says "try again", 401 says "get a new token",
-            # and sending an agent to re-authenticate against a broken IdP is
-            # how a dependency outage becomes a login storm.
+            # IdP failure is 503, not 401: a 401 would send agents to re-authenticate
+            # against a broken IdP.
             logger.exception("auth.provider_unavailable")
             await _unavailable(send)
             return
 
         bind_principal(principal)
-        # Held apart from the principal, and read by exactly one module. See
-        # `principal._subject_token` for why the token is not a field on the
-        # thing that represents identity, and `acp.identity.exchange` for what needs it.
+        # Kept off the principal; only `acp.identity.exchange` reads it.
         bind_subject_token(token)
         context.bind(**principal.as_log_fields())
         await self._app(scope, receive, send)
@@ -149,15 +100,7 @@ class AuthenticationMiddleware:
     async def _challenge(self, send: Any, *, error: str | None) -> None:
         """Answer 401 with a ``WWW-Authenticate`` challenge.
 
-        ``resource_metadata`` (RFC 9728 §5.1) is what turns this from a refusal
-        into an instruction: a client that has never heard of this gateway reads
-        the URL, fetches the document, learns which authorization servers can
-        issue for it, and comes back with a token. Without it a 401 says only
-        "no", and the client's only recourse is a human editing its config.
-
-        Emitted only when there is a document to point at. A challenge naming a
-        URL that answers 404 is worse than one naming nothing, because it sends
-        the client down a discovery path that ends nowhere.
+        Adds ``resource_metadata`` (RFC 9728 §5.1) only when a document exists to point at.
         """
         parameters = [] if error is None else [f'error="{error}"']
         if self._resource is not None:
@@ -172,10 +115,9 @@ class AuthenticationMiddleware:
 
 
 def _bearer_token(scope: Scope) -> str | None:
-    """Extract a bearer token, or ``None`` if there isn't a usable one.
+    """Return the bearer token, or ``None`` if absent, oversized or malformed.
 
-    The scheme is compared case-insensitively because RFC 7235 says it is
-    case-insensitive, and real clients send ``bearer``.
+    The scheme is matched case-insensitively (RFC 7235).
     """
     headers: Sequence[tuple[bytes, bytes]] = scope.get("headers") or []
     for key, value in headers:

@@ -1,29 +1,9 @@
-"""Qualified tool names: ``<upstream>__<tool>``.
+"""Qualified tool names: ``<upstream>__<tool>`` (ADR 0003 and its amendment).
 
-See ADR 0003 and its amendment. Two properties make routing work:
-
-**The upstream segment is never ambiguous.** ``UpstreamConfig`` rejects
-underscores in upstream names, so the first ``__`` in a qualified name always
-separates upstream from tool — even when the tool half was truncated, and even
-when the tool's own name contains ``__``. Routing to the right server is
-therefore always exact.
-
-**Truncation is lossy and cannot be reversed.** When a qualified name would
-exceed the length limit the tool half is shortened and a hash of the *full*
-name is appended. Nothing recovers the original from the result.
-
-What *is* available is a sound one-sided test. Truncation always fills the name
-to exactly ``MAX_QUALIFIED_LENGTH`` by construction, so any shorter name is
-definitely intact and its suffix is the upstream's real tool name — no state,
-no lookup. Only names at exactly the limit are ambiguous (a tool could
-legitimately be named that long), and those are resolved through the upstream's
-catalogue.
-
-An earlier version of this module tried to detect truncation by re-qualifying
-the suffix and comparing. That is always false: a truncated name is itself
-under the limit, so re-qualifying it is a no-op and matches every time. A
-randomised check over 200,000 name pairs caught it; the mistake is recorded
-here because the idea is superficially convincing.
+Upstream names cannot contain underscores, so the first ``__`` always separates upstream
+from tool and routing is exact. Over-long names are truncated with a hash of the full
+name, which is irreversible. Truncation fills exactly ``MAX_QUALIFIED_LENGTH``, so a
+shorter name is intact; names at the limit must be resolved via the catalogue.
 """
 
 from __future__ import annotations
@@ -31,27 +11,13 @@ from __future__ import annotations
 import hashlib
 
 SEPARATOR = "__"
-"""Separator between the upstream and tool halves.
-
-Double underscore rather than ``.``, ``/`` or ``:``, none of which are reliably
-legal in tool names across MCP clients (ADR 0003).
-"""
+"""Separator between upstream and tool; ``.``, ``/`` and ``:`` are not portable (ADR 0003)."""
 
 MAX_QUALIFIED_LENGTH = 64
-"""Conservative ceiling on a qualified tool name.
-
-Several MCP clients cap tool names around here, and the failure mode when one
-is exceeded is a client-side validation error far from the cause. Staying under
-it is cheaper than diagnosing that.
-"""
+"""Conservative ceiling on a qualified tool name, below common MCP client limits."""
 
 HASH_LENGTH = 6
-"""Hex characters of digest appended to a truncated name.
-
-Six gives ~16.7 million values. Collisions only matter *within one upstream*
-between two tools whose names share a long prefix, which makes the practical
-risk negligible while keeping names readable.
-"""
+"""Hex digest characters appended to a truncated name (collisions matter only per upstream)."""
 
 TRUNCATION_MARKER = "-"
 
@@ -61,19 +27,18 @@ class MalformedToolNameError(ValueError):
 
 
 def qualify(upstream: str, tool: str) -> str:
-    """Build the qualified name a client will see for ``tool`` on ``upstream``.
+    """Build the qualified name a client sees for ``tool`` on ``upstream``.
 
-    Deterministic: the same pair always produces the same name, across
-    processes and machines. That matters because policy rules and audit records
-    reference these names, and a name that changed between restarts would
-    silently invalidate both.
+    Deterministic across processes, since policy rules and audit records use these names.
+
+    Raises:
+        ValueError: The upstream name leaves no room for a tool name.
     """
     candidate = f"{upstream}{SEPARATOR}{tool}"
     if len(candidate) <= MAX_QUALIFIED_LENGTH:
         return candidate
 
-    # Hash the *full* candidate, not the truncated remainder, so two tools that
-    # share a long prefix still differ after truncation.
+    # Hash the full name so tools sharing a long prefix still differ.
     digest = hashlib.sha256(candidate.encode()).hexdigest()[:HASH_LENGTH]
     prefix = f"{upstream}{SEPARATOR}"
     room = MAX_QUALIFIED_LENGTH - len(prefix) - HASH_LENGTH - len(TRUNCATION_MARKER)
@@ -87,9 +52,10 @@ def qualify(upstream: str, tool: str) -> str:
 
 
 def upstream_of(qualified: str) -> str:
-    """Extract the upstream name from a qualified tool name.
+    """Extract the upstream name; exact even for truncated names.
 
-    Always exact, including for truncated names — see the module docstring.
+    Raises:
+        MalformedToolNameError: No separator or empty upstream.
     """
     upstream, separator, _ = qualified.partition(SEPARATOR)
     if not separator or not upstream:
@@ -99,11 +65,10 @@ def upstream_of(qualified: str) -> str:
 
 
 def suffix_of(qualified: str) -> str:
-    """Everything after the first separator.
+    """Return everything after the first separator.
 
-    For an untruncated name this *is* the upstream's tool name. For a truncated
-    one it is the shortened form, which cannot be used directly — use
-    :func:`is_truncated` to tell them apart.
+    This is the real tool name only if the name is not truncated; see
+    :func:`may_be_truncated`.
     """
     _, separator, suffix = qualified.partition(SEPARATOR)
     if not separator:
@@ -113,15 +78,9 @@ def suffix_of(qualified: str) -> str:
 
 
 def may_be_truncated(qualified: str) -> bool:
-    """Whether ``qualified`` *could* be a shortened form, and so needs resolving.
+    """Return whether ``qualified`` could be truncated and so needs resolving.
 
-    Deliberately one-sided, and named to say so. ``False`` is certain: truncation
-    always fills a name to exactly ``MAX_QUALIFIED_LENGTH``, so anything shorter
-    is intact and :func:`suffix_of` gives the upstream's real tool name directly.
-
-    ``True`` is only a maybe — a tool legitimately named to exactly the limit is
-    indistinguishable from a truncated one, and no test on the string can tell
-    them apart. Callers must resolve those through the upstream's catalogue
-    rather than guessing, because guessing wrong means invoking the wrong tool.
+    ``False`` is certain. ``True`` is only a maybe: resolve it via the upstream's
+    catalogue, since guessing could invoke the wrong tool.
     """
     return len(qualified) >= MAX_QUALIFIED_LENGTH

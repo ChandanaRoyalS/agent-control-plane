@@ -1,26 +1,8 @@
-"""Proportions with confidence intervals, and honesty about when they mean little.
+"""Proportions with percentile-bootstrap confidence intervals.
 
-Every number this harness reports is a proportion over a corpus somebody wrote
-by hand: 8 attacks in a family, 106 benign documents. A bare "75%" over 8
-documents reads exactly like a 75% over 8,000 and is a completely different
-claim, and the whole reason the harness reports intervals is to stop that
-sentence being written.
-
-**Percentile bootstrap**, not a normal approximation. The Wald interval on a
-proportion is the standard choice and it is wrong in precisely the cases this
-corpus is full of — small n, and rates near 0 or 1, where it produces intervals
-that run below zero or above one. Resampling the observed outcomes makes no
-distributional assumption at all, and the cost — a few thousand resamples of a
-list of booleans — is irrelevant for a corpus this size.
-
-**And the failure mode the bootstrap has, stated rather than hidden.** When every
-observation in a sample agrees — 0 of 8 caught, 12 of 12 caught — every resample
-also agrees, so the interval collapses to a single point and claims certainty the
-data does not support. This is a real and well-known limitation of the percentile
-bootstrap, not a bug here, and the fix is not to paper over it with a different
-estimator: it is to mark the interval `degenerate` so a reader is told the
-interval is uninformative rather than being handed a spuriously tight one. A
-harness whose weakest numbers look like its strongest is worse than no harness.
+Bootstrap rather than Wald, which breaks at small n and rates near 0 or 1. When
+every observation agrees the bootstrap collapses to a point, so such intervals
+(and empty samples) are marked `degenerate` and rendered as uninformative.
 """
 
 from __future__ import annotations
@@ -31,12 +13,7 @@ from dataclasses import dataclass
 from typing import Final
 
 DEFAULT_RESAMPLES: Final = 2_000
-"""Enough that the percentile estimate is stable to about a percentage point.
-
-More would be cheap and would not change a reported figure at this corpus size;
-fewer starts to make the interval itself noisy, which is a strange thing for a
-measure of noise to be.
-"""
+"""Enough for the percentile estimate to be stable to about a percentage point."""
 
 DEFAULT_CONFIDENCE: Final = 0.95
 
@@ -49,15 +26,7 @@ class Interval:
     high: float
 
     degenerate: bool = False
-    """True when the interval carries no information.
-
-    Either the sample was empty, or every observation in it agreed. In the second
-    case the percentile bootstrap returns a single point — not because the
-    estimate is certain, but because resampling identical values can only produce
-    identical values. Reported rather than smoothed over: an interval that is
-    narrow because the data is unanimous and an interval that is narrow because
-    the data is plentiful are different claims, and only one of them is strong.
-    """
+    """True when the sample was empty or unanimous, so the interval carries no information."""
 
     def render(self) -> str:
         if self.degenerate:
@@ -66,7 +35,7 @@ class Interval:
 
 
 EMPTY: Final = Interval(low=0.0, high=1.0, degenerate=True)
-"""What no observations buys you: the whole range, and a warning."""
+"""The interval for no observations: the whole range, degenerate."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,10 +63,7 @@ def bootstrap(
 ) -> Interval:
     """A percentile bootstrap interval for the rate of ``True`` in ``outcomes``.
 
-    ``rng`` is injected rather than module-global, for the same reason the rate
-    limiter takes ``now``: a measurement nobody can reproduce is a measurement
-    nobody can check, and a seeded generator passed in makes the whole harness a
-    pure function of its inputs.
+    ``rng`` is injected so a seeded run is reproducible.
     """
     total = len(outcomes)
     if total == 0:
@@ -105,8 +71,7 @@ def bootstrap(
 
     first = outcomes[0]
     if all(outcome is first for outcome in outcomes):
-        # Every resample would be identical, so the percentile interval is a
-        # point. Reported as uninformative rather than as certainty.
+        # Every resample would be identical: a point, marked uninformative.
         rate = 1.0 if first else 0.0
         return Interval(low=rate, high=rate, degenerate=True)
 
@@ -141,15 +106,10 @@ def measure_clustered(
     resamples: int = DEFAULT_RESAMPLES,
     confidence: float = DEFAULT_CONFIDENCE,
 ) -> Proportion:
-    """A rate over documents whose interval resamples *groups*, not documents.
+    """A rate over documents whose interval resamples whole groups, not documents.
 
-    For a corpus built as a cross product — one attacker sentence planted in
-    seventeen templates — the documents are not independent: if the firewall
-    misses the sentence it misses it seventeen times. Resampling documents would
-    treat those seventeen as seventeen pieces of evidence and report an interval
-    far tighter than the data supports. Resampling whole groups gives the
-    interval the number of *distinct attacks* deserves, which is the honest
-    sample size.
+    Documents in a group (one attack in many templates) are not independent, so
+    the sample size is the number of groups.
     """
     flat = [outcome for group in groups for outcome in group]
     total = len(flat)
@@ -165,8 +125,7 @@ def measure_clustered(
         )
     sizes = [(sum(group), len(group)) for group in groups if group]
     if len({hits / n for hits, n in sizes}) == 1:
-        # Every group has the same rate, so every resample does too. As with
-        # unanimous outcomes: a point, reported as uninformative, not certain.
+        # Equal group rates make every resample equal: a point, marked uninformative.
         rate = successes / total
         return Proportion(
             successes=successes,

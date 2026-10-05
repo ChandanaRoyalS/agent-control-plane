@@ -1,22 +1,8 @@
-"""The admin surface: metrics, health and readiness, on their own listener.
+"""The admin app: metrics, health, readiness, approvals and console, on their own listener.
 
-**On a separate port from the gateway itself.** That is the whole reason this is
-its own module rather than two more routes on the MCP app.
-
-A scrape endpoint is not neutral. It publishes every upstream's name, every
-tool's name, the shape of the traffic and which dependencies are currently
-failing — which is a reconnaissance report for anyone deciding what to attack.
-For a component whose purpose is to sit between agents and the things they can
-do, putting that on the same listener as the thing being protected is the wrong
-default, and "we'll firewall it later" is how it ends up public.
-
-So: a second listener, bound to loopback by default, that a sidecar or a scrape
-job on the same host can reach and nothing else can. Making it *available*
-elsewhere becomes a deliberate act of configuration, which is the direction a
-security control should fail in.
-
-The cost is a second server in the process. It is about ten lines in
-``runtime``, and the health endpoints land here for free.
+Kept off the gateway port because metrics reveal upstreams, tools and failing
+dependencies to an attacker; the listener binds to loopback by default, so exposing
+it elsewhere is a deliberate configuration choice.
 """
 
 from __future__ import annotations
@@ -46,46 +32,22 @@ SCHEMAS_PATH = "/schemas"
 
 
 async def _metrics(_request: Request) -> Response:
-    """Prometheus exposition.
-
-    Deliberately not wrapped in the request-context middleware. A scrape every
-    fifteen seconds forever would otherwise produce a log line every fifteen
-    seconds forever, burying the traffic anyone actually cares about under
-    monitoring of the monitoring.
-    """
+    """Prometheus exposition; skips request-context middleware so scrapes are not logged."""
     payload, content_type = metrics.render()
     return Response(content=payload, media_type=content_type)
 
 
 async def _healthz(_request: Request) -> Response:
-    """Liveness only: this process is up and serving.
-
-    Deliberately *not* a readiness check and deliberately not a report on the
-    upstreams. A liveness probe that fails when a dependency is unhealthy gets
-    the container restarted for someone else's outage — which turns one broken
-    upstream into a crash loop. ``/readyz`` below is the readiness endpoint,
-    and it reports upstream health without conflating the two.
-    """
+    """Liveness only; ignores upstreams so an upstream outage cannot cause a restart loop."""
     return PlainTextResponse(f"ok {__version__}\n")
 
 
 def build_readyz(health: HealthMonitor | None) -> Any:
-    """Readiness: can this gateway currently serve a useful request?
+    """Readiness route: 503 when upstreams are configured and none can serve.
 
-    503 when upstreams are configured and *none* of them can serve, because at
-    that point every ``tools/list`` raises anyway (the total-failure policy) and
-    reporting ready would be a lie a load balancer believes.
-
-    Two consequences worth stating rather than discovering.
-
-    Every replica shares the same upstreams, so a total upstream outage fails
-    readiness on all of them at once. That is accepted deliberately: the
-    alternative is a fleet that reports ready while erroring every request,
-    which is worse for anyone reading a dashboard at the time.
-
-    A gateway with **no** upstreams configured is ready. Nothing is wrong with
-    it; it simply has nothing attached yet, which is a legitimate way to bring
-    one up — the same distinction ``Catalogue.is_total_failure`` draws.
+    A total upstream outage therefore fails readiness on every replica at once, by
+    design. With no upstreams configured the gateway is ready, as in
+    ``Catalogue.is_total_failure``.
     """
 
     async def readyz(_request: Request) -> Response:
@@ -107,18 +69,10 @@ def build_readyz(health: HealthMonitor | None) -> Any:
 
 
 def build_schemas(detector: DriftDetector | None) -> Any:
-    """Current distance from the committed schema baseline.
+    """Schema-drift route: the whole outstanding difference from the committed baseline.
 
-    Always 200, including when there is drift. Drift is not an outage and must
-    not read as one: a catalogue that changed is a thing for a human to look at,
-    not a reason for a load balancer to take a healthy gateway out of rotation.
-    That is also why it is a route of its own rather than a field on ``/readyz``
-    — the two are read by different consumers for different purposes, and
-    merging them would eventually have somebody wiring drift into a probe.
-
-    Reports the *whole* outstanding difference every time, not only what is new.
-    The log line is the edge-triggered alert; this is the level-triggered view
-    you check when you are already looking.
+    Always 200, and separate from ``/readyz``, so drift never takes a gateway out of
+    rotation.
     """
 
     async def schemas(_request: Request) -> Response:
@@ -142,22 +96,12 @@ def build_admin_app(
     console: TraceHub | None = None,
     operator_validator: TokenValidator | None = None,
 ) -> Starlette:
-    """The admin ASGI app. Small on purpose — it must not be able to fail.
+    """The admin ASGI app; kept small so it cannot fail.
 
-    The approval channel is mounted here rather than on the gateway,
-    and that placement is the security property: the agent addresses `:8080` and
-    a person decides on `:9090`, so an agent cannot approve its own call because
-    it cannot reach the thing that approves calls. See `acp.approvals.operator`.
-
-    It is also the one part of this listener that is authenticated, because it is
-    the one part that *writes* — and what it writes is a permission. With no
-    credential configured the routes are absent rather than present and closed;
-    `operator_routes` argues why.
-
-    `console` is keyword-only, and the `*` is load-bearing rather than stylistic:
-    a sixth positional parameter trips `PLR0917`, and the rule is right. Five
-    interchangeable `X | None` arguments in a row is already a call site where
-    transposing two of them type-checks and silently mounts the wrong thing.
+    Approvals live here, not on the gateway port, so an agent cannot reach the channel
+    that approves its own calls (see `acp.approvals.operator`). They are the only
+    authenticated routes, and are absent when no credential is configured.
+    `console` is keyword-only so the `X | None` arguments cannot be transposed.
     """
     return Starlette(
         routes=[
@@ -166,11 +110,7 @@ def build_admin_app(
             Route(READY_PATH, build_readyz(health), methods=["GET"]),
             Route(SCHEMAS_PATH, build_schemas(drift), methods=["GET"]),
             *operator_routes(approvals, operator_credential, audit, operator_validator),
-            # Here for the same reason the approval channel is: this
-            # stream carries every principal's activity, so an agent that could
-            # open it would read what every other caller is doing. It shares the
-            # operator credential because it is the same trust boundary — a
-            # person who may approve a call may certainly watch one.
+            # Streams every principal's activity: admin port, operator credential.
             *console_routes(console, operator_credential),
         ]
     )

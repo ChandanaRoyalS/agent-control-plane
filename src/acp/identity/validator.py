@@ -1,41 +1,9 @@
-"""Deciding whether a bearer token means anything, and whose it is.
+"""Bearer token validation: resolve a token to a principal, or reject it.
 
-Four checks, and each one is here because skipping it is a documented way to be
-compromised rather than because a specification lists it.
-
-**The algorithm is chosen by us, never read from the token.** A JWT's header
-names its own algorithm, and a verifier that believes it can be told ``none``.
-The subtler version is worse: when the key material is an RSA *public* key
-fetched from a JWKS, an attacker can sign a token with ``HS256`` using that
-public key — which is published — as the HMAC secret, and a verifier that
-honours the header will happily check an HMAC with it and accept. That is why
-the allow-list is asymmetric-only and why a symmetric algorithm in the
-configuration is refused at construction rather than at verification: a
-misconfiguration that can only fail closed is not a misconfiguration.
-
-**The audience is checked.** A token is minted for a particular resource. One
-issued for the expense system is a perfectly valid, correctly signed,
-unexpired token — and accepting it here would let anything that can obtain a
-token for *any* service in the estate act through this gateway. This is the
-same problem RFC 8707 resource indicators solve on the outbound side in `exchange`.
-
-**Expiry is required, not merely honoured.** ``exp`` is technically optional in
-JWT. A token without it never expires, and a verifier that treats a missing
-claim as "no constraint" turns one leaked token into permanent access.
-
-**The issuer chooses the rules, before any rule is applied.** With more than
-one trusted authorization server, "verify against whichever key matches, then
-read ``iss``" accepts a token genuinely signed by server B while applying server
-A's registration to it. So ``iss`` is read *first*, from the unverified payload,
-and selects one registration — and the signature is then checked against that
-registration's keys and that registration's issuer. A token that lies about who
-issued it selects a registration whose keys will not verify it. See
-``acp.identity.issuers``.
-
-**The caller is told nothing about why.** Expired, wrong audience, bad
-signature and unknown key all come back as one answer. A validator that
-distinguishes them is an oracle an attacker can query, and the reason is
-recorded in the log where the operator — who is not the attacker — can read it.
+Algorithms come from an asymmetric-only allow-list, never the header (blocks ``none`` and
+HS256-with-public-key). Audience and issuer are bound to the registration selected by
+the token's ``iss`` before verification (see ``acp.identity.issuers``). ``exp`` is
+required. Every rejection gives the caller the same answer; the cause goes to the log.
 """
 
 from __future__ import annotations
@@ -55,18 +23,12 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle: issuers imports TokenPolic
 logger = logging.getLogger(__name__)
 
 DEFAULT_ALGORITHMS: tuple[str, ...] = ("RS256", "RS384", "RS512", "ES256", "ES384", "PS256")
-"""Asymmetric signatures only. See the module docstring for why a symmetric
-algorithm alongside a public key is an accepted-forgery, not a configuration
-preference."""
+"""Asymmetric signatures only; see the module docstring."""
 
 SYMMETRIC_PREFIXES: tuple[str, ...] = ("HS", "none")
 
 DEFAULT_LEEWAY = 60.0
-"""Clock skew tolerated on ``exp``, ``nbf`` and ``iat``.
-
-A minute. Enough for hosts whose clocks disagree slightly, small enough that it
-does not meaningfully extend the life of a token somebody wants revoked.
-"""
+"""Clock skew tolerated on ``exp``, ``nbf`` and ``iat``, in seconds."""
 
 REQUIRED_CLAIMS: tuple[str, ...] = ("sub", "iss", "aud", "exp", "iat")
 
@@ -87,9 +49,7 @@ class TokenPolicy:
             raise ConfigurationError(msg)
         bad = [a for a in self.algorithms if a.startswith(SYMMETRIC_PREFIXES)]
         if bad:
-            # Refused here rather than ignored later, because the failure mode
-            # is silent acceptance of forged tokens rather than a rejected
-            # request somebody would notice.
+            # Refused at construction: the failure mode is silently accepting forgeries.
             msg = (
                 f"symmetric or unsigned algorithms are not permitted: {', '.join(bad)}. "
                 f"A JWKS publishes public keys, and an attacker can sign HS256 with one."
@@ -107,19 +67,15 @@ class TokenValidator:
     issuers: IssuerRegistry
 
     async def validate(self, token: str) -> Principal:
-        """Verify ``token`` and build its principal, or raise.
+        """Verify ``token`` and build its principal.
 
-        Every failure raises the same exception with the same message. The
-        specific cause is logged, never returned.
+        Raises:
+            AuthenticationError: On every failure, with one message; the cause is logged.
         """
         header = self._header(token)
         self._reject_forbidden_algorithm(header.get("alg"))
 
-        # Read who the token *claims* issued it, and let that choose the rules.
-        # Nothing has been verified at this point; the safety comes from the two
-        # steps below, which check the signature against this registration's
-        # keys and `iss` against this registration's issuer. A lie here selects
-        # a registration that cannot verify the token.
+        # Unverified `iss` selects the rules; a lie selects keys that cannot verify it.
         registration = self.issuers.registration_for(self._claimed_issuer(token))
         policy = registration.policy
         key = await registration.keys.key_for(_optional_str(header.get("kid")))
@@ -132,11 +88,8 @@ class TokenValidator:
                 audience=policy.audience,
                 issuer=policy.issuer,
                 leeway=policy.leeway,
-                # Written as a literal rather than assembled elsewhere so that
-                # every verification this gateway performs is visible in one
-                # place. `require` is the load-bearing entry: without it a token
-                # missing `exp` is not rejected, it is simply never checked for
-                # expiry, and one leaked token becomes permanent access.
+                # All checks in one literal. `require` is load-bearing: without it a token
+                # missing `exp` is never checked for expiry.
                 options={
                     "require": list(policy.required_claims),
                     "verify_signature": True,
@@ -150,30 +103,17 @@ class TokenValidator:
         except jwt.InvalidTokenError as exc:
             raise _rejected(type(exc).__name__) from exc
         except (TypeError, ValueError) as exc:
-            # Not every way a token can be wrong is an `InvalidTokenError`. A
-            # key set holding both EC and RSA keys plus an unauthenticated token
-            # whose header names an EC `kid` with `alg: RS256` makes the library
-            # raise `TypeError` from the key's PEM handling — which escaped the
-            # middleware as a 500 with a traceback, on every such request,
-            # before any credential was presented. Fail-closed is preserved;
-            # the status and the noise were not. Same rejection, same message.
+            # Mixed EC/RSA key sets can make PyJWT raise TypeError; reject it like any other
+            # failure rather than surface a 500.
             raise _rejected(type(exc).__name__) from exc
 
         try:
             principal = from_claims(claims)
         except ValueError as exc:
-            # Signed, unexpired, correctly addressed — and it does not say who
-            # it is for. A token like that is not usable as an identity, and
-            # accepting it would mean a request executing under no principal at
-            # all while every log line claimed otherwise.
+            # A valid token that names no subject is not an identity.
             raise _rejected("UnusableClaims") from exc
 
-        # The tenant comes from the REGISTRATION, after verification — never
-        # from a claim. The registration was selected by `iss` and
-        # then proven: the signature verified against ITS keys and `iss`
-        # matched ITS issuer. A token cannot reach this line under a
-        # registration that did not issue it, so the tenant stamped here
-        # inherits the mix-up defence rather than adding a new thing to trust.
+        # Tenant comes from the verified registration, never a claim.
         if registration.tenant is not None:
             principal = replace(principal, tenant=registration.tenant)
         return principal
@@ -181,13 +121,7 @@ class TokenValidator:
     # -- internals ---------------------------------------------------------
 
     def _claimed_issuer(self, token: str) -> str | None:
-        """The ``iss`` the token asserts, with nothing verified.
-
-        Every check is switched off deliberately: this is not a validation, it
-        is a lookup key, and running expiry or audience checks against a
-        registration that has not been chosen yet would apply the wrong rules
-        in order to decide which rules apply.
-        """
+        """Return the token's asserted ``iss``, unverified; it is only a lookup key."""
         try:
             payload: dict[str, Any] = jwt.decode(
                 token,
@@ -212,24 +146,18 @@ class TokenValidator:
         return header
 
     def _reject_forbidden_algorithm(self, alg: Any) -> None:
-        """Read the header's ``alg`` only in order to refuse it.
+        """Refuse a symmetric or ``none`` ``alg`` early, before any key lookup.
 
-        ``jwt.decode`` already refuses anything outside the allow-list, so this
-        is redundant — deliberately. It fails earlier, before a key lookup that
-        a flood of ``none``-algorithm tokens would otherwise turn into work, and
-        it makes the rejection explicit at the place a reader looks for it.
+        Redundant with ``jwt.decode`` on purpose: it stops a flood of such tokens cheaply.
         """
         if isinstance(alg, str) and alg.startswith(SYMMETRIC_PREFIXES):
             raise _rejected("ForbiddenAlgorithm")
 
 
 def _rejected(reason: str) -> AuthenticationError:
-    """One message for every cause.
+    """Return the single rejection error; the reason goes in ``details`` for the log only.
 
-    The reason travels in ``details`` for the log and is stripped before the
-    response is written — see ``acp.identity.asgi``. Telling a caller which of
-    "expired", "wrong audience" and "bad signature" applied hands them a way to
-    probe the configuration one request at a time.
+    ``acp.identity.asgi`` strips it before responding, so callers cannot probe the config.
     """
     logger.warning("auth.rejected", extra={"reason": reason})
     return AuthenticationError("the presented token is not valid", details={"reason": reason})

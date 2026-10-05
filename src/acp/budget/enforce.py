@@ -1,10 +1,6 @@
 """Turn a rate-limiter decision into a refused call, or let it pass.
 
-The counterpart to ``policy.enforce_call``: a pure boundary the request path
-calls in one place. The limiter decides whether the principal is within budget;
-this raises ``RateLimitExceededError`` when they are not, carrying both halves
-of what a refused agent needs: how long until it may retry, and how much
-allowance is left when it does.
+Like ``policy.enforce_call``, a pure boundary called in one place on the request path.
 """
 
 from __future__ import annotations
@@ -18,19 +14,12 @@ def enforce_rate_limit(
 ) -> None:
     """Consume ``cost`` units of ``principal``'s budget, or raise.
 
-    Returns ``None`` when the call is within budget. Raises
-    ``RateLimitExceededError`` when the bucket is empty, carrying two numbers:
+    With ``debit=False`` only checks affordability.
 
-    ``retry_after`` — seconds until a token returns. Tells the agent *when*.
-
-    ``remaining`` — units available right now, and ``limit``, the bucket's
-    capacity. Tells the agent *how much*, which is the difference between one
-    that backs off blindly and one that plans: given three units and five
-    queued calls, an agent that knows the number can choose which three.
-
-    All three are safe to expose. They describe only the limit the caller is
-    already hitting — nothing about other callers, and nothing about anyone
-    else's budget.
+    Raises:
+        RateLimitExceededError: with ``retry_after`` (seconds until a token returns),
+            ``remaining`` and ``limit`` (bucket capacity). These describe only the
+            caller's own budget, so they are safe to expose.
     """
     if (limiter.check if debit else limiter.affords)(principal, now, cost):
         return

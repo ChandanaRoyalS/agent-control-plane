@@ -1,32 +1,9 @@
 """The public surface this project's version number is a promise about.
 
-Semantic versioning is a contract, and a contract needs a subject.
-"Breaking change" is undefined until somebody says **breaking for whom** — and
-for a gateway the answer is almost never the Python API. Nobody imports
-``acp``; they run the container.
-
-So the surface is the four things a deployment can actually depend on:
-
-- **every ``ACP_*`` environment variable**, its type and its default, because a
-  renamed variable is a gateway that starts with the old behaviour and says
-  nothing (this project has hit it six times)
-- **every CLI command and option**, because they are in somebody's Makefile
-- **the audit record's shape** — its version stamp, categories, outcomes and
-  fields — because a chain written by 1.0 has to still verify under 1.1
-- **this module's own version stamp**, so what "the surface" means can change
-  without an old snapshot being reinterpreted under the new rule
-
-What is deliberately **not** here: the Python API, the policy file's semantics
-beyond its schema, the wire protocol (pinned by ADR 0001 to one specification
-revision and checked by the conformance suite, which is a stronger guarantee
-than a snapshot), and anything under ``perf/`` or ``scripts/``.
-
-**Everything in this module is pure.** It reads declarations and returns data;
-it opens no file, imports nothing that constructs a server, and takes the
-argument parser as a parameter rather than building one. That is what lets the
-comparison be tested by mutating a dictionary rather than by editing the
-project and running it — see ``tests/unit/test_surface.py``, where the snapshot
-check is broken on purpose three ways.
+Four sections: every ``ACP_*`` variable with type and default, every CLI command and
+option, the audit record's shape, and this module's own stamp. The Python API and the
+wire protocol (ADR 0001) are excluded. Pure: no files, no servers, parser passed in,
+so ``tests/unit/test_surface.py`` can test by mutating dictionaries.
 """
 
 from __future__ import annotations
@@ -46,27 +23,13 @@ from acp.audit.record import AUDIT_VERSION, AuditRecord, Category, Outcome
 from acp.config import GatewaySettings
 
 SURFACE_VERSION: Final = "acp-surface-v1"
-"""Stamped into the snapshot.
-
-A third stamp rather than a shared one, for the same reason the audit chain,
-the approval fingerprint and the result-cache key each carry their own: a
-change made for one carries no implication for the others.
-"""
+"""Stamped into the snapshot; independent of the audit and other version stamps."""
 
 MISSING: Final = "(absent)"
-"""What a comparison prints for a name present on only one side.
-
-A word rather than an empty string, because an empty string in a diff column
-reads as "the value is blank" and this means "there is no such thing here".
-"""
+"""Printed for a name present on only one side (distinct from a blank value)."""
 
 HELP_OPTIONS: Final = frozenset({"-h", "--help"})
-"""Excluded from the recorded options.
-
-`argparse` adds these to every parser it creates. Recording them would put the
-same two strings on every command in the snapshot and say nothing about a
-decision this project made.
-"""
+"""Options argparse adds to every parser; not recorded."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,11 +43,7 @@ class Setting:
 
 @dataclass(frozen=True, slots=True)
 class Command:
-    """One command path, and the options it accepts.
-
-    `path` is the words a person types — ``acp audit verify`` — rather than the
-    parser's internal name, because the words are what is in somebody's script.
-    """
+    """One command path as typed (``acp audit verify``), and the options it accepts."""
 
     path: str
     options: tuple[str, ...]
@@ -101,12 +60,7 @@ class Difference:
 
 
 # ---------------------------------------------------------------------------
-# Rendering values and types stably
-#
-# Everything below returns a string rather than a JSON value. A snapshot is
-# compared textually and read by a person in a pull request diff; `"3600.0"`
-# and `3600.0` are the same fact, and only one of them survives a round trip
-# through JSON on every Python version without argument.
+# Rendering values and types as strings, so snapshots compare textually and stably.
 # ---------------------------------------------------------------------------
 
 
@@ -126,12 +80,7 @@ def render_value(value: object) -> str:
 
 
 def render_type(annotation: object) -> str:
-    """A type, as a string, with an enum's members spelled out.
-
-    The members matter: `ACP_FIREWALL_MODE` accepting a fourth mode is an
-    addition to the surface, and a snapshot recording only the word `Mode`
-    would not show it.
-    """
+    """A type as a string, spelling out enum members so a new member shows as a change."""
     if annotation is None or annotation is type(None):
         return "None"
 
@@ -159,14 +108,8 @@ def render_type(annotation: object) -> str:
 def settings(model: type[BaseSettings] = GatewaySettings) -> tuple[Setting, ...]:
     """Every environment variable the gateway reads, with its default.
 
-    Defaults come from `model_construct()` rather than from each field's
-    declaration, so a `default_factory` is *called* and a list default appears
-    as the list it produces. Reading the declaration would print the factory's
-    repr, which changes with the interpreter and tells a reviewer nothing.
-
-    `model_construct` does not read the environment, which is the property that
-    matters here: a snapshot captured on a machine with `ACP_AUDIT_FSYNC` set
-    would record that machine's configuration as this project's default.
+    Defaults come from `model_construct()`, which calls default factories and does not
+    read the environment, so the local machine's settings never leak into a snapshot.
     """
     prefix = model.model_config.get("env_prefix") or ""
     defaults = model.model_construct()
@@ -187,14 +130,10 @@ def settings(model: type[BaseSettings] = GatewaySettings) -> tuple[Setting, ...]
 
 
 def aliases(model: type[BaseSettings] = GatewaySettings) -> tuple[str, ...]:
-    """Field names carrying a validation alias.
+    """Field names carrying an alias.
 
-    `settings()` computes each variable as prefix + field name upper-cased,
-    which is what pydantic-settings does **unless** a field declares an alias.
-    None do. This exists so that the assumption is asserted rather than
-    believed: the day somebody adds an alias, the test that calls this fails and
-    names the field, instead of the snapshot silently recording a variable the
-    gateway does not read.
+    `settings()` assumes none do (variable = prefix + upper-cased name); a test
+    asserts this is empty.
     """
     return tuple(
         name
@@ -204,11 +143,7 @@ def aliases(model: type[BaseSettings] = GatewaySettings) -> tuple[str, ...]:
 
 
 def audit() -> dict[str, list[str]]:
-    """The audit record's shape.
-
-    Fields in declaration order rather than sorted: a reordering is a change to
-    the record and should be visible as one.
-    """
+    """The audit record's shape; fields in declaration order so a reordering shows."""
     return {
         "version": [AUDIT_VERSION],
         "categories": sorted(member.value for member in Category),
@@ -220,17 +155,9 @@ def audit() -> dict[str, list[str]]:
 def commands(parser: argparse.ArgumentParser, path: str = "acp") -> tuple[Command, ...]:
     """Every command path under `parser`, and the options each accepts.
 
-    Walks the parser **object**, not the source. Two of this CLI's command
-    groups build their verbs in a `for` loop, so an AST reading of
-    `add_parser("...")` would find the ones written out as literals, miss the
-    ones built in loops, and report a confident, incomplete answer. Lesson 53's
-    shape: a completeness search that silently truncates.
-
-    `_actions` is private and there is no public equivalent. Reached through
-    `getattr` so that a future argparse without it degrades to an empty list
-    rather than an exception at capture time -- and the emptiness is caught,
-    because the snapshot test asserts the surface is not empty before it asserts
-    anything about its contents.
+    Walks the parser object, not the source, so verbs built in loops are found.
+    The private `_actions` is read via `getattr`; if it vanishes the result is empty,
+    which the snapshot test catches.
     """
     actions: Sequence[argparse.Action] = getattr(parser, "_actions", ())
 
@@ -310,11 +237,7 @@ def _differences(
 
 
 def compare(captured: Mapping[str, Any], current: Mapping[str, Any]) -> tuple[Difference, ...]:
-    """Every way `current` departs from `captured`.
-
-    Empty means the surface is unchanged, which is the only state that needs no
-    decision about the version number.
-    """
+    """Every way `current` departs from `captured`; empty means unchanged."""
     found: list[Difference] = []
 
     stamped = str(captured.get("surface_version", MISSING))

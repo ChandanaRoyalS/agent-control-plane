@@ -1,25 +1,7 @@
-"""OpenTelemetry semantic conventions for MCP, expressed as data.
+"""OpenTelemetry GenAI/MCP semantic conventions as plain data, with no OpenTelemetry import.
 
-Attribute names and span-naming rules, as plain values with no OpenTelemetry
-import. Same reasoning as ``acp.upstream.envelope``: the names are a
-specification someone else owns, so they are declared in one place, and getting
-one wrong should be a visible mistake rather than a span that silently fails to
-group with everything else in the trace.
-
-The conventions used here are the MCP spans defined in OpenTelemetry's GenAI
-semantic conventions. Two details from that document shape everything below.
-
-**The gateway is both roles at once.** It receives a request (a ``SERVER`` span)
-and makes requests of its own (``CLIENT`` spans). That is the whole reason a
-trace through this system is worth looking at: one picture showing the agent's
-call, the fan-out to three upstreams, which one was slow, and which one had its
-circuit open.
-
-**A tool call is a GenAI ``execute_tool`` operation.** The conventions state that
-MCP tool-call spans are compatible with GenAI execute-tool spans, so a
-``tools/call`` span carries ``gen_ai.operation.name = "execute_tool"`` and the
-tool name. That is what makes these traces legible to tooling built for agent
-observability rather than only to MCP-aware readers.
+The gateway emits ``SERVER`` spans for requests it receives and ``CLIENT`` spans for upstream
+calls; ``tools/call`` spans carry ``gen_ai.operation.name = "execute_tool"``.
 """
 
 from __future__ import annotations
@@ -32,7 +14,7 @@ from urllib.parse import urlsplit
 # ---------------------------------------------------------------------------
 
 MCP_METHOD_NAME: Final = "mcp.method.name"
-"""Required on every MCP span. `tools/list`, `tools/call`, and so on."""
+"""Required on every MCP span, e.g. `tools/call`."""
 
 MCP_PROTOCOL_VERSION: Final = "mcp.protocol.version"
 MCP_RESOURCE_URI: Final = "mcp.resource.uri"
@@ -53,13 +35,7 @@ SERVER_PORT: Final = "server.port"
 NETWORK_TRANSPORT: Final = "network.transport"
 
 ACP_UPSTREAM: Final = "acp.upstream"
-"""Not a standard attribute, and deliberately prefixed with the project's own
-namespace rather than invented inside someone else's.
-
-`server.address` already carries the host, but every span in this system is
-grouped, filtered and alerted on by *which upstream* rather than by hostname —
-two upstreams behind the same host would be indistinguishable otherwise.
-"""
+"""Project-specific attribute naming the upstream, since several may share a host."""
 
 EXECUTE_TOOL: Final = "execute_tool"
 """The GenAI operation name for running a tool."""
@@ -76,35 +52,14 @@ TOOLS_LIST: Final = "tools/list"
 
 
 def span_name(method: str, target: str | None = None) -> str:
-    """`{method} {target}`, or just the method when there is no target.
-
-    The convention names a *low-cardinality* span and puts the variable part in
-    the target, which is why a tool name is allowed here but arguments are not.
-    A span name built from user input is how a tracing backend's index gets
-    destroyed.
-    """
+    """`{method} {target}`, or the method alone; never built from caller input."""
     return f"{method} {target}" if target else method
 
 
 def client_target(upstream: str, tool: str | None = None) -> str:
-    """The target half of an outbound span's name: which upstream, and what.
+    """Outbound span target: `upstream/tool`, or the upstream alone (e.g. for `tools/list`).
 
-    The upstream is always present, and that is not cosmetic. A `tools/list`
-    carries no tool name, so without this every span in a fan-out is named
-    identically — a picture of one request becoming three concurrent calls,
-    in which the three calls are indistinguishable. Found by looking at the
-    trace rather than by any test, because "the labels are ambiguous" is not
-    a property a test knows to assert.
-
-    Both halves are bounded by things the gateway controls: upstream names come
-    from the config file, tool names from a catalogue. Neither is caller input,
-    which is the rule that decides what may appear in a span name at all.
-
-    Separated with `/` rather than the `__` of ADR 0003, deliberately. The
-    qualified name is what the *agent* asked for; what actually went upstream is
-    the bare tool name after routing, and writing `mock-a__read_document` on this
-    span would claim the qualified name crossed the wire when the entire point
-    of the routing layer is that it does not.
+    Uses `/`, not ADR 0003's `__`, because the bare tool name is what crossed the wire.
     """
     return f"{upstream}/{tool}" if tool else upstream
 
@@ -117,11 +72,7 @@ Attributes = dict[str, Any]
 
 
 def _endpoint(url: str) -> Attributes:
-    """`server.address` and `server.port` from an upstream URL.
-
-    The port is filled in from the scheme when the URL omits it, because a span
-    that sometimes has a port and sometimes does not cannot be grouped by one.
-    """
+    """`server.address` and `server.port`, defaulting the port from the scheme."""
     parts = urlsplit(url)
     attributes: Attributes = {}
     if parts.hostname:
@@ -152,8 +103,7 @@ def client_attributes(
     if protocol_version is not None:
         attributes[MCP_PROTOCOL_VERSION] = protocol_version
     if request_id is not None:
-        # A string even when the wire carries an integer: the convention types
-        # it as a string, and a backend that receives both cannot filter on it.
+        # The convention types it as a string, even for integer IDs.
         attributes[JSONRPC_REQUEST_ID] = str(request_id)
     if tool is not None:
         attributes[GEN_AI_TOOL_NAME] = tool
@@ -170,11 +120,7 @@ def server_attributes(
 ) -> Attributes:
     """Attributes for a span covering one request the gateway *receives*.
 
-    The tool name here is the *qualified* name the agent used
-    (`mock-a__search`), not the upstream's real one. Both appear in a single
-    trace — the qualified name on the server span, the real one on the client
-    span beneath it — which makes the gateway's renaming visible rather than
-    something a reader has to already know about.
+    The tool name is the qualified one the agent used (`mock-a__search`).
     """
     attributes: Attributes = {
         MCP_METHOD_NAME: method,
@@ -191,13 +137,7 @@ def server_attributes(
 
 
 def error_attributes(exc: BaseException, status_code: int | None = None) -> Attributes:
-    """What to record when an operation fails.
-
-    `error.type` is the exception's class name rather than its message. The
-    message is unbounded and often contains the very values that should not be
-    in telemetry; the class name is a small closed set that can be grouped and
-    alerted on, which is the entire purpose of the attribute.
-    """
+    """Failure attributes; `error.type` is the class name, never the (sensitive) message."""
     attributes: Attributes = {ERROR_TYPE: type(exc).__name__}
     if status_code is not None:
         attributes[RPC_RESPONSE_STATUS_CODE] = str(status_code)

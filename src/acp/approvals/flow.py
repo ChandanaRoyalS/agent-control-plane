@@ -1,31 +1,10 @@
-"""Resolving a retry: does this call proceed, wait, or stop?
+"""Resolving a retry on the request path: does this call proceed, wait, or stop?
 
-The half of the approval flow that runs on the request path. Everything here is
-a pure function of the store's contents, the clock and the call in hand — no
-I/O, no MCP types, no gateway — so the whole decision table is testable by
-advancing a number.
-
-**Every branch that is not "approved, matching, fresh, unspent" refuses**, and
-the refusal is undifferentiated. A caller learns that this did not work; the log
-learns which of the seven reasons it was. Telling the caller "that token has
-expired" versus "that token is not yours" is an oracle they can map one request
-at a time — the same argument `PolicyDeniedError` makes about naming the rule,
-and `AuthenticationError` makes about its logged reason.
-
-The seven ways a retry stops:
-
-1. **No token** — nothing to resolve.
-2. **Unknown token** — expired out of the store, or invented.
-3. **Expired** — the default-deny, checked here rather than by a sweeper so it
-   cannot be honoured late because a background job did not run.
-4. **Fingerprint mismatch** — *the call is not the one that was approved.* The
-   reason this module exists; see `acp.approvals.record`.
-5. **Wrong subject** — an approval is not bearer-transferable between callers.
-6. **Denied** — a human said no.
-7. **Consumed** — spent already. One approval, one call.
-
-A `PENDING` request is the eighth outcome and the only one that is not a
-refusal: the caller is told to wait, with the same token, and nothing changes.
+Depends only on the store, the clock and the call (no MCP types). Anything but
+approved, matching, fresh and unspent is refused, and the caller gets one
+undifferentiated refusal so it is not an oracle; only the log records why (no or
+unknown token, expired, other tenant or subject, fingerprint mismatch, denied,
+consumed). A `PENDING` request answers wait, with the same token.
 """
 
 from __future__ import annotations
@@ -55,12 +34,12 @@ class Outcome(StrEnum):
     """Still pending. Answer `input_required` again with the same token."""
 
     REFUSE = "refuse"
-    """Any of the seven. The caller gets an undifferentiated denial."""
+    """Any refusal; the caller gets an undifferentiated denial."""
 
 
 @dataclass(frozen=True, slots=True)
 class Resolution:
-    """What happened, and why — the why for the log, not for the caller."""
+    """What happened, and why (the why is for the log, not the caller)."""
 
     outcome: Outcome
     reason: str
@@ -83,22 +62,13 @@ def _binding_failure(
 ) -> str | None:
     """Why this token does not bind to this call, or ``None`` if it does.
 
-    Split from the state checks because they answer different questions and get
-    read at different times. These four are about *whether the held record is
-    about the call in front of us at all* — and they are checked first, so a
-    mismatched call is refused before its state is even consulted. A record that
-    does not bind is not this caller's approval, whatever it says.
+    Checked before the record's state, so a mismatched call is refused regardless.
     """
     if held.expired(now):
-        # Default-deny on expiry, and before the state, so a request approved
-        # after it lapsed is still refused. "Late" is a decision the caller does
-        # not get the benefit of.
+        # Before the state, so an approval given after expiry is still refused.
         return "approval expired"
     if held.tenant != tenant:
-        # Checked before the fingerprint, which would also catch it (the tenant
-        # is in the digest since v2), because this refusal must not depend on a
-        # hash comparison staying in the material list. Belt over braces, in
-        # the direction where slipping is an escalation.
+        # Explicit, not left to the fingerprint alone, so it cannot regress.
         return "approval belongs to another tenant"
     if held.subject != subject:
         return "approval belongs to another subject"
@@ -108,8 +78,7 @@ def _binding_failure(
     if digest is None:
         return "call cannot be fingerprinted"
     if digest != held.fingerprint:
-        # The one that matters. A human approved a call; this is a different
-        # call wearing its token.
+        # A different call wearing the approved call's token.
         return "call does not match the approved one"
     return None
 
@@ -134,10 +103,8 @@ async def resolve(
 ) -> Resolution:
     """Decide what to do with a retry carrying ``token``.
 
-    Consumes the request as part of returning ``PROCEED``, inside this function
-    rather than at the call site. A caller that had to remember to spend the
-    token is a caller that eventually does not, and the failure is silent: the
-    same approval authorises every subsequent call until it expires.
+    Spends the approval itself before returning ``PROCEED``, so no call site can
+    forget to.
     """
     if not token:
         return Resolution(Outcome.REFUSE, "no request_state supplied")
@@ -155,43 +122,27 @@ async def resolve(
     if held.state is State.PENDING:
         return Resolution(Outcome.WAIT, "awaiting a decision", held)
 
-    # Read as approved a moment ago and spent by somebody else since — a retry
-    # on another replica, or the same retry delivered twice — is refused the
-    # same way as a token that was already spent when we read it. One proceeds.
+    # `consume` is compare-and-set: of racing retries exactly one proceeds.
     spent = held.state is State.APPROVED and await store.consume(token)
     if not spent:
         return Resolution(Outcome.REFUSE, _STATE_REFUSALS[held.state], held)
     return Resolution(Outcome.PROCEED, "approved", held)
 
 
-# ---------------------------------------------------------------------------
-# The request path's whole decision, in one pure function
-# ---------------------------------------------------------------------------
+# The request path's whole decision
 
 
 @dataclass(frozen=True, slots=True)
 class Gate:
-    """What the gateway should do about a call the policy held.
-
-    Everything the request path needs and nothing about MCP: the handler turns
-    this into an `InputRequiredResult` or an error, and this module never learns
-    what those are. The same split as `enforce_call` — the decision here, the
-    protocol at the one call site.
-    """
+    """What the gateway should do about a held call; the handler maps it to MCP."""
 
     outcome: Outcome
     reason: str
     token: str | None = None
-    """The `request_state` to hand back. Present on `WAIT`, and on a first ask
-    it is a *new* token; on a poll it is the same one, unchanged."""
+    """The `request_state` on `WAIT`: new on a first ask, unchanged on a poll."""
 
     expires_at: float | None = None
-    """When the caller stops being able to answer.
-
-    Safe to disclose for the reason `retry_after` is: it describes only
-    the limit the caller is already inside. It is a hint, not a promise — the
-    check that matters happens at resolution.
-    """
+    """When the request expires; a hint safe to disclose, enforced at resolution."""
 
 
 async def gate(
@@ -209,15 +160,9 @@ async def gate(
 ) -> Gate:
     """Start an approval, or resolve the one this retry carries.
 
-    Two paths, and which one runs is decided by whether the caller sent a token
-    — *not* by whether one exists for this call. Looking up a pending request by
-    fingerprint instead would let one caller's poll attach to another's approval,
-    and would make the token decorative.
-
-    A caller who loses their token simply asks again and gets a second pending
-    request. That is the right behaviour and it is why the store is bounded: the
-    cost of forgetting is a re-ask, and the cost of doing it in a loop is
-    eviction rather than the process.
+    The path depends only on whether the caller sent a token, never on a lookup by
+    fingerprint, which could attach one caller's poll to another's approval. A
+    caller without a token gets a new pending request.
     """
     if token:
         resolution = await resolve(
@@ -232,9 +177,7 @@ async def gate(
         )
         held = resolution.request
         if resolution.outcome is Outcome.WAIT:
-            # The same token, unchanged. A poll that minted a new one would
-            # leave the old request pending and approvable — an operator's yes
-            # landing on a token nobody is holding any more.
+            # Same token: a new one would leave the old request approvable.
             return Gate(Outcome.WAIT, resolution.reason, token, held.expires_at if held else None)
         return Gate(resolution.outcome, resolution.reason)
 
@@ -249,8 +192,7 @@ async def gate(
         ttl=ttl,
     )
     if request is None:
-        # Unfingerprintable arguments. Refused rather than held, because an
-        # approval that cannot be bound to a call is an approval for anything.
+        # Unbindable, so refused: it would be an approval for anything.
         return Gate(Outcome.REFUSE, "call cannot be fingerprinted")
     await store.create(request)
     return Gate(Outcome.WAIT, "approval requested", request.token, request.expires_at)

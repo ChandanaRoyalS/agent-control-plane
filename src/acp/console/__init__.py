@@ -1,8 +1,7 @@
 """The live trace console.
 
-`events` is the wire shape, `hub` the fan-out, `app` the routes. The design
-argument lives in `events`: **the console is a view of the audit chain, not a
-second telemetry path.**
+`events` is the wire shape, `hub` the fan-out, `app` the routes. The console is a
+view of the audit chain, not a second telemetry path (ADR 0056).
 """
 
 from acp.console.events import Source, TraceEvent, from_entry, from_record, observed

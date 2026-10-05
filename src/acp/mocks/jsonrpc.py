@@ -1,21 +1,7 @@
-"""JSON-RPC 2.0 and MCP tool-primitive shapes, hand-rolled for the mock fleet.
+"""JSON-RPC 2.0 and MCP tool shapes, hand-rolled so the mocks can misbehave on demand (ADR 0004).
 
-**Why hand-rolled rather than built on the MCP SDK's server class.** The gateway
-itself is built on the SDK (see ADR 0002) — the wire protocol is not something
-worth reimplementing for production code. The *mocks* are different: their
-entire purpose is to be provoked into misbehaving in precise, controllable ways
-(malformed bodies, mid-stream disconnects, oversized payloads), and a
-well-behaved SDK server actively gets in the way of that, because it validates
-and normalizes exactly the things we need to deliberately break. See
-``docs/decisions/0004-hand-roll-mock-protocol-layer.md``.
-
-Field names below are not invented. They are read directly off the installed
-``mcp`` SDK's ``mcp.types`` module (``Tool.inputSchema``,
-``CallToolResult.content`` / ``isError``, ``TextContent.type`` / ``text``,
-``ListToolsResult.tools`` / ``nextCursor``, ``ErrorData.code`` / ``message`` /
-``data``) so a real MCP client parses these responses correctly. The 2026-07-28
-revision changed session/transport/auth semantics; it did not change the shape
-of a tool definition or a tool call result.
+The gateway itself uses the SDK (ADR 0002). Field names match the SDK's ``mcp.types``, so real
+MCP clients parse these responses.
 """
 
 from __future__ import annotations
@@ -32,17 +18,10 @@ JsonRpcId = int | str | None
 
 
 class JsonRpcRequest(BaseModel):
-    """An inbound JSON-RPC 2.0 request.
+    """An inbound JSON-RPC 2.0 request, strict so gateway bugs surface.
 
-    ``extra="forbid"`` is deliberate: a strict mock catches gateway bugs that a
-    permissive one would silently accept.
-
-    There is deliberately **no top-level** ``_meta`` field. This model used to
-    have one, because the gateway used to send one — and because both sides
-    agreed, the whole suite passed against a request shape no real MCP server
-    accepts. The 2026-07-28 envelope lives in ``params._meta``. Forbidding
-    extras now means the old shape is rejected here, so that particular
-    regression cannot come back quietly.
+    There is no top-level ``_meta``: the 2026-07-28 envelope lives in ``params._meta``, and
+    forbidding extras rejects the old shape.
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -54,10 +33,7 @@ class JsonRpcRequest(BaseModel):
 
 
 class JsonRpcErrorObject(BaseModel):
-    """The ``error`` member of a JSON-RPC response.
-
-    Mirrors ``mcp.types.ErrorData``: ``code``, ``message``, optional ``data``.
-    """
+    """The ``error`` member of a JSON-RPC response, mirroring ``mcp.types.ErrorData``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -67,12 +43,7 @@ class JsonRpcErrorObject(BaseModel):
 
 
 class JsonRpcResponse(BaseModel):
-    """An outbound JSON-RPC 2.0 response.
-
-    Exactly one of ``result`` or ``error`` must be set — never both, never
-    neither. This is a JSON-RPC 2.0 requirement, not a style preference, and
-    getting it wrong produces a message real MCP clients will reject.
-    """
+    """An outbound JSON-RPC 2.0 response with exactly one of ``result`` or ``error``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -98,14 +69,8 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 HEADER_MISMATCH = -32020
-"""A routing header disagrees with the body it claims to describe.
-
-Its own code rather than a generic bad request, because the failure is
-specific and the fix is specific: whoever built the request mirrored one of
-`Mcp-Method` / `Mcp-Name` / `Mcp-Protocol-Version` incorrectly.
-"""
-# The implementation-defined range is -32000 to -32099. Chaos-specific codes
-# live in `chaos.py` so this module stays purely about the real protocol.
+"""A routing header (`Mcp-Method`, `Mcp-Name`, `Mcp-Protocol-Version`) disagrees with the body."""
+# Chaos-specific codes live in `chaos.py`.
 
 
 def error_response(request_id: JsonRpcId, code: int, message: str) -> JsonRpcResponse:
@@ -119,11 +84,7 @@ def error_response(request_id: JsonRpcId, code: int, message: str) -> JsonRpcRes
 
 
 class ToolDefinition(BaseModel):
-    """A single entry in a ``tools/list`` response.
-
-    ``input_schema`` is a plain JSON Schema dict describing the tool's
-    arguments — the same thing a real upstream would generate from type hints.
-    """
+    """A single entry in a ``tools/list`` response; ``input_schema`` is plain JSON Schema."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -144,13 +105,8 @@ class TextContent(BaseModel):
 class CallToolResult(BaseModel):
     """The ``result`` of a ``tools/call``.
 
-    MCP's convention: a tool that *ran* but failed reports ``is_error: true``
-    inside a normal JSON-RPC result, with the failure explained in ``content``.
-    A JSON-RPC ``error`` object is reserved for protocol-level failures — an
-    unknown method, an unknown tool, malformed params — which never reached
-    tool execution at all. The mocks preserve this distinction deliberately,
-    because the gateway's error taxonomy (`acp.exceptions`) has to handle both
-    cases differently.
+    A tool that ran but failed sets ``is_error``; a JSON-RPC ``error`` means it never ran
+    (unknown method or tool, bad params). The gateway handles the two differently.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -162,13 +118,9 @@ class CallToolResult(BaseModel):
 def tool_definitions_result(
     tools: list[ToolDefinition], *, ttl_ms: int = 0, cache_scope: str = "public"
 ) -> dict[str, Any]:
-    """Render a ``tools/list`` result payload, with its freshness hints.
+    """Render a ``tools/list`` result with top-level ``ttlMs`` and ``cacheScope`` (2026-07-28).
 
-    ``ttlMs`` and ``cacheScope`` live at the top level of the result under the
-    2026-07-28 revision, not inside ``_meta``. The defaults here are the
-    permissive ones because these are mocks whose caching behaviour is meant to
-    be exercised; a real server's defaults are ``0`` and ``private``, which is
-    what the gateway assumes when a hint is absent.
+    The gateway assumes ``0`` and ``private`` when a hint is absent; these mock defaults differ.
     """
     return {
         "tools": [t.model_dump(by_alias=True) for t in tools],

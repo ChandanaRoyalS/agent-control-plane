@@ -1,40 +1,9 @@
-"""The chain itself: what each link proves, and the one thing it cannot.
+"""The hash chain: each entry carries the previous entry's hash, plus `verify`.
 
-Every entry carries the hash of the entry before it, so changing any
-record invalidates every link after it. That is the whole mechanism, and it is
-worth being precise about what it buys, because "tamper-evident" is a word people
-use much more loosely than it deserves.
-
-**What a hash chain detects**
-
-- **Modification.** Edit a record and its hash no longer matches; edit its hash
-  to match and the next entry's `prev` no longer matches. Fixing that means
-  recomputing every link to the end.
-- **Splicing.** Insert or remove an entry in the middle and the `prev` of the
-  following one is wrong.
-- **Reordering.** Two entries swapped are two broken links.
-
-**What it does not detect, and this is the honest part**
-
-- **Truncation of the tail.** Delete the last thousand entries and what remains
-  is a *perfectly valid chain*. Nothing inside the file can say otherwise,
-  because the file no longer contains the evidence. This is not a flaw in the
-  implementation; it is what a self-contained log can be.
-- **A wholesale rewrite.** An attacker who can write the file and knows the
-  scheme can rebuild the entire chain from genesis. The chain is a check against
-  *edits*, not against an adversary who owns the storage.
-
-Both are answered the same way — by an anchor the attacker cannot reach. See
-`acp.audit.checkpoint`: the head is committed to the repository, the same shape
-ADR 0013 used for the schema baseline, and a verifier holding that anchor detects
-both truncation and rewrite. **A chain plus an external anchor is tamper-evident;
-a chain alone is tamper-evident to anybody who already knows where it should
-end.** Saying so is the point of writing it down.
-
-**Sequence numbers are carried as well as hashes**, and not as a convenience.
-They make a gap *legible*: a verifier that stops at a broken link can say "entry
-41,208" rather than "somewhere". They are also inside the hash, so they cannot be
-renumbered to hide a removal.
+Detects modification, splicing and reordering. It cannot detect tail truncation or a
+wholesale rewrite by someone who owns the storage; `acp.audit.checkpoint` anchors the head
+outside the writer's reach for that (same shape as ADR 0013). Sequence numbers are hashed
+too, so a break names its entry and cannot be renumbered away.
 """
 
 from __future__ import annotations
@@ -47,31 +16,17 @@ from typing import Any, Final
 from acp.audit.record import AUDIT_VERSION, AuditRecord, canonical
 
 GENESIS: Final = "0" * 64
-"""The `prev` of the first entry.
-
-A fixed, obviously-not-a-hash value rather than an empty string or `None`, so
-that "this is the start of the chain" is a claim the format states rather than
-one a reader infers from an absence. A verifier can then check the first entry
-as strictly as every other one.
-"""
+"""The `prev` of the first entry, explicit so the first entry is checked like any other."""
 
 SEQ_START: Final = 1
-"""Entries are numbered from one, not zero. The first question asked of a chain
-is how many entries it has, and `seq` of the last entry answering that directly
-is worth more than the symmetry."""
+"""Entries are numbered from one, so the last `seq` is the entry count."""
 
 
 def link(*, prev: str, seq: int, payload: Mapping[str, Any]) -> str:
-    """The hash binding this record to the one before it.
+    """SHA-256 binding this record to the one before it.
 
-    Over `[AUDIT_VERSION, prev, seq, canonical(payload)]` — a JSON array rather
-    than concatenated strings, because concatenation is how two different tuples
-    hash to one digest. ``"a" + "bc"`` and ``"ab" + "c"`` are the same bytes; a
-    length-delimited encoding of the parts is not, and the ambiguity is exactly
-    the kind an attacker looks for.
-
-    The version is *inside* the hash so a chain written under one rule cannot be
-    verified under another and silently pass.
+    Hashes a canonical JSON structure (not concatenated strings, which are ambiguous) and
+    includes the audit version, so a chain cannot verify under a different rule.
     """
     material = canonical(
         {"v": AUDIT_VERSION, "prev": prev, "seq": seq, "record": canonical(payload)}
@@ -87,14 +42,9 @@ class Entry:
     prev: str
     hash: str
     record: Mapping[str, Any]
-    """The record as a plain mapping, already redacted.
+    """The redacted record as a plain mapping.
 
-    A mapping rather than an `AuditRecord`, because an entry read back from disk
-    may have been written by a *newer* version of this code carrying fields this
-    one does not know about. Parsing it into today's dataclass would discard
-    them — and then verify a hash computed over the fields that were discarded,
-    reporting tampering on a file nobody touched. **A verifier must hash what is
-    there, not what it understands.**
+    Kept unparsed so fields from a newer writer are still hashed during verification.
     """
 
     def as_dict(self) -> dict[str, Any]:
@@ -112,14 +62,7 @@ def next_entry(*, head: str, seq: int, payload: Mapping[str, Any]) -> Entry:
 
 
 class Chain:
-    """The head of a chain being appended to, in this process.
-
-    Deliberately tiny and deliberately not the thing that writes: it holds a
-    position and produces entries, and `acp.audit.sink` decides where they go and
-    what happens when that fails. Keeping them apart is what makes the whole
-    chaining rule testable without a filesystem, and what lets a Postgres-backed
-    sink arrive later as a class rather than a redesign.
-    """
+    """The in-process head of a chain; produces entries, while `acp.audit.sink` stores them."""
 
     def __init__(self, head: str = GENESIS, seq: int = SEQ_START - 1) -> None:
         self._head = head
@@ -143,18 +86,13 @@ class Chain:
 
 
 # ---------------------------------------------------------------------------
-# Verification (the engine behind `acp audit verify` — the CLI is a thin wrapper over this)
+# Verification (behind `acp audit verify`)
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
 class Break:
-    """Where a chain stops being one, and in what way.
-
-    The sequence number matters more than the message. An auditor told "the chain
-    is broken" has to read the whole file; one told "entry 41,208's `prev` does
-    not match entry 41,207" has a line number and a time window.
-    """
+    """One broken link: its sequence number (if readable), file line and reason."""
 
     seq: int | None
     line: int
@@ -173,26 +111,10 @@ class Verification:
     head: str
     breaks: tuple[Break, ...]
     unreadable: int
+    """Lines that were not JSON or not an entry; any makes the chain not intact."""
 
     anchor_hash: str | None = None
-    """The hash of the entry at the sequence number an anchor names, if one was
-    asked for.
-
-    Captured during the walk rather than by keeping every hash, so verifying a
-    chain costs O(1) memory however long it is. A verifier that had to hold the
-    whole chain to check one anchor would be a verifier nobody runs on the file
-    that matters most.
-    """
-    """Lines that were not JSON, or were JSON of the wrong shape.
-
-    Counted rather than raised, and **counted as a failure** — unlike the
-    decision-log reader (ADR 0045), which skips a bad line and carries on because
-    a simulator that dies on line 40,000 has answered no question at all. The
-    opposite call here, for the opposite reason: a line this cannot read is a
-    line whose contribution to the chain it cannot check, and reporting "verified"
-    over a file with a hole in it is precisely the lie the chain exists to make
-    impossible.
-    """
+    """Hash of the entry at `anchor_seq`, captured during the walk so memory stays O(1)."""
 
     @property
     def intact(self) -> bool:
@@ -209,12 +131,7 @@ class Verification:
 
 
 def _entry_from(payload: object) -> Entry | None:
-    """An entry, or ``None`` if this object is not one.
-
-    Every field is checked for the type it must have. A `seq` that arrived as a
-    string is not a sequence number this can reason about, and coercing it would
-    let a hand-edited file walk straight past the check.
-    """
+    """An entry, or ``None`` if any field has the wrong type (no coercion)."""
     if not isinstance(payload, dict):
         return None
     seq, prev, digest, record = (
@@ -235,17 +152,7 @@ def _entry_from(payload: object) -> Entry | None:
 def verify(
     lines: Iterable[str], *, expected_head: str = GENESIS, anchor_seq: int | None = None
 ) -> Verification:
-    """Walk a chain and report every way it is not one.
-
-    Takes lines rather than a path so the caller decides where the chain comes
-    from — a file, a pipe, a test's list of strings, an object store — and so a
-    chain larger than memory streams rather than loads.
-
-    **Every break is reported, not just the first.** A verifier that stops at the
-    first one turns an investigation into a series of round trips, and the shape
-    of the damage is itself evidence: one broken link is an edit, a break at
-    every entry after some point is a rewrite that started there.
-    """
+    """Stream a chain's lines and report every break, not just the first."""
     import json  # noqa: PLC0415 — local, so this module's import graph stays hash-only
 
     breaks: list[Break] = []
@@ -283,10 +190,7 @@ def verify(
         if anchor_seq is not None and entry.seq == anchor_seq:
             anchor_hash = entry.hash
 
-        # The walk continues from what the file *claims*, not from what it
-        # should have been. Re-deriving the head would make one edit cascade
-        # into a break on every subsequent line, burying the location of the
-        # actual change under thousands of consequences of it.
+        # Continue from the file's claimed hash so one edit reports one break, not a cascade.
         head = entry.hash
         seq = entry.seq
 

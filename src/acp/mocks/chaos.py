@@ -1,20 +1,7 @@
-"""Controllable misbehavior for the mock upstream servers.
+"""Repeatable failure modes for the mock upstreams, to exercise resilience features.
 
-Every resilience feature the gateway builds — timeouts, retries with jitter,
-circuit breakers, health-driven catalog withdrawal — needs an upstream that can
-be provoked into failing in a specific, repeatable way. That is what this module
-is for. It is deliberately simple: one enum of modes, one function that applies
-a mode to an in-flight request.
-
-Two ways to select a mode, checked in this order:
-
-1. Per-request, via the ``X-ACP-Chaos-Mode`` header — lets a test flip one
-   upstream between modes without restarting the process.
-2. Process-wide, via the ``CHAOS_MODE`` environment variable — lets
-   docker-compose or a manual run make a whole mock chaotic by default.
-
-``X-ACP-Chaos-Param`` (or the ``CHAOS_PARAM`` env var) carries the one numeric
-knob each mode needs: seconds to hang, or bytes to inflate a payload to.
+The mode comes from the ``X-ACP-Chaos-Mode`` header, else the ``CHAOS_MODE`` env var.
+``X-ACP-Chaos-Param`` (or ``CHAOS_PARAM``) sets its knob: seconds to hang or bytes to inflate.
 """
 
 from __future__ import annotations
@@ -30,11 +17,7 @@ DEFAULT_HANG_SECONDS = 5.0
 DEFAULT_OVERSIZED_BYTES = 5_000_000
 
 CHAOS_SIMULATED_ERROR = -32050
-"""JSON-RPC code for a deliberately induced failure.
-
-Sits in the implementation-defined range (-32000 to -32099) so it can never be
-confused with a real protocol error the gateway must handle differently.
-"""
+"""JSON-RPC code for an induced failure, in the implementation-defined range."""
 
 CHAOS_MODE_HEADER = "x-acp-chaos-mode"
 CHAOS_PARAM_HEADER = "x-acp-chaos-param"
@@ -56,16 +39,10 @@ class ChaosMode(StrEnum):
     """Start a response, then drop the connection mid-stream."""
 
 
-class Disconnected(Exception):  # noqa: N818 — deliberately not an *Error; see below
+class Disconnected(Exception):  # noqa: N818 — a transport stand-in, not an error
     """Raised to simulate a mid-response connection drop.
 
-    Not named ``DisconnectedError`` on purpose: this is not really an
-    application error, it is a stand-in for the transport vanishing. Real ASGI
-    servers (uvicorn) close the socket when a handler raises after starting a
-    response; the in-process ASGI test transport surfaces this same exception
-    to the caller, which is the closest an in-process test can get to a genuine
-    dropped TCP connection. Full socket-level disconnect behaviour is exercised
-    by the compose smoke test against a real running server.
+    uvicorn closes the socket; the in-process test transport surfaces this exception instead.
     """
 
 
@@ -75,8 +52,7 @@ def resolve_mode(header_value: str | None) -> ChaosMode:
     try:
         return ChaosMode(raw.lower())
     except ValueError:
-        # An unrecognized mode fails loud rather than silently acting normal —
-        # a mistyped header should not masquerade as "everything is fine".
+        # Fail loudly so a mistyped mode does not look like normal behaviour.
         msg = f"unknown chaos mode: {raw!r}"
         raise ValueError(msg) from None
 
@@ -98,11 +74,7 @@ async def maybe_hang(mode: ChaosMode, seconds: float) -> AsyncIterator[None]:
 
 
 def oversized_text(byte_count: int) -> str:
-    """A deterministic string of approximately ``byte_count`` bytes.
-
-    Deterministic (not random) so a test can assert on its exact length and,
-    if useful later, its exact content.
-    """
+    """A deterministic string of ``byte_count`` characters."""
     unit = "chaos-oversized-payload-filler "
     repeats = (byte_count // len(unit)) + 1
     return (unit * repeats)[:byte_count]

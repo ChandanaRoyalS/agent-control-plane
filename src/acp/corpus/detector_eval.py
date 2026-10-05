@@ -1,22 +1,9 @@
-"""Any yes/no injection detector, scored on every corpus this project has.
+"""Scoring any yes/no injection detector (e.g. DeBERTa, Prompt Guard) before wiring it (ADR 0039).
 
-`acp.corpus.classifier_eval` scores the Ollama classifier, whose answer is a
-family. Purpose-built detectors — ProtectAI's DeBERTa, Meta's Prompt Guard —
-answer one question, *is this an injection*, with a score. Wiring one into the
-firewall would mean inventing a family for its findings, and inventing it before
-knowing whether the detector is any good would be the order this project keeps
-refusing (ADR 0039: measure, then decide). So this module scores the bare
-yes/no, on the same three populations everything else is scored on:
-
-1. **The 106 benign documents** — false positives first, by name.
-2. **The 36 internal development attacks**, by the family the corpus assigned.
-3. **InjecAgent's development half** (ADR 0061), base and enhanced, against the
-   same template-only control: an attack counts as caught only if the detector
-   says yes to it and no to the template with the attack removed. Intervals
-   resample attacker instructions.
-
-Held-out splits are not touched. A detector chosen on these numbers is scored on
-held-out v2 once, afterwards.
+Scored on the benign documents (false positives, by name), the internal
+development attacks by family, and InjecAgent's development half (ADR 0061),
+where an attack counts as caught only if the template without it is not flagged;
+intervals resample attacker instructions. Held-out splits are not touched.
 """
 
 from __future__ import annotations
@@ -33,7 +20,7 @@ from acp.corpus.external import SUBSETS, VARIANTS, ExternalDocument
 from acp.corpus.metrics import DEFAULT_RESAMPLES, Proportion, measure, measure_clustered
 
 Detect = Callable[[str], bool]
-"""Text in, "is this an injection" out. The seam a detector backend fills."""
+"""Text in, "is this an injection" out; the seam a backend fills."""
 
 Progress = Callable[[int, int], None]
 
@@ -61,8 +48,7 @@ class DetectorReport:
     internal: tuple[FamilyRow, ...]
     external: tuple[SliceRow, ...]
     controls_flagged: int
-    """Templates with the attack removed that the detector still called an
-    injection — false positives on text the source never meant as an attack."""
+    """Attack-free templates the detector still flagged (false positives)."""
     latency: Latency
 
 

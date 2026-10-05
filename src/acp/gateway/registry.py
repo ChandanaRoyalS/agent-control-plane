@@ -1,22 +1,9 @@
-"""The set of upstreams the gateway brokers for, and how calls route to them.
+"""The upstreams the gateway brokers for: catalogue merging and call routing.
 
-Two responsibilities, deliberately kept apart from the server that uses them:
-
-**Merging.** ``list_tools`` fans out to every upstream concurrently and merges
-the results under qualified names (ADR 0003). One upstream failing does not fail
-the whole catalogue — the failures come back alongside the tools and the caller
-decides what to do. A gateway that goes dark because one of five upstreams is
-down is worse than one serving the other four, and that is the same principle
-health-driven withdrawal will build on.
-
-**Routing.** ``call_tool`` takes a qualified name and finds the upstream and the
-real tool name. The upstream half is always exact. The tool half is exact too
-unless the name had to be truncated, and truncation cannot be reversed — so
-those are resolved through the upstream's own catalogue.
-
-The resolution map is a *memo*, not session state: it is rebuilt from upstreams
-on demand, so a cold instance behaves identically to a warm one. That is what
-keeps this compatible with the stateless model of ADR 0001.
+``list_tools`` fans out concurrently and merges under qualified names (ADR 0003); one
+upstream failing does not fail the catalogue. ``call_tool`` routes exactly, resolving
+possibly truncated names via the upstream's catalogue. The resolution map is a memo
+rebuilt on demand, keeping the stateless model of ADR 0001.
 """
 
 from __future__ import annotations
@@ -48,57 +35,30 @@ class Catalogue:
     """Upstream name to the error it raised. Empty when every upstream answered."""
 
     ttl_ms: int = 0
-    """How long an agent may cache *this* merged catalogue.
-
-    The minimum of the contributing upstreams' TTLs: a merged answer is only as
-    durable as its least durable part. Zero whenever anything failed or was
-    withdrawn, because the thing most likely to change in the next minute is
-    precisely the upstream that is currently broken.
-    """
+    """Milliseconds an agent may cache this catalogue; see ``_compose_hints``."""
 
     cache_scope: str = "private"
-    """``public`` only when every contributing upstream said ``public``.
-
-    One private component makes the whole merge private. Scope is an
-    authorization boundary, not a performance dial, and it does not average.
-    """
+    """``public`` only when every contributing upstream said ``public``."""
 
     withdrawn: dict[str, str] = field(default_factory=dict)
-    """Upstreams not even attempted, because health probing found them down.
+    """Upstreams skipped because health probing found them down.
 
-    Kept apart from ``failures`` because they are a different kind of event. A
-    failure is a surprise worth a warning on the request that hit it; a
-    withdrawal is a known condition already logged once when it started. Merging
-    them would mean an upstream that has been down for an hour logs a warning on
-    every single request for that hour.
+    Separate from ``failures`` so a known outage is not re-warned on every request.
     """
 
     @property
     def is_total_failure(self) -> bool:
-        """True when nothing answered — no tools, and something went wrong.
+        """Return True when there are no tools and something failed or was withdrawn.
 
-        Distinguishes "every upstream is down" from the legitimate case of
-        upstreams that simply expose no tools, which are not the same thing and
-        deserve different responses. A withdrawal counts: an agent given an
-        empty catalogue would conclude it has no tools and proceed without
-        them, which is exactly the outcome the total-failure error prevents.
+        Distinguishes an outage from upstreams that expose no tools.
         """
         return not self.tools and bool(self.failures or self.withdrawn)
 
 
 def _compose_hints(results: Iterable[ListToolsResult], *, degraded: bool) -> tuple[int, str]:
-    """Combine several upstreams' freshness hints into one for the merge.
+    """Combine upstream freshness hints: minimum TTL, ``public`` only if all are.
 
-    Conservative in both directions, and deliberately so. The TTL is the
-    *minimum*, because a merged catalogue stops being accurate the moment its
-    shortest-lived component does. The scope is ``public`` only if every
-    contributor said ``public``, because one private component makes the whole
-    answer caller-specific — scope is a boundary, and boundaries do not average.
-
-    A degraded catalogue is not cacheable at all. The upstream most likely to
-    change in the next minute is the one that is currently broken, and freezing
-    a reduced tool list into an agent's prompt is how a recovered upstream stays
-    invisible long after it came back.
+    A degraded catalogue is not cacheable, so a recovered upstream reappears promptly.
     """
     collected = list(results)
     if degraded or not collected:
@@ -113,12 +73,9 @@ class UpstreamRegistry:
 
     def __init__(self, clients: Iterable[Upstream], health: HealthMonitor | None = None) -> None:
         self._clients: dict[str, Upstream] = {c.config.name: c for c in clients}
-        # Optional on purpose. Without a monitor every upstream is attempted —
-        # so a registry built by a test, or by `build_app` directly, is
-        # unaffected.
+        # Optional: without a monitor every upstream is attempted.
         self._health = health
-        # qualified name -> real tool name, populated as catalogues are read.
-        # Only ever consulted for names that may have been truncated.
+        # qualified name -> real tool name; consulted only for possibly truncated names.
         self._resolved: dict[str, str] = {}
 
     @property
@@ -127,32 +84,17 @@ class UpstreamRegistry:
 
     @property
     def known_tools(self) -> frozenset[str]:
-        """Every qualified tool name this process has resolved so far.
+        """Return every qualified tool name this process has resolved so far.
 
-        The firewall's tool-mention detector needs a catalogue to compare a
-        document against, and this is the cheap answer: no fan-out, no upstream
-        call, just what has already been seen. It is what makes that detector
-        the one only a gateway can write — a document returned by ``mock-a``
-        naming ``mock-b__delete_record`` has read this estate's catalogue.
-
-        Honestly incomplete, and incomplete in the safe direction. A process
-        that has never served a ``tools/list`` knows nothing, so the detector
-        under-reports rather than inventing names — which is the same choice
-        ADR 0036 made for the screener's defaults. In practice an agent must
-        list before it can call, so by the first ``tools/call`` this is
-        populated.
+        Feeds the firewall's tool-mention detector without a fan-out. Incomplete in the
+        safe direction (under-reports before the first ``tools/list``), as in ADR 0036.
         """
         return frozenset(self._resolved)
 
     # -- catalogue ---------------------------------------------------------
 
     async def list_tools(self) -> Catalogue:
-        """Fetch and merge every upstream's catalogue, concurrently.
-
-        Concurrent rather than sequential because latency here is the sum of
-        round trips otherwise, and an agent waits for this before it can do
-        anything at all.
-        """
+        """Fetch and merge every upstream's catalogue concurrently."""
         results: dict[str, ListToolsResult] = {}
         failures: dict[str, ACPError] = {}
         withdrawn: dict[str, str] = {}
@@ -161,16 +103,13 @@ class UpstreamRegistry:
             try:
                 results[name] = await client.list_tools()
             except ACPError as exc:
-                # Deliberately caught, not propagated: one bad upstream must not
-                # take down the catalogue. The caller sees it in `failures`.
+                # One bad upstream must not fail the catalogue; reported in `failures`.
                 failures[name] = exc
 
         async with anyio.create_task_group() as group:
             for name, client in self._clients.items():
                 if self._health is not None and not self._health.serves_tools(name):
-                    # Known down. Not attempted at all — the breaker would make
-                    # the attempt cheap, but "cheap" is not "free", and an agent
-                    # is waiting on this fan-out.
+                    # Known down: skip it so the agent does not wait on it.
                     withdrawn[name] = self._health.record_for(name).error or "unhealthy"
                     continue
                 group.start_soon(fetch, name, client)
@@ -198,12 +137,10 @@ class UpstreamRegistry:
     ) -> CallToolResult:
         """Route a qualified tool call to the upstream that owns it.
 
-        A name with no separator is an unknown tool, not a programming error:
-        it is caller input, and under an allow-any rule it reaches here having
-        passed policy. Raised as `UnknownToolError` so the server's `ACPError`
-        path audits it and answers with a code, rather than a bare
-        `ValueError` becoming an internal error with no audit row (W11 of the
-        external review).
+        Raises:
+            UnknownToolError: Name has no separator (caller input, audited by the server's
+                `ACPError` path; W11 of the external review) or matches no tool.
+            UnknownUpstreamError: No such upstream is configured.
         """
         try:
             upstream = upstream_of(qualified)
@@ -225,17 +162,10 @@ class UpstreamRegistry:
         return await client.call_tool(tool, arguments)
 
     async def _resolve(self, qualified: str, client: Upstream) -> str:
-        """Find the upstream's real name for a qualified tool.
+        """Return the upstream's real name for a qualified tool.
 
-        The fast path is the common one and costs nothing: a name shorter than
-        the length limit cannot have been truncated, so its suffix *is* the real
-        name. See ``naming.may_be_truncated`` for why that is sound in one
-        direction only.
-
-        Ambiguous names are resolved from the memo, and on a miss by re-reading
-        that one upstream's catalogue. Guessing is not an option here — a wrong
-        guess invokes a different tool than the caller asked for, which for a
-        non-idempotent tool is unrecoverable.
+        Names below the limit are exact (``naming.may_be_truncated``). Others come from the
+        memo, refreshed once from this upstream on a miss; never guessed.
         """
         if not may_be_truncated(qualified):
             return suffix_of(qualified)

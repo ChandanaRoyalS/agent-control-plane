@@ -1,17 +1,8 @@
-"""What every Redis this gateway talks to has in common.
+"""Shared Redis plumbing for the approval and budget stores (ADR 0066, ADR 0067).
 
-Two settings point at a Redis — the approval store (ADR 0066) and the budget
-store (ADR 0067) — and both must refuse a URL that is not one at load, where
-the message can name the setting, rather than at the first connection, where
-the failure would be a gateway holding calls in nothing. The check is the same
-and lives once.
-
-So does the client. A Redis client built with no timeouts waits forever on a
-hung server, and a gateway with one such wait on its request path has every
-budgeted or held call behind it; a client with the library's default pool
-refuses the two-hundred-and-first concurrent command with an error rather than
-a queue. `client_for` sets both (ADR 0070), and the request path turns what
-the library raises into one typed, fail-closed refusal (`unavailable`).
+`check_redis_url` rejects a non-Redis URL when settings load, so the error names
+the setting. `client_for` builds a client with timeouts and a bounded pool, and
+`unavailable` turns library errors into one fail-closed refusal (ADR 0070).
 """
 
 from __future__ import annotations
@@ -31,18 +22,13 @@ logger = logging.getLogger(__name__)
 REDIS_SCHEMES: Final = ("redis://", "rediss://", "unix://")
 
 CONNECT_TIMEOUT_SECONDS: Final = 2.0
-"""How long to wait for a TCP connection. Startup pings and reconnects."""
+"""TCP connect timeout, for startup pings and reconnects."""
 COMMAND_TIMEOUT_SECONDS: Final = 1.0
-"""How long one command may take. A budget charge or an approval read is a
-few microseconds of server work; a second is a hung server, not a slow one."""
+"""Per-command timeout; commands here take microseconds, so a second means a hung server."""
 MAX_CONNECTIONS: Final = 1024
-"""Pool ceiling. Above it the library raises rather than queues, so this is
-sized to the concurrency a single gateway is expected to carry, with headroom;
-a deployment carrying more should raise it and the worker count together."""
+"""Pool ceiling; above it the library raises rather than queues, so size it to concurrency."""
 HEALTH_CHECK_INTERVAL_SECONDS: Final = 30.0
-"""How stale an idle connection may be before it is pinged before reuse, so a
-server restart is noticed on the next command rather than reported as a
-broken pipe mid-call."""
+"""Idle age after which a connection is pinged before reuse, catching server restarts."""
 
 
 def client_for(url: str) -> Redis:
@@ -58,12 +44,7 @@ def client_for(url: str) -> Redis:
 
 @asynccontextmanager
 async def unavailable(what: str) -> AsyncIterator[None]:
-    """Turn the library's failures into the gateway's one refusal.
-
-    `RedisError` covers connection, timeout and pool exhaustion; `OSError` is
-    what a refused socket raises underneath it. Anything else is a bug and
-    propagates as one.
-    """
+    """Turn `RedisError`/`OSError` into `StateStoreUnavailableError`; other errors propagate."""
     try:
         yield
     except (RedisError, OSError) as exc:

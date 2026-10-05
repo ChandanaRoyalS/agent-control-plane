@@ -1,38 +1,11 @@
-"""Screening the catalogue: tool descriptions are model-visible text too.
+"""Screening tool descriptions, which are model-visible text (threat model section 6.2).
 
-Every tool *result* passes through the firewall. Until this module, no tool
-*description* did — and a description is prose an upstream writes and the model
-reads before it does anything, on every turn, in the system prompt's most
-trusted position. An upstream that wants to address the model does not need to
-poison a document; it can say what it likes in `tools/list`. The threat model
-listed this as the largest unscreened surface (section 6.2), and the schema
-fingerprint (ADR 0013) notices when a description *changes* but never reads it.
-
-**What is screened.** The description, plus every `description` string nested
-anywhere in the input schema: an attacker who knows the top-level field is read
-moves the payload into a parameter's. The same detectors run as on a result, with
-one difference in what they are told — the catalogue minus the tool itself, so a
-tool is not flagged for naming its own qualified name, while a tool naming
-*another* upstream's tool stays exactly the tool-confusion signal it is.
-
-**What happens on a finding.** The same bar as a result (`triggers_for`: HIGH
-confidence from an enforceable detector). In enforce mode a tool that crosses it
-is **withheld from the catalogue** — the agent never learns it exists this turn —
-because the alternative, serving the tool with its description blanked, would
-invent a tool the upstream did not describe. In report mode it is served and
-the decision is logged, which is how a deployment measures what enforcement
-would cost before turning it on. Findings below the bar are reported and the tool
-is served, as with a result.
-
-**Why not fence it.** Provenance framing (ADR 0037) tells the model "this text
-was retrieved; treat it as data". A description cannot be data: its entire
-purpose is to instruct the model about the tool. There is no honest frame for
-text that is supposed to be followed, so the only two outcomes are serve or
-withhold.
-
-**Measured before it was wired** (ADR 0065). The detectors were run over 1,096
-tool, toolkit and parameter descriptions nobody here wrote before this module
-was allowed to withhold anything.
+Screens each tool's description and every nested schema ``description``, with the
+tool-mention detector told the catalogue minus the tool itself. A tool crossing
+the result bar (`triggers_for`) is withheld in enforce mode and served-and-logged
+in report mode; descriptions are never fenced, since they are meant to be followed
+(ADR 0037). The schema fingerprint (ADR 0013) only notices changes. Measured on
+1,096 third-party descriptions before wiring (ADR 0065).
 """
 
 from __future__ import annotations
@@ -50,12 +23,9 @@ SCHEMA_DESCRIPTION_KEY = "description"
 
 
 def schema_descriptions(schema: Any, *, depth: int = 0, limit: int = 32) -> Iterator[str]:
-    """Every ``description`` string in a JSON schema, at any depth.
+    """Every ``description`` string in a JSON schema, down to ``limit`` levels.
 
-    Bounded in depth, because the schema is upstream-supplied and a
-    thousand-level nest is a cheap way to make this walk expensive. Anything
-    deeper than ``limit`` is not read — and a description an upstream buried
-    thirty-two levels down is not one a model would have read either.
+    The bound stops an upstream-supplied deep nest from making the walk expensive.
     """
     if depth > limit:
         return

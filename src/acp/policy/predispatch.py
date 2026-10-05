@@ -1,37 +1,10 @@
 """Authorize on the routing headers, before anything parses a body.
 
-The 2026-07-28 revision added ``Mcp-Method`` and ``Mcp-Name`` so that an
-intermediary can route and authorize without reading the JSON-RPC payload. This
-gateway is the exact component those headers were added for, and this is the
-half that uses them.
-
-**The one rule that makes it safe: this may refuse, and may never authorize.**
-
-The headers are chosen by the caller, so anything decided *in the caller's
-favour* on the strength of a header is decided on the attacker's say-so. So the
-pre-check only ever subtracts: it refuses calls it can prove the policy would
-refuse anyway, and everything it does not refuse goes on to
-``enforce_call``, which reads the *body* and remains authoritative
-(ADR 0027 — enforcement is the backstop).
-
-That single direction is what makes a lying header worthless. A caller who puts
-an allowed tool in the header and a forbidden one in the body gets past this
-layer and is refused by the real one; a caller who does the reverse refuses
-themselves. There is no combination that gains anything, which is why this
-module contains no header-versus-body reconciliation: the desync it would
-defend against cannot buy an attacker a call.
-
-**And the trap that makes a naive version wrong.** A rule constraining an
-argument cannot match a call whose arguments are unknown — and at header time
-they are always unknown, because the body is exactly what has not been read. An
-implementation that simply evaluated the policy with an empty argument mapping
-would refuse every call permitted by an argument-scoped rule: a false denial of
-legitimate traffic, produced by the optimisation meant to be invisible. So the
-question asked here is not "would this be allowed" but the strictly weaker
-**"could this ever be allowed, for any arguments at all"** — see
-``could_ever_allow``.
-
-See ADR 0043.
+Uses the ``Mcp-Method`` and ``Mcp-Name`` headers (2026-07-28 revision). Headers are
+caller-chosen, so this may refuse but never authorize: it refuses only calls
+``could_ever_allow`` proves no arguments could permit, and everything else goes to
+``enforce_call``, which reads the body and stays authoritative (ADR 0027). A lying
+header therefore gains nothing, so no header-body reconciliation is needed (ADR 0043).
 """
 
 from __future__ import annotations
@@ -63,12 +36,7 @@ TOOL_CALL_METHOD: Final = "tools/call"
 """The only method decided here — see ``_declared_tool`` for why not all three."""
 
 MAX_HEADER_LENGTH: Final = 1024
-"""Longest routing header this will look at.
-
-A qualified tool name is bounded near 64 characters (ADR 0003). A kilobyte is
-generous and finite, and the bound matters because this runs before any other
-size limit in the stack.
-"""
+"""Longest routing header read; this runs before any other size limit (ADR 0003)."""
 
 REFUSED_EVENT: Final = "policy.predispatch_refused"
 
@@ -76,9 +44,8 @@ REFUSED_EVENT: Final = "policy.predispatch_refused"
 class PreDispatchAuthorizationMiddleware:
     """Refuses a request whose routing headers name a call policy cannot permit.
 
-    Placed *inside* ``AuthenticationMiddleware`` so the principal is already
-    resolved when this runs — it is added to the stack first, and Starlette's
-    ``add_middleware`` inserts at the front, so first added is innermost.
+    Must sit inside ``AuthenticationMiddleware`` so the principal is resolved: add it
+    first, since Starlette's ``add_middleware`` makes the first added innermost.
     """
 
     def __init__(
@@ -88,10 +55,7 @@ class PreDispatchAuthorizationMiddleware:
         audit: AuditLog | None = None,
     ) -> None:
         self._app = app
-        # A bare Policy wraps into a set whose default it is — the same
-        # normalisation `build_server` performs, done again here because this
-        # middleware is constructed independently and a rule enforced in one
-        # place and assumed in another is how the two drift.
+        # Same normalisation as `build_server`; this is constructed independently.
         self._policies = (
             policy if isinstance(policy, PolicySet) or policy is None else PolicySet(policy)
         )
@@ -100,18 +64,13 @@ class PreDispatchAuthorizationMiddleware:
     async def _record(self, *args: Any, **kwargs: Any) -> None:
         """Chain a refusal, swallowing a sink failure.
 
-        A failure here does not change the outcome: the call is being refused
-        either way, so fail-closed is already satisfied — nothing happens that
-        is not recorded, because nothing happens. What must not happen is a 500,
-        which would answer a policy refusal with a different word than the policy
-        used. The writer has already logged at ERROR and moved the metric.
+        The call is refused either way, so fail-closed holds; a 500 would misreport the
+        refusal. The writer has already logged at ERROR and moved the metric.
         """
         if self._audit is None:  # pragma: no cover — guarded by the caller
             return
         with contextlib.suppress(ACPError):
-            # On a thread. A refusal here is the fastest path through
-            # the gateway — it never parses a body — and parking the event loop
-            # to record it would make the cheap path the expensive one.
+            # On a thread, so the cheap refusal path never blocks the event loop.
             await self._audit.arecord(*args, **kwargs)
 
     async def __call__(self, scope: Scope, receive: Any, send: Any) -> None:
@@ -121,9 +80,7 @@ class PreDispatchAuthorizationMiddleware:
 
         tool = _declared_tool(scope)
         if tool is None:
-            # No routing headers, or a method that names nothing — `tools/list`
-            # carries no subject to authorize. Nothing to decide here; the
-            # request proceeds to the checks that read the body.
+            # Nothing to decide; the body checks still run.
             await self._app(scope, receive, send)
             return
 
@@ -134,9 +91,8 @@ class PreDispatchAuthorizationMiddleware:
             await self._app(scope, receive, send)
             return
 
-        # Either there is no principal while a policy is loaded — the same
-        # fail-closed misconfiguration `on_call_tool` refuses — or no arguments
-        # could make this call permitted.
+        # No principal with a policy loaded (fail closed, as `on_call_tool` does),
+        # or no arguments could permit this call.
         logger.info(
             REFUSED_EVENT,
             extra={
@@ -145,16 +101,9 @@ class PreDispatchAuthorizationMiddleware:
                 "reason": "no principal" if principal is None else "no rule could allow",
             },
         )
-        # Chained before the 403 is written. A refusal made at the header is
-        # still an authorization decision, and it is the *only* record of a call
-        # that never reached `enforce_call` — leaving it out would make the fast
-        # path a hole in the audit trail rather than an optimisation of it.
+        # Chained before the 403: the only audit record of a call that never
+        # reaches `enforce_call`.
         if self._audit is not None:
-            # Through `_record`, which suppresses a sink failure — the call is
-            # being refused either way, so fail-closed is satisfied, and a 500
-            # here would answer a policy refusal with a different word than the
-            # policy used. (This previously called the sink directly; the
-            # helper existed, argued exactly this, and had no caller.)
             await self._record(
                 AuditCategory.AUTHORIZATION,
                 REFUSED_EVENT,
@@ -169,31 +118,13 @@ class PreDispatchAuthorizationMiddleware:
 
 
 def _declared_tool(scope: Scope) -> str | None:
-    """The *tool* named by the routing headers, or ``None`` for "do not decide".
+    """Return the tool named by the routing headers, or ``None`` to abstain.
 
-    Every ``None`` below is a deliberate abstention rather than a refusal. This
-    layer acts only on a positive proof, so anything it cannot read cleanly is
-    handed to the checks that read the body — which refuse it there if it
-    deserves refusing.
-
-    **Only ``tools/call``**, though ``NAME_BEARING_METHODS`` lists three methods.
-    That mapping answers "which methods carry an ``Mcp-Name`` at all", which is
-    the right question for the outbound client and the wrong one here: the name
-    on ``resources/read`` is a URI and the name on ``prompts/get`` is a prompt,
-    and neither is a thing a policy rule is written about. Passing either to a
-    tool-shaped check would find no matching rule, hit the deny default, and
-    refuse a request the real check permits — the exact false refusal this whole
-    design is built to avoid. The mapping is still imported, and membership
-    still asserted, so that a method removed from it cannot silently keep being
-    decided here.
-
-    **The name is decoded, not compared raw.** A name outside visible ASCII —
-    or one that merely looks like the codec's sentinel — travels base64-wrapped
-    (``encode_header_value``), and comparing the wrapper against a policy rule
-    would refuse a legitimate call for the crime of having an awkward name.
-    ``decode_header_value`` is the same codec the outbound client and the mock
-    server use, so all three agree on what a header says by construction, and it
-    already answers ``None`` for a malformed sentinel rather than raising.
+    ``None`` hands the request to the body checks; anything unclear abstains. Only
+    ``tools/call`` is decided: the names on ``resources/read`` and ``prompts/get`` are
+    not tools, and checking them would falsely refuse. Membership in
+    ``NAME_BEARING_METHODS`` is still asserted. The name is decoded with the shared
+    ``decode_header_value`` codec, since awkward names travel base64-wrapped.
     """
     headers: Sequence[tuple[bytes, bytes]] = scope.get("headers") or []
     method: str | None = None
@@ -204,9 +135,7 @@ def _declared_tool(scope: Scope) -> str | None:
         if lowered not in (METHOD_HEADER, NAME_HEADER):
             continue
         if lowered in seen:
-            # The same routing header twice, with nothing to say which one the
-            # body will agree with. Declining costs a fast path; guessing risks
-            # refusing the call the caller actually made.
+            # A duplicate header is ambiguous; abstain rather than guess.
             return None
         seen.add(lowered)
         if len(value) > MAX_HEADER_LENGTH:
@@ -214,8 +143,7 @@ def _declared_tool(scope: Scope) -> str | None:
         try:
             decoded = value.decode("ascii")
         except UnicodeDecodeError:
-            # Not a value any conforming client sends: the codec above exists
-            # precisely so that non-ASCII names travel as ASCII.
+            # Conforming clients encode non-ASCII names as ASCII.
             return None
         if lowered == METHOD_HEADER:
             method = decoded
@@ -238,35 +166,18 @@ REFUSAL: Final = json.dumps(
         },
     }
 ).encode()
-"""The fast path's refusal, as the JSON-RPC error the handler would have sent.
+"""The JSON-RPC error the handler would send, with ``id`` null since the body is unread.
 
-`id` is ``null`` because the body has not been read, so the request's id is
-not known — JSON-RPC's own spelling for "an error about a request I could not
-identify". A conforming client answers the pending call with it anyway: the
-streamable-HTTP transport knows which request it posted (ADR 0072)."""
+Clients still match it to the pending call via the streamable-HTTP transport (ADR 0072).
+"""
 
 
 async def _refuse(send: Any) -> None:
     """Answer 403 carrying the same JSON-RPC error `enforce_call` would give.
 
-    403 rather than a JSON-RPC error inside a 200, for the reason
-    ``AuthenticationMiddleware`` returns 401: this happens before anything
-    parses a body, and answering 200 tells every proxy in the path that the
-    request succeeded.
-
-    **And a JSON-RPC body inside the 403, because an agent reads the body.**
-    The first version answered ``{"error": "forbidden"}``, which no MCP client
-    understands: the official SDK turned it into ``-32603 Server returned an
-    error response``, the code for *the server broke*. So the same denial meant
-    "stop, you are not entitled" (``-32040``, ``recoverable: false``) when the
-    handler gave it and "something failed, try again" when this layer did — and
-    this layer is the one a conforming client hits first. Nothing in the suite
-    noticed, because nothing in the suite was a real client (ADR 0072).
-
-    The message is undifferentiated on purpose — the same refusal
-    ``PolicyDeniedError`` gives. Naming the rule, or distinguishing "no such
-    tool" from "forbidden tool", is an oracle a caller can map one request at a
-    time. The log has the detail; the caller has "no".
+    A 403, not a 200, so proxies do not see success; a JSON-RPC body so MCP clients read
+    it as a non-recoverable denial (ADR 0072). The message is undifferentiated, so
+    callers cannot map the policy.
     """
     await send(
         {

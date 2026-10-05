@@ -1,15 +1,7 @@
 """What the gateway needs from an upstream, independent of how it is built.
 
-The registry brokers between upstreams; it has no business knowing whether the
-thing it holds retries, breaks a circuit, or talks straight to a socket. Typing
-it against a ``Protocol`` rather than ``UpstreamClient`` makes that explicit and
-keeps the decorators (``RetryingUpstreamClient``, the circuit-breaking
-``GuardedUpstreamClient``) composable without the registry changing at all.
-
-Structural typing is the right tool here specifically because these wrappers are
-*not* subclasses. Making them inherit from ``UpstreamClient`` would drag along a
-connection pool and a request path they do not use, purely to satisfy the type
-checker.
+A structural ``Protocol`` so the registry need not know which wrappers are stacked,
+and the wrappers need not subclass ``UpstreamClient`` and its connection pool.
 """
 
 from __future__ import annotations
@@ -25,15 +17,8 @@ from acp.upstream.models import CallToolResult, ListToolsResult
 class Credentials(Protocol):
     """Whatever can produce an ``Authorization`` value for an upstream call.
 
-    A structural type, and deliberately not an import of ``acp.identity``. The
-    upstream client's business is HTTP and JSON-RPC; giving it a concrete
-    dependency on token exchange would make every test of the transport need an
-    authorization server, and would put an identity import in the one package
-    that should be usable without one.
-
-    What it receives is a name and an audience — never a principal, never a
-    token. The client cannot forward an inbound credential because it is not
-    holding one.
+    Structural, so this package does not import ``acp.identity``. It receives a name
+    and an audience, never an inbound token, so the client cannot forward one.
     """
 
     async def authorization_for(self, upstream: str, audience: str, resource: str) -> str | None:
@@ -47,8 +32,7 @@ class Upstream(Protocol):
 
     @property
     def config(self) -> UpstreamConfig:
-        """Declared as a property so both a plain attribute and a computed one
-        satisfy it — the concrete client stores it, the wrappers delegate."""
+        """This upstream's configuration (a property so wrappers can delegate)."""
         ...
 
     async def list_tools(self) -> ListToolsResult:
@@ -56,13 +40,7 @@ class Upstream(Protocol):
         ...
 
     async def invalidate(self) -> None:
-        """Discard anything cached about this upstream.
-
-        On the protocol rather than only on the caching wrapper, because the
-        health monitor has to be able to force a real request without knowing
-        which layers are present. A probe answered from cache reports on a
-        conversation that happened minutes ago.
-        """
+        """Discard anything cached, so a health probe makes a real request."""
         ...
 
     async def call_tool(

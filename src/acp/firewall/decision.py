@@ -1,25 +1,9 @@
-"""What the gateway does about a finding — the first place the firewall can be wrong.
+"""What the gateway does about a finding: the first layer that can wrongly refuse.
 
-The detectors detect and decide nothing. Provenance framing frames and judges
-nothing. This is the first module that changes what a caller receives because of
-what a detector thought, and therefore the first that can be wrong about a real
-request.
-
-The asymmetry is the design. A missed attack costs whatever the attack was
-worth; a false refusal costs the deployment's trust in the control, and the
-observed response to a firewall that refuses honest traffic is not a tuning
-ticket, it is ``ACP_FIREWALL_MODE=off``. So the bar is set deliberately high and
-the numbers that would justify lowering it come from the corpora and the
-evaluation harness in `acp.corpus`.
-
-**The refusal never reproduces the content.** Not the payload, not the matched
-span, not a paraphrase. Explaining a refusal by quoting what was in the document
-delivers that text to the model, in the model's context, wearing the gateway's
-authority and outside any fence — a better delivery mechanism than the original
-attack had. The notice carries labels, which this repository writes and which
-cannot carry an instruction, plus an incident identifier a human can look up.
-
-See ADR 0038.
+A false refusal costs trust in the control, so the bar is deliberately high and
+evidence to lower it comes from `acp.corpus`. The refusal never reproduces the
+document's content, only repository-written labels and an incident ID, since
+quoting it would deliver the payload with the gateway's authority (ADR 0038).
 """
 
 from __future__ import annotations
@@ -56,18 +40,13 @@ class Mode(StrEnum):
     """How much the firewall is allowed to do."""
 
     OFF = "off"
-    """No screening at all. The default, because screening is linear in the size
-    of every result and a control that turns itself on is a control nobody
-    chose."""
+    """No screening. The default: screening costs time linear in every result."""
 
     REPORT = "report"
-    """Screen everything, log everything, change nothing the caller receives.
+    """Screen and log everything, change nothing the caller receives.
 
-    Where a deployment starts, and it answers the question that actually decides
-    whether enforcement is safe here: not "how many findings does my traffic
-    produce" but "how many of them would have been *refused*". So the bar is
-    evaluated in this mode too, and a result that would have been withheld is
-    logged as ``would_refuse`` and served anyway.
+    The bar is still evaluated: a result enforce would withhold is logged as
+    ``would_refuse`` and served, measuring what enforcement would cost.
     """
 
     ENFORCE = "enforce"
@@ -75,64 +54,20 @@ class Mode(StrEnum):
 
 
 ENFORCEABLE: Final = frozenset({"bidirectional_override", "encoded_payload"})
-"""The only detectors whose findings may withhold a result.
+"""The only detectors whose HIGH findings may withhold a result in enforce mode.
 
-Two, and the list is short because it was **measured** rather than reasoned
-about. Both of these produced zero findings across the 106 documents of the
-benign corpus. Everything else produced some, and a detector that
-fires on real documents cannot be allowed to withhold them.
-
-In code rather than in configuration, deliberately. A deployment can say what it
-knows about its own environment — its hosts, its mode — but it cannot promote a
-noisy detector into a blocking one, because what is encoded here is what *this
-project has measured* about its own detectors' error rates.
-
-Absent, and each for a reason the corpus either predicted or produced:
-
-``instruction_override`` — capped at MEDIUM by ADR 0036, so it could never
-withhold anything. Fired on 10 benign documents, exactly as expected: security
-advisories, an incident report, this repository's own ADRs.
-
-``invisible_characters`` — MEDIUM, same reasoning. Fired on 10: emoji built from
-zero-width joiners, Persian requiring the zero-width non-joiner as spelling,
-French non-breaking spaces.
-
-``disallowed_url`` — MEDIUM. Fired on 10 benign documents that link to things,
-because benign documents link to things.
-
-``tool_name_mention`` — **demoted by the corpus** (ADR 0039). It was on this
-list, described as having a false-positive rate near zero because a *qualified*
-name is unusual in prose. That was a guess and it was wrong in a predictable
-class: it withheld the gateway's own audit log, a policy-decision record and its
-own firewall log lines. A document that is a record of tool calls names tools.
-An observability tool returning that record would have been refused by the
-gateway that wrote it.
-
-``external_image`` — **demoted by the corpus** (ADR 0039). It withheld a
-marketing newsletter carrying a tracking pixel and a security advisory
-demonstrating the exfiltration pattern. Both are benign, both are exactly the
-shape, and no allow-list a real deployment would write covers a third party's
-newsletter.
-
-Both demoted detectors still fire, are still logged, and still count toward
-`would_refuse` in report mode. What changed is that they no longer withhold
-anything on their own. Detector tuning against the harness can promote them
-again by combining them with a second signal — which is what the corpus says
-they need.
+Both had zero findings on the 106-document benign corpus; it is code, not config,
+so a deployment cannot promote a noisy detector. ``tool_name_mention`` and
+``external_image`` were demoted after withholding benign documents (ADR 0039);
+they still fire, log and count toward ``would_refuse``. The MEDIUM-capped
+detectors (ADR 0036) can never withhold.
 """
 
 INCIDENT_BYTES: Final = 8
-"""64 bits of reference. Not a secret — a handle, so that a user given a refusal
-can quote something an operator can find in a log, and the payload never has to
-travel in order to explain itself."""
+"""Size of the incident ID: a non-secret handle an operator can find in the log."""
 
 MAX_LOGGED_FINDINGS: Final = 5
-"""How many findings' evidence reaches the decision log line.
-
-The full count is always reported; the excerpts are capped. A document with two
-hundred zero-width characters is one event, and a log line reproducing all two
-hundred is an amplification whose size the attacker chose.
-"""
+"""Evidence excerpts per decision log line; the full count is always logged."""
 
 REFUSAL: Final = (
     "[GATEWAY NOTICE — CONTENT WITHHELD, incident {incident}]\n"
@@ -146,13 +81,10 @@ REFUSAL: Final = (
     "Tell the user that the content was withheld and give them incident "
     "{incident}, which an operator can look up."
 )
-"""What the caller is told. It is a security control written in English, so it
-is a constant in one module with tests over its contents rather than a string
-built at the call site — the same rule ADR 0037 applied to the fence.
+"""The refusal notice, a tested constant (as ADR 0037 does for the fence).
 
-Note what is *not* interpolated: nothing from the document. ``tool`` comes from
-the request, ``triggers`` are detector and family names this repository defines,
-and ``incident`` is hex.
+Nothing from the document is interpolated: ``tool`` is from the request,
+``triggers`` are repository-defined labels and ``incident`` is hex.
 """
 
 
@@ -167,33 +99,23 @@ class Inspection:
     refused: bool
 
     incident: str = ""
-    """Empty unless refused. A reference, generated per refusal."""
+    """Empty unless refused; generated per refusal."""
 
     triggers: tuple[Finding, ...] = ()
-    """The findings that crossed the bar — populated in report mode too, where
-    they mean "this would have been withheld". That number, rather than the
-    finding count, is what tells a deployment whether enforcement is safe for
-    its own traffic."""
+    """Findings that crossed the bar; in report mode, what would have been withheld."""
 
     @property
     def cacheable(self) -> bool:
-        """Whether this result may be stored.
+        """Whether this result may be cached: not refused and not truncated.
 
-        Not refused, and not truncated. In enforce mode the second half is
-        implied by the first (a truncated screening is refused, ADR 0069); in
-        report mode it stands alone: a long document is served once, examined
-        in part, and never repeated from the cache, because storing one whose
-        tail was never examined turns a single unexamined document into every
-        subsequent caller's answer for the length of its TTL.
+        In report mode a truncated result is served but never cached, so a
+        partly examined document is not replayed to later callers (ADR 0069).
         """
         return not self.refused and not self.screening.truncated
 
 
 UNEXAMINED_TAIL: Final = "unexamined_tail"
-"""The trigger a truncated screening earns. Not a detector — nothing ran — and
-not on `ENFORCEABLE`, because it is not a claim about the text; it is the
-absence of one. It withholds for the reason ADR 0069 gives: a document whose
-tail no detector read is a document whose tail an attacker chose."""
+"""Trigger for a truncated screening: an unread tail is attacker-chosen (ADR 0069)."""
 
 
 def truncation_trigger(screening: Screening) -> Finding:
@@ -209,25 +131,9 @@ def truncation_trigger(screening: Screening) -> Finding:
 
 
 def triggers_for(screening: Screening) -> tuple[Finding, ...]:
-    """The findings that justify withholding a result.
+    """The findings that justify withholding: HIGH from an `ENFORCEABLE` detector.
 
-    Two conditions, both necessary: HIGH confidence, and a detector on the
-    enforceable list. HIGH alone is not enough because confidence is a claim a
-    detector makes about itself; the list is what decides which detectors are
-    trusted to make it.
-
-    And one condition on the screening itself: that it read the whole document.
-    A result longer than the window was screened in part, and "no findings in
-    the part I looked at" is not "no findings" (ADR 0069). The unexamined tail
-    is a trigger in its own right — the only place a payload can sit that no
-    detector will ever see is the one place an attacker who knows the window
-    will put it.
-
-    There used to be a third condition — that a host-dependent detector could
-    only withhold once the deployment had configured its allowed hosts. It went
-    when `external_image` left the enforceable list, because a condition on a
-    detector that can no longer withhold anything is a guard that cannot fire,
-    and a guard that cannot fire is worse than none: a reader trusts it.
+    A truncated screening also adds `UNEXAMINED_TAIL` (ADR 0069).
     """
     found = tuple(
         finding
@@ -242,16 +148,9 @@ def triggers_for(screening: Screening) -> tuple[Finding, ...]:
 def refusal(tool: str, triggers: tuple[Finding, ...], incident: str) -> CallToolResult:
     """The notice a caller receives in place of withheld content.
 
-    ``isError`` rather than a JSON-RPC error, because the transport worked, the
-    request was well-formed and the tool ran — what failed is that its output is
-    not usable, which is exactly the line MCP draws. It also means
-    ``ResultCache.put`` refuses it for free (ADR 0035), so a refusal cannot be
-    cached even by a call site that forgets.
-
-    Not framed, either. Provenance framing marks text the gateway did not write;
-    fencing text the gateway *did* write would be a lie about its origin, and
-    would teach a model that fenced text is sometimes authoritative — the one
-    belief ADR 0037 exists to prevent.
+    An ``isError`` result (the tool ran; its output is unusable), which
+    ``ResultCache.put`` also refuses to store (ADR 0035). Not fenced, since it is
+    gateway-written text (ADR 0037).
     """
     labels = ", ".join(sorted({finding.label for finding in triggers})) or "an internal check"
     return CallToolResult(
@@ -267,32 +166,16 @@ def refusal(tool: str, triggers: tuple[Finding, ...], incident: str) -> CallTool
 
 RESULT: Final = "result"
 CATALOGUE: Final = "catalogue"
-"""Which model-visible surface a decision was about: a tool's output, or the
-description of the tool itself. Separate series, because a deployment that sees
-`would_refuse` climb needs to know whether a document or an upstream's
-catalogue is doing it."""
+"""Metric surface label: a tool's output or its description, kept as separate series."""
 
 MAX_CONCURRENT_CLASSIFIER_CALLS: Final = 4
-"""How many screenings may be waiting on the model at once.
-
-A local model answers one prompt at a time; a hundred concurrent tool results
-would queue behind it either way, and letting them all hold a worker thread
-while they wait is how a thread pool fills with calls to one slow dependency.
-Four is enough to overlap network latency with inference and small enough that
-the gateway's other threaded work (the audit `fsync`) still gets a thread.
-"""
+"""Screenings that may wait on the model at once, so one slow model cannot fill the thread pool."""
 
 _limiter: CapacityLimiter | None = None
 
 
 def _classifier_limiter() -> CapacityLimiter:
-    """One limiter per process, created on first use.
-
-    Lazily, because an anyio `CapacityLimiter` binds to the running event loop
-    on first acquisition, and the `Firewall` is constructed at startup before
-    the loop the gateway serves on exists — the same reason the audit writer
-    creates its serialiser on demand.
-    """
+    """One limiter per process, created lazily because it binds to the running loop."""
     global _limiter  # noqa: PLW0603 — one per process is the point
     if _limiter is None:
         _limiter = CapacityLimiter(MAX_CONCURRENT_CLASSIFIER_CALLS)
@@ -302,10 +185,7 @@ def _classifier_limiter() -> CapacityLimiter:
 class Firewall:
     """Screens a tool result and decides what the caller gets.
 
-    Holds the deployment's mode and host list. The *catalogue* is passed per
-    call rather than held, because it grows as upstreams are listed and a
-    firewall holding a stale copy would under-report exactly the detector only a
-    gateway can write.
+    The catalogue is passed per call, not held, so it is never stale.
     """
 
     def __init__(
@@ -328,22 +208,11 @@ class Firewall:
         tool: str,
         tools: AbstractSet[str] = frozenset(),
     ) -> Inspection:
-        """`inspect`, off the event loop when a model is attached.
+        """`inspect`, on a limited worker thread when a classifier is attached.
 
-        The pattern detectors take microseconds and run inline. The classifier
-        is a synchronous HTTP call to a local model with a five-second timeout,
-        and `inspect` was being called from the request handler with no thread
-        hop — so with the classifier enabled, every tool call parked the whole
-        gateway for the model's latency, for every other request in the
-        process. The same bug class ADR 0053 found for a 5.8 ms `fsync`, three
-        orders of magnitude longer, in the one component that is also the
-        project's only model. So: with a classifier, the screening runs on a
-        worker thread under a limiter that bounds concurrent model calls;
-        without one, there is nothing to wait for and the hop is pure cost.
-
-        `inspect` stays synchronous and pure — the evaluation harness, the
-        corpus scripts and the unit tests call it directly, and a decision that
-        can be reasoned about without an event loop should stay that way.
+        The classifier is a blocking HTTP call that would otherwise stall the loop
+        (the bug class of ADR 0053); without one, it runs inline. `inspect` stays
+        synchronous for the harness and tests.
         """
         if self._classifier is None:
             return self.inspect(result, tool=tool, tools=tools)
@@ -368,10 +237,7 @@ class Firewall:
             ),
             classifier=self._classifier,
         )
-        # Text blocks only. An image is bytes and this layer has no opinion
-        # about bytes; a resource link is a URI the *client* may fetch, which is
-        # a real exfiltration channel and a gap named in ADR 0037 rather than
-        # closed here by guessing at a field name that varies by content type.
+        # Text blocks only; resource links are a known gap (ADR 0037).
         screening = screener.screen_all(
             [block.text for block in result.content if block.text is not None]
         )
@@ -396,12 +262,7 @@ class Firewall:
     def inspect_tool(
         self, tool: ToolDefinition, *, tools: AbstractSet[str] = frozenset()
     ) -> ToolInspection:
-        """Screen one tool's description; decide whether the caller may see it.
-
-        Same screener, same bar as a result (see `acp.firewall.catalogue`). The
-        tool-mention detector is told the catalogue *minus this tool*, so a
-        tool is never flagged for naming itself.
-        """
+        """Screen one tool's descriptions with the result bar (see `acp.firewall.catalogue`)."""
         screener = Screener(
             ScreenPolicy(
                 allowed_hosts=self._allowed_hosts,
@@ -442,8 +303,7 @@ class Firewall:
         return CatalogueInspection(served=serve(inspections), inspections=inspections)
 
     async def ainspect_catalogue(self, tools: Sequence[ToolDefinition]) -> CatalogueInspection:
-        """`inspect_catalogue`, off the event loop when a model is attached —
-        for the same reason as `ainspect`, multiplied by the catalogue's size."""
+        """`inspect_catalogue`, off the event loop when a model is attached (as `ainspect`)."""
         if self._classifier is None:
             return self.inspect_catalogue(tools)
         return await to_thread.run_sync(
@@ -460,18 +320,9 @@ class Firewall:
         triggers: tuple[Finding, ...] = (),
         surface: str = RESULT,
     ) -> None:
-        """The decision record: which tool, what the gateway did, and why.
+        """Record metrics for every screening, and a log line for every non-clean one.
 
-        Separate from the screener's own ``firewall.findings`` line, and the
-        split follows the layering rather than fighting it — a screener does not
-        know what a tool is, and a decision layer should not have to re-derive
-        what a detector found. Both carry the request ID, which is what makes
-        them one event to anybody reading them.
-
-        Metrics are recorded for every screening including the clean ones,
-        because a detection count without its denominator is not a rate. The
-        *log line* is not: a line per successful call saying "nothing happened"
-        is how a security log becomes unreadable.
+        Joins the screener's ``firewall.findings`` line by request ID.
         """
         metrics.record_firewall_decision(decision=decision, surface=surface)
         for finding in screening.findings:
@@ -494,23 +345,14 @@ class Firewall:
                 "highest": str(highest) if highest is not None else None,
                 "truncated": screening.truncated,
                 "triggers": [finding.label for finding in triggers],
-                # Redacted at construction (ADR 0036), capped here. This is the
-                # only place the document's own text appears anywhere in this
-                # module, and its reader is a human with a grep rather than a
-                # model with tools.
+                # Redacted at construction (ADR 0036); the only document text here, for humans.
                 "evidence": [f.evidence for f in screening.findings[:MAX_LOGGED_FINDINGS]],
             },
         )
 
 
 def _verdict(screening: Screening, triggers: tuple[Finding, ...]) -> str:
-    """What to call a screening that was not acted on.
-
-    ``would_refuse`` is the whole value of report mode: it separates "my traffic
-    produces findings", which is interesting, from "enforcement would have
-    withheld this result", which is the number a deployment needs before it
-    turns enforcement on.
-    """
+    """Label a screening that was not acted on: would_refuse, reported or clean."""
     if triggers:
         return "would_refuse"
     if screening.findings or screening.truncated:
@@ -524,12 +366,7 @@ def firewall_for(
     allowed_hosts: AbstractSet[str] = frozenset(),
     classifier: OllamaClassifier | None = None,
 ) -> Firewall | None:
-    """The firewall this mode asks for, or ``None`` for no screening at all.
-
-    ``None`` rather than a ``Firewall`` in an inert mode, so that "off" costs
-    nothing on the request path and cannot become a branch inside the hot loop
-    that somebody later gets wrong.
-    """
+    """The firewall for ``mode``, or ``None`` when off (zero request-path cost)."""
     if mode is Mode.OFF:
         return None
     return Firewall(

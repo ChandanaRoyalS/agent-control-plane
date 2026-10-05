@@ -1,10 +1,7 @@
-"""Mock upstream B — a chat and directory service.
+"""Mock upstream B: a chat and directory service.
 
-``search`` here deliberately collides in name with mock A's ``search`` but has
-a different schema and a different implementation, which is the point: the
-gateway must namespace both as distinct tools (``mock-a__search`` and
-``mock-b__search``, per ADR 0003) rather than the second silently shadowing
-the first.
+Its ``search`` collides by name with mock A's, so the gateway must expose both as
+``mock-a__search`` and ``mock-b__search`` (ADR 0003).
 """
 
 from __future__ import annotations
@@ -23,8 +20,7 @@ _CHANNELS: dict[str, list[str]] = {
 
 
 def _search(arguments: dict[str, Any]) -> CallToolResult:
-    # Deliberately different argument shape from mock-a's `search` (channel
-    # instead of limit) — the collision is in *name* only, not in behaviour.
+    # Different arguments from mock-a's `search`; the collision is in name only.
     query = str(arguments.get("query", ""))
     channel = arguments.get("channel")
     channels = [channel] if isinstance(channel, str) else list(_CHANNELS)

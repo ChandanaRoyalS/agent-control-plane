@@ -1,15 +1,8 @@
 """The gateway's outbound half: talking to upstream MCP servers.
 
-Hand-rolled over ``httpx`` rather than built on the MCP SDK — see
-``docs/decisions/0005-hybrid-protocol-layer.md``. The short version: this side
-talks to servers that are expected to be slow, broken, or hostile, and it needs
-to *observe* protocol failures and classify them rather than have a library
-raise on them. The inbound half (agent to gateway) has the opposite
-requirements and uses the SDK.
-
-Resilience is layered as wrappers around the client rather than folded into it
-— see ``docs/decisions/0006-layer-resilience-as-wrappers.md`` and
-:mod:`acp.upstream.factory`, which is the single place the layers are stacked.
+Hand-rolled over ``httpx`` so protocol failures from slow or hostile servers can be
+observed and classified (ADR 0005). Resilience is layered as wrappers, stacked only
+in :mod:`acp.upstream.factory` (ADR 0006).
 """
 
 from acp.upstream.breaker import (

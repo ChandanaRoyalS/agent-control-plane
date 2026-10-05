@@ -1,9 +1,7 @@
 """The gateway's inbound half: the MCP server agents connect to.
 
-Built on the MCP SDK (ADR 0005), in contrast to ``acp.upstream`` which is
-hand-rolled over httpx. The two halves have opposite requirements: inbound
-optimises for compatibility with clients we do not control, outbound for
-control over servers that may misbehave.
+Built on the MCP SDK for client compatibility, unlike the hand-rolled ``acp.upstream``
+(ADR 0005).
 """
 
 from acp.gateway.registry import Catalogue, UpstreamRegistry

@@ -1,27 +1,8 @@
-"""The anchor a chain cannot provide for itself.
+"""External anchor for the audit chain, which cannot detect tail truncation or rewrite alone.
 
-The other half of verification. `acp.audit.chain` is explicit that a hash chain detects
-modification, splicing and reordering, and **cannot** detect truncation of the
-tail — delete the last thousand entries and what remains is a perfectly valid
-chain. Nothing inside the file can say otherwise, because the file no longer
-contains the evidence.
-
-The answer is the pattern this project already uses for schema drift (ADR 0013):
-**commit the expected state, and compare against it.** `acp audit checkpoint`
-records where the chain had got to; `acp audit verify --checkpoint` fails if the
-chain no longer reaches it. A truncation that removes the checkpointed entry is
-then a build failure rather than a silence.
-
-**Where the anchor lives is the whole security property.** A checkpoint sitting
-beside the log, writable by whoever can write the log, proves nothing — an
-attacker rewrites both. It is useful exactly to the extent that it is somewhere
-the writer cannot reach: committed to the repository, sent to a monitoring
-system, printed into a chat channel, read aloud in a meeting. This module makes
-the anchor small enough to travel that way — a sequence number and a hash — and
-says out loud that *storing it next to the log is a decorative use of it*.
-
-That is a deployment property, not something code here can enforce, which is why
-it is stated rather than implemented.
+`acp audit checkpoint` records a (seq, hash) pair; `acp audit verify --checkpoint` fails if
+the chain no longer reaches it, the committed-baseline pattern of ADR 0013. The anchor only
+helps if stored where the log's writer cannot reach it; code cannot enforce that.
 """
 
 from __future__ import annotations
@@ -34,26 +15,18 @@ from typing import Any, Final
 from acp.exceptions import ConfigurationError
 
 DEFAULT_CHECKPOINT_PATH: Final = Path("config/audit-checkpoint.json")
-"""Under `config/` because that directory is committed and mounted read-only in
-the container (ADR 0014) — so the running gateway cannot rewrite the anchor that
-proves it has not rewritten its own log."""
+"""Under `config/`, committed and mounted read-only (ADR 0014), so the gateway cannot rewrite it."""
 
 
 @dataclass(frozen=True, slots=True)
 class Checkpoint:
-    """A position in a chain, small enough to travel by hand.
-
-    Two fields and nothing else. An anchor that needs a parser is an anchor
-    nobody pastes into an incident channel, and the whole value of this thing is
-    that it can live somewhere the log cannot.
-    """
+    """A chain position (seq and head hash), small enough to paste anywhere."""
 
     seq: int
     head: str
 
     at: float | None = None
-    """When it was taken. Not part of the claim — the pair above is — but the
-    first thing anybody asks of an anchor is how stale it is."""
+    """When it was taken; informational, not part of the anchor."""
 
     def as_dict(self) -> dict[str, Any]:
         return {"seq": self.seq, "head": self.head, "at": self.at}
@@ -67,14 +40,11 @@ class Checkpoint:
 
 
 def load(path: Path) -> Checkpoint | None:
-    """The committed anchor, or ``None`` when there is not one yet.
+    """The committed anchor, or ``None`` if the file does not exist.
 
-    Absence is not an error. Every new deployment starts unanchored, and refusing
-    to verify without a checkpoint would mean the verifier is useless until
-    somebody remembers a step — so `verify` runs, reports the chain intact, and
-    says plainly that it checked no anchor. A corrupt one *is* an error, because
-    silently treating it as absent would turn "the anchor was tampered with" into
-    "there is no anchor", which is the same downgrade an attacker would choose.
+    Raises:
+        ConfigurationError: The file exists but is corrupt; treating that as absent would
+            let tampering downgrade to "no anchor".
     """
     if not path.exists():
         return None
@@ -105,23 +75,15 @@ class Anchoring:
 
     @property
     def satisfied(self) -> bool:
-        """True when there was nothing to check, or the check passed.
-
-        No checkpoint is *not* a failure — see `load`. It is reported, so that
-        "verified against an anchor" and "verified against nothing" never read
-        the same in a build log.
-        """
+        """True when there was no checkpoint (reported, not failed) or the check passed."""
         return self.checkpoint is None or self.reached
 
 
 def check(checkpoint: Checkpoint | None, *, entries: int, anchor_hash: str | None) -> Anchoring:
-    """Does this chain still contain the entry the anchor names?
+    """Whether the chain still holds the anchored entry with the anchored hash.
 
-    Checked by looking the sequence number up and comparing hashes, rather than
-    by trusting the chain's final head. A chain can be rewritten from any point,
-    so "the head is what I expected" is only meaningful for an anchor taken at
-    the very end. Anchoring on the *entry* means a checkpoint taken last Tuesday
-    still detects a rewrite that happened on Wednesday.
+    Compares that entry rather than the final head, so an older checkpoint still detects a
+    later rewrite.
     """
     if checkpoint is None:
         return Anchoring(None, reached=False, reason="no checkpoint committed — nothing anchored")

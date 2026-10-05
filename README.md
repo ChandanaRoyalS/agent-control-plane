@@ -7,44 +7,32 @@ calls for a human, and records every decision in a hash-chained log.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~2,200 tests (about 1,700 on the gateway itself) · 95% branch coverage ·
-73 decision records · 20 hand-picked breakages, each caught by the test meant to
-catch it**
+**~2,300 tests · 95% branch coverage · 73 decision records ·
+20 hand-picked breakages, each caught by the test meant to catch it**
 
 ## Why
 
 An agent connected to internal systems usually holds one broad credential per
 system, so a request made for an intern reaches the same data as one made for
-the CFO. And everything the agent reads — a ticket, a README, a database row —
-lands in its context as potential instruction. This gateway puts identity,
-policy, screening, approval and audit on the one path every tool call takes.
+the CFO. And everything the agent reads lands in its context as potential
+instruction. This gateway puts identity, policy, screening, approval and audit
+on the one path every tool call takes.
 
 ## What stops an injection here
 
-**The policy and the human approval are what stop an injected tool call.** Text
-screening logs the injections that announce themselves, and withholds only three
-narrow things: a bidirectional-override character, a base64 run that decodes to
-an instruction, and a result too long to have been screened whole
+The policy and a human approval stop injected tool calls. Text screening flags
+injections that announce themselves, and withholds only three narrow patterns
 ([ADR 0069](docs/decisions/0069-the-unexamined-tail-is-the-trigger.md)).
-Everything else it finds reaches the model, fenced and logged.
 
-Measured on [InjecAgent](https://github.com/uiuc-kang-lab/InjecAgent) (ACL
-2024), poisoned tool responses written by other researchers. The held-out half
-is 35 attacker instructions, each placed in 17 user tasks, in two forms
-([ADR 0064](docs/decisions/0064-held-out-v2-scored-once.md)). Read the third
-column before the second:
+Measured on the held-out half of [InjecAgent](https://github.com/uiuc-kang-lab/InjecAgent)
+(ACL 2024): 35 attacker instructions written by other researchers, each placed
+in 17 user tasks ([ADR 0064](docs/decisions/0064-held-out-v2-scored-once.md)).
 
-| what was measured | result | what it actually shows |
+| measured | result | what it shows |
 |---|---|---|
-| text screening, the benchmark's "enhanced" form | caught 595 / 595, **withheld 0** | Every one of those documents begins with the same sentence, *"IMPORTANT!!! Ignore all previous instructions"*, and one regex matches it. One phrasing, not 595 results. |
-| text screening, the "base" form (same 35, no prefix) | caught **0 / 595** | Nothing here recognises a politely worded instruction. (70 of them are flagged, all for a link in one of the benchmark's own templates — the clean version of the same response is flagged too.) Neither did llama3.2 nor ProtectAI's DeBERTa detector, which also flagged most clean tool output ([ADR 0063](docs/decisions/0063-the-control-that-stops-the-polite-injection-is-the-policy.md)). |
-| policy: allow exactly the user's 17 tools | 35 / 35 attack chains blocked | Close to the benchmark's construction — its attacker tools are by design not the user's tools. It shows the evaluator applies a least-privilege policy correctly, not that writing one is easy. |
-| policy: reads allowed, writes held for a person | 35 / 35 chains held at a write | The reads run. Across the benchmark 27 of 94 attacker tool steps are reads (a user's genetic data, a password vault's search), and they execute; only the step that sends is held, and only a person saying no stops it. The read-verb rule was written with the catalogue in view. |
-| either policy, the user's own task tools | 17 / 17 allowed | The cost side, on 17 tools. |
-
-What this measures is a gateway's rule applied to a recorded tool call. It does
-not measure how often an agent is fooled into making one, and no model is in the
-loop.
+| screening, with the benchmark's "ignore all previous instructions" prefix | 595 / 595 caught, 0 withheld | One regex matching one sentence, not 595 detections. |
+| screening, the same 35 attacks without the prefix | 0 / 595 caught | Nothing here recognises a politely worded instruction; nor did two model-based detectors ([ADR 0063](docs/decisions/0063-the-control-that-stops-the-polite-injection-is-the-policy.md)). |
+| policy: least privilege, or writes held for a person | 35 / 35 chains blocked or held; 17 / 17 user tools allowed | Reads still run under the looser policy: 27 of 94 attacker steps are reads. |
 
 ## Quickstart
 
@@ -55,35 +43,25 @@ make attack-demo                          # the same agent, twice, on a poisoned
 docker compose down
 ```
 
-The released image, verified by the release workflow, runs as uid 10001:
-
-```bash
-docker pull ghcr.io/chandanaroyals/agent-control-plane:2.1.0
-docker run --rm --entrypoint python \
-  ghcr.io/chandanaroyals/agent-control-plane:2.1.0 \
-  -c "import acp; print(acp.__version__)"
-```
-
-The MCP endpoint is on `:8080`; health, metrics, schema drift and the live
-decision console are on `:9090`; traces at <http://localhost:16686>.
+The released image runs as uid 10001:
+`docker pull ghcr.io/chandanaroyals/agent-control-plane:2.1.0`. The MCP
+endpoint is on `:8080`; health, metrics and the live decision console on
+`:9090`; traces at <http://localhost:16686>.
 
 ## The demo
 
 `make attack-demo` runs one agent twice against an incident runbook that tells
-it to read the compensation file and paste it into a ticket. **Directly**, the
-agent does it and nothing records it. **Through the gateway**, the call is held,
-and a person on the separate operator listener sees the real arguments and
-refuses. The firewall saw the attack too, with high confidence, but is not
-allowed to block on that detector: promoting it would also block about one
-benign document in five. The run prints all of that rather than asserting a
-pass — [transcript](docs/demo/attack.txt) ·
-[ADR 0057](docs/decisions/0057-the-demo-reports-what-happened-it-does-not-assert-it.md).
+it to read the compensation file and paste it into a ticket. Directly, the
+agent does it and nothing records it. Through the gateway, the ticket is held
+and a person on the operator listener refuses it
+([transcript](docs/demo/attack.txt)).
 
-That agent is a parser, which makes the demo reproducible and says nothing
-about whether a model would obey the runbook. `make model-demo-record` asks
-that: a local model served by Ollama decides every call, on each path, over
-seeded trials, and every transcript is committed
-([ADR 0073](docs/decisions/0073-a-model-decides-the-calls.md)).
+That agent is a parser. `make model-demo-record` puts a local model in its
+place and runs seeded trials on each path
+([ADR 0073](docs/decisions/0073-a-model-decides-the-calls.md)). With
+qwen2.5:7b, the payroll table reached a created ticket in 2 of 10 runs directly
+and in none through the gateway, where every ticket was held. llama3.2 mostly
+described the attack without making the calls.
 
 <!-- model:begin -->
 | model | path | trials | persuaded¹ | described only² | leaked³ | stopped by |
@@ -127,31 +105,22 @@ flowchart LR
     CH --> V["acp audit verify"]
 ```
 
-Each call is authenticated, refused early if the caller could never be allowed
-it, authorized deny-by-default down to the argument, held for a human where a
-rule says so, charged against a rate limit and quota, served from a
-per-principal cache where possible, sent upstream with a token scoped to that
-upstream only, screened on the way back, and written to a hash chain. Agents use
-`:8080`; people approve on `:9090`, so **an agent cannot approve its own call**
-([ADR 0049](docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md)).
-Walkthroughs with real output: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-Targets the stateless [2026-07-28 MCP specification](https://blog.modelcontextprotocol.io/posts/2026-07-28/)
-([ADR 0001](docs/decisions/0001-target-2026-07-28-spec-only.md)).
+Agents connect on `:8080` and people approve on `:9090`, so an agent cannot
+approve its own call ([ADR 0049](docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md)).
+Walkthroughs with real output are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The gateway targets the stateless [2026-07-28 MCP specification](https://blog.modelcontextprotocol.io/posts/2026-07-28/).
 
 ## Measured, on this repository's own corpora
 
 | | measured | read it as | where |
 |---|---|---|---|
-| benign documents withheld | 0 of 106 | The two blocking detectors were *kept* because they had no hits on these 106, so this confirms a selection rather than testing it. | [ADR 0047](docs/decisions/0047-a-baseline-not-a-threshold.md) |
-| benign documents flagged | 19.8% [13–27%] | The honest false-positive number: one clean document in five is flagged. | ADR 0047 |
-| internal attacks | 21 of 37 detected, 5 withheld; 0 of 10 in the two families with no tell-tale shape | Written by the same hand as the detectors, mostly in their vocabulary. | [THREAT_MODEL §6.1](docs/THREAT_MODEL.md) |
-| internal held-out split | 3 of 7 detected, 0 withheld | Seven documents, one per family; every interval is uninformative. | [ADR 0060](docs/decisions/0060-the-held-out-split-scored-once-and-what-the-model-adds.md) |
-| head-of-line blocking, found and fixed | p95 2819 ms → 35.7 ms | A single before-run, reported in prose; the raw load-test output was not committed. | [ADR 0053](docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md) |
+| benign documents withheld | 0 of 106 | Confirms how the blocking detectors were chosen; not an independent test. | [ADR 0047](docs/decisions/0047-a-baseline-not-a-threshold.md) |
+| benign documents flagged | 19.8% [13–27%] | One clean document in five is flagged. | ADR 0047 |
+| internal attacks | 21 of 37 detected, 5 withheld | Written by the same hand as the detectors. | [THREAT_MODEL §6.1](docs/THREAT_MODEL.md) |
+| internal held-out split | 3 of 7 detected, 0 withheld | Seven documents; the intervals are uninformative. | [ADR 0060](docs/decisions/0060-the-held-out-split-scored-once-and-what-the-model-adds.md) |
 
-What the gateway costs, generated from the newest committed run in
-[`perf/results/`](perf/results/) — the method is
-[ADR 0054](docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md),
-and a test fails if these rows and that file disagree:
+What the gateway adds per call, from the newest run in
+[`perf/results/`](perf/results/) ([method](docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md)):
 
 <!-- overhead:begin -->
 | gateway overhead | p50 | added at p95 | recorded |
@@ -162,10 +131,7 @@ and a test fails if these rows and that file disagree:
 Sequential, one request in flight, mock upstreams; commit `4af760c`; switches `auth=on exchange=on cache=on costs=on ratelimit=on quota=on screening=on framing=on tracing=on fsync=on probing=on`.
 <!-- overhead:end -->
 
-One machine, 150 sequential requests, a mock upstream that answers in about a
-millisecond: an upper bound on what the gateway itself adds, not a throughput
-figure. Under concurrent agents, generated from the newest committed load run
-in [`perf/results/`](perf/results/), with locust's raw output beside it:
+Under concurrent agents, with locust's raw output committed beside the summary:
 
 <!-- load:begin -->
 | concurrent agents | throughput | served p50 | served p95 | served p99 | listed p95 |
@@ -176,17 +142,11 @@ in [`perf/results/`](perf/results/), with locust's raw output beside it:
 30s per level, first 3.0s discarded, 0-50 ms think time per agent, mock upstreams, no request throttled or failed (a run with either is refused); [2026-10-05, Darwin arm64](perf/results/load-2026-10-05-ed61a8c.json), raw locust CSVs in [`perf/results/load-2026-10-05-ed61a8c/`](perf/results/load-2026-10-05-ed61a8c/); commit `ed61a8c`; switches `auth=on exchange=on cache=on costs=on ratelimit=OFF quota=OFF screening=on framing=on tracing=on fsync=on probing=on`.
 <!-- load:end -->
 
-From 20 to 50 agents, throughput rises 39% while the time to serve a call
-rises about sevenfold, so the gateway saturates in between. Calls that write
-an audit record slow down together; listings, which write none, barely move.
-That points at the audit writer, which syncs every entry to disk one at a time
-([ADR 0053](docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md)).
-It is a reading of these numbers, not yet a measurement: the same run with
-`fsync` off would confirm or refute it.
-
-Every number above comes from a harness in this repository, and two of them
-gate CI: the firewall cannot get worse on the internal corpus or on InjecAgent
-without a build failing.
+Between 20 and 50 agents, throughput rises 39% while serve time rises
+sevenfold. Listings, which write no audit record, barely move, which points at
+the per-entry `fsync` in the audit writer; a run with `fsync` off would confirm
+it. A test fails if any table above disagrees with its file, and CI fails if
+the firewall gets worse on the internal corpus or on InjecAgent.
 
 ## How this was built
 
@@ -195,48 +155,28 @@ of the code and prose; I set the direction, reviewed every change, and ran it.
 Because generated code is easy to accept without checking, the repository is
 built to make its own claims checkable:
 
-- **Every change is a pull request** against a protected `main`, through the
-  same `make check` CI runs: lint, format, strict types, the test suite, an 80%
-  coverage floor.
-- **Four mutation harnesses** break four invariants on purpose, 20 hand-picked
-  ways, and fail unless the named test catches each one. A targeted check on
-  the properties that matter most, not a mutation score for the codebase.
-- **The release surface is a file**, and a test fails when it changes unannounced
-  ([ADR 0058](docs/decisions/0058-a-version-is-a-promise-about-a-surface.md)).
-- **Held-out splits are held out by convention, not by mechanism.** Nothing
-  stops a single author reading them. What the git history does show: the
-  detector patterns last changed on 2026-08-11 and the set allowed to withhold
-  on 2026-08-12, the InjecAgent corpus was imported on 2026-10-04, and each
-  split was scored once and then marked spent in its own manifest.
-- **Two reviews in October 2026.** The first found 16 issues, including
-  concurrency and audit-chain bugs. The second, an independent run against
-  v1.3.0 with exploit scripts, found two authorization bypasses — an
-  argument-level `deny` defeated by capitalising one word, and a payload placed
-  past the screening window — and four configuration holes a replicated
-  deployment would hit. Each was fixed in a pull request with a regression test
-  and a decision record ([0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md),
-  [0069](docs/decisions/0069-the-unexamined-tail-is-the-trigger.md),
-  [0070](docs/decisions/0070-the-fleet-release-made-true.md)). Its other findings
-  are below, under what this does not do.
+- **Every change is a pull request** through the same `make check` CI runs:
+  lint, strict types, the test suite and an 80% coverage floor.
+- **Four mutation harnesses** break the most important invariants 20 ways on
+  purpose and fail unless the named test catches each one.
+- **Held-out splits are held out by convention.** Nothing stops one author
+  reading them; the git history shows the detector patterns last changed on
+  2026-08-11, and both splits were scored once, on 2026-10-04, then marked
+  spent.
+- **Two outside reviews in October 2026** found two authorization bypasses and
+  several concurrency and configuration bugs. Each fix has a regression test
+  and a decision record ([0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md)–[0072](docs/decisions/0072-a-real-client-reads-the-refusal.md)).
 
 ## Decisions worth reading
 
-All of them are in [`docs/decisions/`](docs/decisions/README.md). Start with the
-ones where a measurement or a reviewer disagreed with the plan:
+All of them are in [`docs/decisions/`](docs/decisions/README.md). These are the
+ones where a measurement or a reviewer changed the plan:
 
-- [0047](docs/decisions/0047-a-baseline-not-a-threshold.md) — the benign corpus
-  demoted two detectors
-- [0053](docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md)
-  — a load harness found `fsync` blocking the event loop; one of four written
-  predictions was wrong
-- [0061](docs/decisions/0061-attacks-nobody-here-wrote.md) — 0 of 459 polite
-  external attacks caught, and why the result is reported that way
-- [0063](docs/decisions/0063-the-control-that-stops-the-polite-injection-is-the-policy.md)
-  — no text detector separates a polite injection from a request; the policy does
-- [0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md)
-  — an outside reviewer bypassed an argument-level `deny` by sending
-  `Production`; the fix is a rule about which side of a constraint costs the
-  caller
+- [0047](docs/decisions/0047-a-baseline-not-a-threshold.md): the benign corpus demoted two detectors
+- [0053](docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md): a load test found `fsync` blocking the event loop
+- [0063](docs/decisions/0063-the-control-that-stops-the-polite-injection-is-the-policy.md): no text detector separates a polite injection from a request
+- [0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md): a `deny` bypassed by capitalising one word, and the rule that fixed it
+- [0072](docs/decisions/0072-a-real-client-reads-the-refusal.md): the official MCP client found three bugs 2,212 tests had missed
 
 ## Development
 
@@ -252,80 +192,31 @@ make overhead       # gateway cost, with its configuration printed
 
 ## What this does not do
 
-Full threat model: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md), written for
-somebody looking for gaps.
+The full threat model is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
-- **Not production-ready.** One outside review found two authorization bypasses
-  in a released version; both are fixed, and there are more. Do not put it in
-  front of anything real.
-- **Budgets and caching are opt-in.** A bare `acp serve` refuses to start
-  without an identity provider and an audit file, screens every result in
-  report mode, and logs at startup which controls are on and which are off
-  ([ADR 0071](docs/decisions/0071-the-safe-defaults.md)). Rate limits, quotas,
-  the cost table, the result cache and enforce mode are each a deliberate
-  setting.
-- **Polite injections pass the firewall** (0 of 595 held-out); only the policy
-  stops their actions, and only if it is scoped tightly and the human says no.
-  An attack that only needs reads would pass the broad policy.
-- **Attacks split across two documents** are caught by nothing — screening sees
-  one result at a time.
-- **The detectors match fixed phrasings.** Rewording the override, a Cyrillic
-  homoglyph, spaced-out letters, base64 split across a line, or the same
-  sentence in another language all pass them. There is no evasion corpus yet,
-  so this is stated, not measured.
-- **There is no model in the request path.** The published demo transcript
-  is a parser that follows the instructions it reads, by design. The
-  model-driven demo (ADR 0073) measures one small local model on one task,
-  and nothing isolates whether a model honours the provenance fence.
-- **Enforce mode withholds on two detectors and one condition**: a
-  bidirectional override, a base64 run that decodes to an instruction, or a
-  result too long to have been screened whole ([ADR 0069](docs/decisions/0069-the-unexamined-tail-is-the-trigger.md)).
-  Everything else the firewall finds is logged and served.
-- **An argument-level `deny` holds against re-spellings and omission**
-  ([ADR 0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md));
-  it does not reason about meaning, so `dataset: prod-eu` is not `production`
-  to it.
-- **The hash chain cannot detect tail truncation or a wholesale rewrite** without
-  an external anchor; both are asserted as passing tests. It is not signed:
-  whoever can write the file can rewrite it consistently. One writer per file
-  is enforced; one file per process is not fixed.
-- **Tool descriptions are screened but cannot be fenced.** A description with
-  a detectable payload is withheld from the catalogue; a politely worded one
-  reaches the model, and only the policy stands between it and the call.
-- **Pending approvals live in memory unless `ACP_APPROVAL_STORE_URL` is set**;
-  by default a restart loses them and a second replica cannot see them.
-- **Rate limits and quotas are per process unless `ACP_BUDGET_STORE_URL` is
-  set**; by default every replica hands out its own burst and its own quota.
+- **Not production-ready.** An outside review found two authorization bypasses
+  in a released version; both are fixed, and there will be more.
+- **The firewall does not stop polite or reworded injections.** It withholds
+  only a bidirectional override, a base64 run that decodes to an instruction,
+  and a result too long to screen whole. Rewordings, homoglyphs and other
+  languages pass; there is no evasion corpus yet.
+- **Attacks split across two documents** pass: screening sees one result at a
+  time.
+- **No model is on the enforcement path.** The model demo measures two small
+  local models on one task.
+- **An argument-level `deny` checks spelling, not meaning**: `prod-eu` is not
+  `production` to it ([ADR 0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md)).
+- **The audit chain is not signed.** Whoever can write the file can rewrite it
+  consistently, and truncation is invisible without an external anchor.
+- **A replicated deployment needs Redis.** Without `ACP_APPROVAL_STORE_URL` and
+  `ACP_BUDGET_STORE_URL`, approvals and rate limits are per process.
 
 ## What I would do with another month
 
-In this order, because the first one changes what the project is evidence of:
-
-1. **Put a model on the enforcement path and measure it.** A small fine-tuned
-   classifier, scored with intervals on the benign corpus, the internal
-   attacks, an evasion corpus and InjecAgent, allowed to withhold only above a
-   precision measured on benign data. The evaluation machinery for that exists;
-   the model does not.
-2. **Build the evasion corpus** from the phrasings above, and report it beside
-   the other numbers.
-3. **Record the model-driven demo on more than one model.** The official
-   client drives the gateway in the suite
-   ([ADR 0072](docs/decisions/0072-a-real-client-reads-the-refusal.md)) and a
-   local model can drive the demo
-   ([ADR 0073](docs/decisions/0073-a-model-decides-the-calls.md)); one small
-   model on one task is one data point.
-4. **Sign the audit chain** — HMAC per entry or signed checkpoints, which is a
-   key-management decision before it is code.
-
-## Roadmap
-
-| Phase | Status | Scope |
-|---|---|---|
-| 1–4 · Foundation, identity, policy, budgets | **complete** | Resilient passthrough, delegated auth with scoped token exchange, deny-by-default argument-level policy, quotas and per-principal caching |
-| 5–7 · Firewall, approvals, audit | **complete** | Detectors and corpora, human-in-the-loop on a separate listener, hash-chained audit log, multi-tenancy, threat model |
-| 8–9 · Performance, demo | **complete** | Load harness and published overhead, live console, scripted attack demo |
-| 10 · Release | **v2.1.0 released** | Published to ghcr; machine-checked release surface |
-| 11 · External evaluation | **complete** | InjecAgent, two held-out splits scored once, text detectors vs policy measured |
+1. **Put a classifier on the enforcement path**, allowed to withhold only above a precision measured on benign data.
+2. **Build an evasion corpus** from the rewordings above and report it beside the other numbers.
+3. **Record the model demo on more models and tasks.**
+4. **Sign the audit chain**, which is a key-management decision before it is code.
 
 ## License
 

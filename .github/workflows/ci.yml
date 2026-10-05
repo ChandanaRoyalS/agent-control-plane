@@ -93,6 +93,12 @@ jobs:
       - name: Fail if the firewall got worse on external attacks
         run: uv run python scripts/evaluate_external.py --check
 
+      # The learned classifier's weights are committed; this refits them from
+      # the committed corpora and fails if they differ (ADR 0075). liblinear is
+      # deterministic, so a difference is a changed input, not noise.
+      - name: Fail if the committed classifier is not what its data trains
+        run: uv run python scripts/train_classifier.py --check
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

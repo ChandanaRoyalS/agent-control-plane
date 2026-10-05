@@ -29,6 +29,8 @@ from acp.corpus.loader import default_root, load_benign
 VALIDATION_SALT: Final = "acp-classifier-validation-v1"
 VALIDATION_SHARE: Final = 5
 """One group in five goes to validation."""
+FILLER_CHARS: Final = (40, 160)
+"""Length bounds for a benign sentence standing in for a removed instruction."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +41,8 @@ class Example:
     """1 for an attack, 0 for benign."""
     group: str
     source: str
+    planted: str = ""
+    """The planted instruction, when the source records it; empty otherwise."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,20 +73,50 @@ def _dedupe(examples: Iterable[Example]) -> list[Example]:
 
 
 def _bipia(docs: Iterable[BipiaDocument], source: str) -> list[Example]:
-    return [Example(d.id, d.text, int(d.label == ATTACK), d.group, source) for d in docs]
+    return [Example(d.id, d.text, int(d.label == ATTACK), d.group, source, d.planted) for d in docs]
+
+
+def fillers(docs: Iterable[BipiaDocument]) -> list[str]:
+    """Benign sentences from BIPIA's train emails, to stand where an instruction was."""
+    found: set[str] = set()
+    for d in docs:
+        if d.split == "train" and d.task == "email" and d.label != ATTACK:
+            for raw in d.text.replace("\n", " ").split(". "):
+                sentence = " ".join(raw.split())
+                if FILLER_CHARS[0] <= len(sentence) <= FILLER_CHARS[1] and "|" not in sentence:
+                    found.add(sentence.rstrip(".") + ".")
+    return sorted(found)
+
+
+def control_text(text: str, planted: str, pool: Sequence[str]) -> str:
+    """The template with its instruction replaced by a benign sentence.
+
+    Removing the instruction outright leaves an empty field (``''``) that real text
+    rarely has, and a model learns that instead of the instruction (ADR 0075).
+    """
+    choice = int(hashlib.sha256(text.encode("utf-8")).hexdigest(), 16) % len(pool)
+    return text.replace(planted, pool[choice], 1)
 
 
 def development_pool(root: Path | None = None) -> list[Example]:
     """Everything the classifier may learn from, before the validation cut."""
     root = root or default_root()
     injecagent = load_external_split(root / "external" / "injecagent").development
-    pool = [Example(d.id, d.text, 1, d.group, "injecagent") for d in injecagent] + [
-        # The template with the instruction removed. Many groups share a template,
-        # so its group is the text itself, which keeps it on one side of the cut.
-        Example(f"{d.id}/control", d.control, 0, _text_group(d.control), "injecagent")
-        for d in injecagent
-    ]
     bipia = load_bipia(default_bipia_dir(root))
+    pool_sentences = fillers(bipia)
+    pool = [Example(d.id, d.text, 1, d.group, "injecagent", d.planted) for d in injecagent]
+    for d in injecagent:
+        # Many groups share a template, so a control's group is its text, which
+        # keeps it on one side of the validation cut.
+        pool.append(
+            Example(
+                f"{d.id}/control",
+                control_text(d.text, d.planted, pool_sentences),
+                0,
+                _text_group(d.control),
+                "injecagent",
+            )
+        )
     pool += _bipia((d for d in bipia if d.split == "train"), "bipia")
     pool += [
         Example(row["id"], row["text"], 0, row["group"], "stdlib")

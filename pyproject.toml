@@ -51,6 +51,11 @@ dev = [
 perf = [
     "locust>=2.46.3",
 ]
+train = [
+    # Fits the learned classifier (ADR 0075). Never imported at runtime: the
+    # gateway scores with the committed weights in pure Python.
+    "scikit-learn>=1.5",
+]
 
 [build-system]
 requires = ["hatchling"]

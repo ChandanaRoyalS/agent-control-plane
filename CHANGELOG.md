@@ -24,6 +24,12 @@ without somebody accepting the change.
   training text; and `acp.corpus.training`, which assembles train, validation,
   report-only and sealed sets by group and fails if any two share a group or a
   text.
+- A learned injection classifier (ADR 0075): logistic regression over
+  character n-grams, trained by `scripts/train_classifier.py`, committed as
+  weights and scored in pure Python. Scored once on the sealed sets: 64% of
+  BIPIA's held-out attacks at its enforce threshold against 0% withheld by the
+  patterns, with 2% of clean contexts flagged. CI refits it and fails if the
+  committed weights differ. Not yet on the request path.
 
 ## [2.1.0] - 2026-10-05
 

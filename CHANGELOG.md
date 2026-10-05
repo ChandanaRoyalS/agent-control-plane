@@ -22,6 +22,8 @@ without somebody accepting the change.
   `docker/build-push-action@v7` and `login`, `setup-buildx`, `setup-qemu` at
   `@v4`). The old ones targeted Node.js 20, which GitHub has deprecated. No
   input this repository passes changed meaning.
+- Each CI job keeps its own uv cache, so parallel jobs no longer race to save
+  one shared key.
 
 ## [2.2.1] - 2026-10-05
 

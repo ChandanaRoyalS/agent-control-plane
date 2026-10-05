@@ -46,6 +46,10 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+          # One cache per job: they install different sets (the floor Python,
+          # the image job's few tools), and parallel jobs sharing one key race
+          # to save it.
+          cache-suffix: ${{ github.job }}
 
       - name: Set up Python
         run: uv python install

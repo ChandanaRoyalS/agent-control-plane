@@ -28,6 +28,7 @@ the default would produce a confidently wrong number:
 from __future__ import annotations
 
 import itertools
+import json
 import os
 import sys
 import time
@@ -38,6 +39,7 @@ import gevent
 from gevent.lock import Semaphore
 from locust import HttpUser, between, events, task
 
+from perf.load import summarise
 from perf.scenarios import (
     MIX,
     UNIQUE_MARKER,
@@ -49,6 +51,9 @@ from perf.scenarios import (
     percentiles,
     principal_for,
 )
+
+SUMMARY_ENV = "ACP_LOAD_SUMMARY"
+"""Where to write the run summary, when `scripts/record_load.py` asks."""
 
 MINT_FAILURE_HINT = (
     "could not mint a token. Is the stack up (`make up`) and Keycloak "
@@ -307,3 +312,25 @@ def report_by_outcome(environment: Any, **_: Any) -> None:
         "  They are not a benchmark of anything. See perf/README.md."
     )
     emit("=" * 72)
+
+    _write_summary(requested, stats.total_rps)
+
+
+def _write_summary(requested: int | None, throughput: float) -> None:
+    """For `scripts/record_load.py`: the same numbers as the table, as a file,
+    so the run that printed it is the run a README row quotes (perf.load)."""
+    destination = os.environ.get(SUMMARY_ENV)
+    if not destination:
+        return
+    with open(destination, "w", encoding="utf-8") as handle:  # noqa: PTH123
+        json.dump(
+            summarise(
+                _SAMPLES,
+                users_requested=requested,
+                users_started=_SPAWNED,
+                failed_to_start=_FAILED_TO_START,
+                throughput=throughput,
+            ),
+            handle,
+            sort_keys=True,
+        )

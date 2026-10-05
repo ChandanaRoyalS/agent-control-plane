@@ -144,9 +144,16 @@ Sequential, one request in flight, mock upstreams; commit `4af760c`; switches `a
 
 One machine, 150 sequential requests, a mock upstream that answers in about a
 millisecond: an upper bound on what the gateway itself adds, not a throughput
-figure, and no concurrent-load number is committed. Every number above comes
-from a harness in this repository, and two of them gate CI: the firewall cannot
-get worse on the internal corpus or on InjecAgent without a build failing.
+figure. Under concurrent agents, generated from the newest committed load run
+in [`perf/results/`](perf/results/), with locust's raw output beside it:
+
+<!-- load:begin -->
+No concurrent run has been recorded yet: `make up && make load-record`.
+<!-- load:end -->
+
+Every number above comes from a harness in this repository, and two of them
+gate CI: the firewall cannot get worse on the internal corpus or on InjecAgent
+without a build failing.
 
 ## How this was built
 
@@ -272,8 +279,6 @@ In this order, because the first one changes what the project is evidence of:
    small local model rather than a parser.
 4. **Sign the audit chain** — HMAC per entry or signed checkpoints, which is a
    key-management decision before it is code.
-5. **Commit raw load-test output** and a concurrent-throughput row beside the
-   sequential overhead.
 
 ## Roadmap
 

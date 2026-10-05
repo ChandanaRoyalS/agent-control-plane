@@ -1,0 +1,7 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,tools/list,CatchResponseError('unclassifiable: HTTP 0'),2431,2026-10-05T06:56:07Z,2026-10-05T06:56:34Z
+POST,search (unique),CatchResponseError('unclassifiable: HTTP 0'),3653,2026-10-05T06:56:08Z,2026-10-05T06:56:34Z
+POST,create_ticket (gated),CatchResponseError('unclassifiable: HTTP 0'),1208,2026-10-05T06:56:08Z,2026-10-05T06:56:34Z
+POST,search (repeated),CatchResponseError('unclassifiable: HTTP 0'),6110,2026-10-05T06:56:07Z,2026-10-05T06:56:34Z
+POST,summarize,CatchResponseError('unclassifiable: HTTP 0'),1208,2026-10-05T06:56:08Z,2026-10-05T06:56:34Z
+POST,read_document,CatchResponseError('unclassifiable: HTTP 0'),4847,2026-10-05T06:56:08Z,2026-10-05T06:56:34Z

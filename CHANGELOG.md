@@ -15,6 +15,20 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-05
+
+The safe defaults (ADR 0071), and the rest of the October review's
+list: its low-severity findings (W11), the housekeeping, and the first
+committed concurrent-load run. **Major** under ADR 0058 because a default
+changed and a bare start that used to succeed now refuses.
+
+**Upgrading from 1.x.** Set `ACP_AUDIT_FILE` to a path on a persistent
+volume, or set `ACP_AUDIT_REQUIRED=false` to run without a record on
+purpose; the gateway no longer starts with neither. Expect firewall log
+lines: `ACP_FIREWALL_MODE` now defaults to `report`, which screens every
+result and changes nothing a caller receives. Tool-level `deny` and
+`require_approval` rules now also match re-spelled tool names.
+
 ### Added
 
 - `make load-record` runs the load harness at 20 and 50 concurrent agents,
@@ -511,7 +525,8 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.0.0
 [1.3.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.3.1
 [1.3.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.3.0
 [1.2.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.2.0

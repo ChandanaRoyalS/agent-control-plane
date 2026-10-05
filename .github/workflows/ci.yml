@@ -20,10 +20,10 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -101,7 +101,7 @@ jobs:
 
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.xml
@@ -122,10 +122,10 @@ jobs:
     # blocks every open pull request until somebody notices.
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -157,7 +157,7 @@ jobs:
     # until somebody fixes the lint.
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # `uv` is not on a GitHub runner by default. The `quality` job installs
       # it and this one did not, so the audit-verification step below died with
@@ -168,7 +168,7 @@ jobs:
       # the step that needs it: a dependency problem then fails in fifteen
       # seconds instead of after two `docker build`s and a Keycloak boot.
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -186,7 +186,7 @@ jobs:
         run: uv sync --no-dev
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Validate the compose file
         # Before building anything. A typo in compose is a ten-second failure
@@ -232,7 +232,7 @@ jobs:
         # Mode first, then owner: after the chown the runner user no longer
         # owns the directory and a plain `chmod` is refused.
         run: |
-          mkdir -p audit && chmod 770 audit && sudo chown 10001:$(id -g) audit
+          mkdir -p audit && chmod 770 audit && sudo chown "10001:$(id -g)" audit
           docker compose up -d --wait gateway
 
       - name: Keycloak's log if it did not come up

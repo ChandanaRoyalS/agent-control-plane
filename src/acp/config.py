@@ -85,6 +85,15 @@ class GatewaySettings(BaseSettings):
     audit_fsync: bool = True
     """`fsync` each entry before the call proceeds, so a crash loses no record; costs throughput."""
 
+    audit_signing_key_file: Path | None = None
+    """An Ed25519 private key that signs every audit entry (ADR 0078).
+
+    Mount it as a secret, never under `config/` or in the image. Unset writes an
+    unsigned chain, as before. One key signs one file: the gateway refuses to
+    continue a file whose last entry was signed by another key, or not signed at
+    all, so turning signing on or rotating the key starts a new `audit_file`.
+    """
+
     approval_operator_token: str = ""
     """Shared-secret credential for the approval channel on the admin listener.
 

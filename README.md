@@ -7,7 +7,7 @@ calls for a human, and records every decision in a hash-chained log.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~2,300 tests · 95% branch coverage · 77 decision records ·
+**~2,300 tests · 95% branch coverage · 78 decision records ·
 20 hand-picked breakages, each caught by the test meant to catch it**
 
 ## Why
@@ -232,8 +232,10 @@ The full threat model is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
   small local models on one task.
 - **An argument-level `deny` checks spelling, not meaning**: `prod-eu` is not
   `production` to it ([ADR 0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md)).
-- **The audit chain is not signed.** Whoever can write the file can rewrite it
-  consistently, and truncation is invisible without an external anchor.
+- **The audit chain is signed only if you give it a key**
+  ([ADR 0078](docs/decisions/0078-one-key-signs-one-chain.md)). Without one,
+  whoever can write the file can rewrite it consistently. With one, whoever holds
+  the key still can, and truncation is invisible without an external anchor.
 - **A replicated deployment needs Redis.** Without `ACP_APPROVAL_STORE_URL` and
   `ACP_BUDGET_STORE_URL`, approvals and rate limits are per process.
 
@@ -242,7 +244,7 @@ The full threat model is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 1. **Train on more than one source of attacks.** Both learned models learned BIPIA's style: the transformer catches 92% of its held-out attacks and 3% of this project's own ([ADR 0077](docs/decisions/0077-a-transformer-fixed-before-it-is-trained.md)).
 2. **Grow the evasion corpus** with paraphrase and translation, which need a model to generate.
 3. **Record the model demo on more models and tasks.**
-4. **Sign the audit chain**, which is a key-management decision before it is code.
+4. **Keep the audit signing key in a KMS**, so the gateway can sign without ever holding the key.
 
 ## License
 

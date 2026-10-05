@@ -43,7 +43,9 @@ config/secrets.enc
 # grows without bound, and a chain in git would make every `git checkout` a
 # rewrite of an audit log — which is precisely what the chain exists to detect.
 # The CHECKPOINT that anchors it *is* committed, and lives in config/.
-audit/
+# Anchored to the root: an unanchored `audit/` also matched src/acp/audit/ and
+# tests/unit/audit/, and silently left new source files out of commits there.
+/audit/
 
 # Editors
 .vscode/

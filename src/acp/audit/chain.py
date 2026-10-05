@@ -11,9 +11,12 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from acp.audit.record import AUDIT_VERSION, AuditRecord, canonical
+
+if TYPE_CHECKING:
+    from acp.audit.signing import Signer, Verifier
 
 GENESIS: Final = "0" * 64
 """The `prev` of the first entry, explicit so the first entry is checked like any other."""
@@ -47,8 +50,18 @@ class Entry:
     Kept unparsed so fields from a newer writer are still hashed during verification.
     """
 
+    sig: str | None = None
+    """Ed25519 signature over `hash` (ADR 0078); absent on an unsigned chain."""
+
+    kid: str | None = None
+    """Which key signed it."""
+
     def as_dict(self) -> dict[str, Any]:
-        return {"seq": self.seq, "prev": self.prev, "hash": self.hash, "record": dict(self.record)}
+        out = {"seq": self.seq, "prev": self.prev, "hash": self.hash, "record": dict(self.record)}
+        if self.sig is not None:
+            out["sig"] = self.sig
+            out["kid"] = self.kid
+        return out
 
     @property
     def valid(self) -> bool:
@@ -56,17 +69,27 @@ class Entry:
         return self.hash == link(prev=self.prev, seq=self.seq, payload=self.record)
 
 
-def next_entry(*, head: str, seq: int, payload: Mapping[str, Any]) -> Entry:
-    """The entry that follows ``head``."""
-    return Entry(seq=seq, prev=head, hash=link(prev=head, seq=seq, payload=payload), record=payload)
+def next_entry(
+    *, head: str, seq: int, payload: Mapping[str, Any], signer: Signer | None = None
+) -> Entry:
+    """The entry that follows ``head``, signed when a signer is given."""
+    digest = link(prev=head, seq=seq, payload=payload)
+    if signer is None:
+        return Entry(seq=seq, prev=head, hash=digest, record=payload)
+    return Entry(
+        seq=seq, prev=head, hash=digest, record=payload, sig=signer.sign(digest), kid=signer.kid
+    )
 
 
 class Chain:
     """The in-process head of a chain; produces entries, while `acp.audit.sink` stores them."""
 
-    def __init__(self, head: str = GENESIS, seq: int = SEQ_START - 1) -> None:
+    def __init__(
+        self, head: str = GENESIS, seq: int = SEQ_START - 1, *, signer: Signer | None = None
+    ) -> None:
         self._head = head
         self._seq = seq
+        self._signer = signer
 
     @property
     def head(self) -> str:
@@ -79,7 +102,7 @@ class Chain:
     def append(self, record: AuditRecord | Mapping[str, Any]) -> Entry:
         """Extend the chain by one, advancing the head."""
         payload = record.as_dict() if isinstance(record, AuditRecord) else dict(record)
-        entry = next_entry(head=self._head, seq=self._seq + 1, payload=payload)
+        entry = next_entry(head=self._head, seq=self._seq + 1, payload=payload, signer=self._signer)
         self._head = entry.hash
         self._seq = entry.seq
         return entry
@@ -116,13 +139,26 @@ class Verification:
     anchor_hash: str | None = None
     """Hash of the entry at `anchor_seq`, captured during the walk so memory stays O(1)."""
 
+    signed: int = 0
+    """Entries carrying a signature, checked or not."""
+
+    signatures_checked: bool = False
+    """Whether a verifier was given, so every entry's signature was required and checked."""
+
     @property
     def intact(self) -> bool:
         return not self.breaks and not self.unreadable
 
     def describe(self) -> str:
         if self.intact:
-            return f"{self.entries} entries, chain intact, head {self.head[:16]}…"
+            signatures = (
+                f", all {self.entries} signatures valid"
+                if self.signatures_checked
+                else f", {self.signed} signed (not checked: no public key given)"
+                if self.signed
+                else ""
+            )
+            return f"{self.entries} entries, chain intact{signatures}, head {self.head[:16]}…"
         lines = [f"{self.entries} entries read, {len(self.breaks)} break(s)"]
         if self.unreadable:
             lines.append(f"{self.unreadable} unreadable line(s)")
@@ -146,13 +182,33 @@ def _entry_from(payload: object) -> Entry | None:
         return None
     if not isinstance(record, dict):
         return None
-    return Entry(seq=seq, prev=prev, hash=digest, record=record)
+    sig, kid = payload.get("sig"), payload.get("kid")
+    unsigned = sig is None and kid is None
+    if not (unsigned or (isinstance(sig, str) and isinstance(kid, str))):
+        return None
+    return Entry(seq=seq, prev=prev, hash=digest, record=record, sig=sig, kid=kid)
+
+
+def _signature_problem(entry: Entry, verifier: Verifier, file_kid: str | None) -> str | None:
+    """Why this entry's signature is not acceptable, or ``None``: valid, and by the file's key."""
+    problem = verifier.problem(entry.hash, entry.sig, entry.kid)
+    if problem is None and file_kid is not None and entry.kid != file_kid:
+        problem = f"signed by key {entry.kid}, but this file's entries use {file_kid}"
+    return problem
 
 
 def verify(
-    lines: Iterable[str], *, expected_head: str = GENESIS, anchor_seq: int | None = None
+    lines: Iterable[str],
+    *,
+    expected_head: str = GENESIS,
+    anchor_seq: int | None = None,
+    verifier: Verifier | None = None,
 ) -> Verification:
-    """Stream a chain's lines and report every break, not just the first."""
+    """Stream a chain's lines and report every break, not just the first.
+
+    With a ``verifier``, every entry must be signed by one of its keys, and all by the
+    same key: one key signs one file (ADR 0078).
+    """
     import json  # noqa: PLC0415 — local, so this module's import graph stays hash-only
 
     breaks: list[Break] = []
@@ -161,6 +217,8 @@ def verify(
     seq = SEQ_START - 1
     count = 0
     anchor_hash: str | None = None
+    signed = 0
+    file_kid: str | None = None
 
     for number, raw in enumerate(lines, start=1):
         stripped = raw.strip()
@@ -187,6 +245,15 @@ def verify(
         if not entry.valid:
             breaks.append(Break(entry.seq, number, "hash does not match this entry's contents"))
 
+        if entry.sig is not None:
+            signed += 1
+        if verifier is not None:
+            problem = _signature_problem(entry, verifier, file_kid)
+            if problem is not None:
+                breaks.append(Break(entry.seq, number, problem))
+            elif file_kid is None:
+                file_kid = entry.kid
+
         if anchor_seq is not None and entry.seq == anchor_seq:
             anchor_hash = entry.hash
 
@@ -200,4 +267,6 @@ def verify(
         breaks=tuple(breaks),
         unreadable=unreadable,
         anchor_hash=anchor_hash,
+        signed=signed,
+        signatures_checked=verifier is not None,
     )

@@ -28,6 +28,9 @@ dependencies = [
     "starlette>=0.45",
     "uvicorn>=0.34",
     "pyjwt[crypto]>=2.10",
+    # Signs audit entries (ADR 0078). Already present through pyjwt[crypto], and
+    # declared because `acp.audit.signing` imports it.
+    "cryptography>=44",
     "anyio>=4.14.2",
     "redis>=5.2",
 ]

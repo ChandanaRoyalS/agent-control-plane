@@ -14,12 +14,10 @@ from typing import Any
 
 import anyio
 
+from acp.exceptions import PolicyDeniedError
 from acp.identity.principal import Actor, Principal, bind_principal
-from acp.policy.evaluate import evaluate
-from acp.policy.predispatch import (
-    PreDispatchAuthorizationMiddleware,
-    could_ever_allow,
-)
+from acp.policy.evaluate import could_ever_allow, evaluate
+from acp.policy.predispatch import PreDispatchAuthorizationMiddleware
 from acp.policy.schema import Effect, Policy, Rule
 from acp.upstream.envelope import encode_header_value
 
@@ -226,7 +224,15 @@ def test_a_call_no_rule_could_permit_is_refused_before_the_body() -> None:
 
     assert not app.called
     assert status == 403
-    assert body == {"error": "forbidden"}
+    assert body == {
+        "jsonrpc": "2.0",
+        "id": None,
+        "error": {
+            "code": -32040,
+            "message": "this call was not permitted",
+            "data": {"recoverable": False},
+        },
+    }
 
 
 def test_the_refusal_names_neither_the_rule_nor_the_tool() -> None:
@@ -237,8 +243,26 @@ def test_the_refusal_names_neither_the_rule_nor_the_tool() -> None:
 
     _, body = drive(PreDispatchAuthorizationMiddleware(Downstream(), policy=DENIES), scope_for())
 
-    assert set(body) == {"error"}
+    assert body["error"]["message"] == "this call was not permitted"
+    assert set(body["error"]["data"]) == {"recoverable"}
     assert TOOL not in json.dumps(body)
+    assert "no" not in body["error"]["data"], "the rule's name is for the log"
+
+
+def test_the_refusal_is_the_one_the_handler_gives() -> None:
+    """The same denial, whichever layer gives it (ADR 0072).
+
+    An agent decides whether to retry from the code and `recoverable`, so a
+    refusal from the fast path that differed from the handler's would teach a
+    real client two different things about one policy decision.
+    """
+    bind_principal(principal())
+
+    _, body = drive(PreDispatchAuthorizationMiddleware(Downstream(), policy=DENIES), scope_for())
+
+    handler = PolicyDeniedError("this call was not permitted")
+    assert body["error"]["code"] == handler.code
+    assert body["error"]["data"]["recoverable"] is handler.recoverable
 
 
 def test_with_no_policy_nothing_is_decided_here() -> None:

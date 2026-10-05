@@ -41,8 +41,7 @@ from pathlib import Path
 from mutate_no_passthrough import Mutation, apply, failing_tests, working_tree_is_clean
 
 from acp.identity.principal import Actor, Principal
-from acp.policy.evaluate import evaluate, matches_without_arguments
-from acp.policy.predispatch import could_ever_allow
+from acp.policy.evaluate import could_ever_allow, evaluate, matches_without_arguments
 from acp.policy.schema import Effect, Policy, Rule
 
 # ---------------------------------------------------------------------------

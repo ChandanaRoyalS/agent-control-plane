@@ -8,7 +8,7 @@ calls for a human, and records every decision in a hash-chained log.
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
 **~2,200 tests (about 1,700 on the gateway itself) · 95% branch coverage ·
-71 decision records · 20 hand-picked breakages, each caught by the test meant to
+72 decision records · 20 hand-picked breakages, each caught by the test meant to
 catch it**
 
 ## Why
@@ -287,9 +287,10 @@ In this order, because the first one changes what the project is evidence of:
    the model does not.
 2. **Build the evasion corpus** from the phrasings above, and report it beside
    the other numbers.
-3. **Drive the gateway with a real MCP client and a real model**: one
-   end-to-end test through the Python SDK's client, and a demo agent that is a
-   small local model rather than a parser.
+3. **Drive the gateway with a real model.** The official Python SDK client
+   now drives it in the suite, and its first run found three defects nothing
+   else had ([ADR 0072](docs/decisions/0072-a-real-client-reads-the-refusal.md)).
+   The demo agent is still a parser, not a small local model.
 4. **Sign the audit chain** — HMAC per entry or signed checkpoints, which is a
    key-management decision before it is code.
 

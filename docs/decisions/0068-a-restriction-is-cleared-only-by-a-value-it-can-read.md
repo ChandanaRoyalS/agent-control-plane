@@ -1,6 +1,6 @@
 # ADR 0068 — A restriction is cleared only by a value it can read
 
-**Status:** accepted; amends [ADR 0031](0031-argument-level-rules.md)
+**Status:** accepted; amends [ADR 0031](0031-argument-level-rules.md); catalogue visibility amended by [ADR 0072](0072-a-real-client-reads-the-refusal.md)
 **Date:** 2026-10-05
 
 ## Context

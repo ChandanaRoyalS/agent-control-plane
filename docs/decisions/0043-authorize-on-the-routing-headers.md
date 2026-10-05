@@ -1,6 +1,6 @@
 # ADR 0043 — Authorize on the routing headers, in one direction only
 
-**Status:** accepted
+**Status:** accepted; refusal body amended by [ADR 0072](0072-a-real-client-reads-the-refusal.md)
 **Date:** 2026-08-12
 
 ## Context
@@ -137,7 +137,9 @@ proxy in the path that the request succeeded. 403, for the same reason
   inserts at the front of the stack, so first-added runs last on the way in —
   inside `AuthenticationMiddleware`, which is what makes the principal available.
 - The refusal is undifferentiated (`{"error": "forbidden"}`, naming neither rule
-  nor tool), matching `PolicyDeniedError`. Naming either is an oracle a caller
+  nor tool), matching `PolicyDeniedError`. *Amended by ADR 0072: the body is now
+  `PolicyDeniedError`'s own JSON-RPC error with a null id, because no MCP client
+  could read the original.* Naming either is an oracle a caller
   can map one request at a time.
 - A refusal is logged at INFO with subject, tool and reason, so a fast-path
   denial is as visible in the decision record as a slow-path one.

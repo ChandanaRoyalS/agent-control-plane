@@ -1,9 +1,11 @@
 """Unit tests for catalogue filtering.
 
-``visible_tools`` is the visibility half of policy: a tool the caller may not
-call is not shown. The tests pin that visibility tracks callability exactly
-(same evaluator, same qualified name), that order is preserved, and that the
-deny default hides an unmatched tool rather than showing it.
+``visible_tools`` is the visibility half of policy: a tool the caller could
+never call is not shown. The tests pin that visibility asks the same question
+the pre-dispatch check does (`could_ever_allow`, same qualified name), that
+order is preserved, that the deny default hides an unmatched tool rather than
+showing it, and that an argument-scoped rule never hides a tool some call to it
+could reach (ADR 0072).
 """
 
 from __future__ import annotations
@@ -84,3 +86,59 @@ def test_visibility_is_per_principal() -> None:
 def test_empty_catalogue_stays_empty() -> None:
     policy = Policy(rules=(Rule(name="allow-all", effect=Effect.ALLOW),))
     assert visible_tools(policy, _principal(), []) == []
+
+
+# ---------------------------------------------------------------------------
+# Argument-scoped rules (ADR 0072): visible when some call could be permitted
+# ---------------------------------------------------------------------------
+
+
+def test_a_tool_granted_only_for_some_arguments_is_visible() -> None:
+    """A listing has no arguments, and "may read the public dataset" is still
+    a grant to the read tool. Hidden, the agent could never ask for the
+    document it is entitled to."""
+    policy = Policy(
+        rules=(
+            Rule(
+                name="public-reads",
+                effect=Effect.ALLOW,
+                tools=("crm__read",),
+                args={"dataset": ("public",)},
+            ),
+        )
+    )
+    assert [t.name for t in visible_tools(policy, _principal(), _tools("crm__read"))] == [
+        "crm__read"
+    ]
+
+
+def test_an_argument_scoped_deny_in_front_of_an_allow_leaves_the_tool_visible() -> None:
+    """The README's policy. ADR 0068 made the deny catch a call that omits its
+    argument, which is right for a call and wrong for a listing: the tool
+    vanished from the catalogue while calls to it with other arguments were
+    served. The official client's first run found it."""
+    policy = Policy(
+        rules=(
+            Rule(
+                name="not-production",
+                effect=Effect.DENY,
+                tools=("crm__delete_record",),
+                args={"dataset": ("production",)},
+            ),
+            Rule(name="deletes", effect=Effect.ALLOW, tools=("crm__delete_record",)),
+        )
+    )
+    visible = visible_tools(policy, _principal(), _tools("crm__delete_record"))
+    assert [t.name for t in visible] == ["crm__delete_record"]
+
+
+def test_an_unconditional_deny_still_hides_the_tool() -> None:
+    policy = Policy(
+        rules=(
+            Rule(name="no-deletes", effect=Effect.DENY, tools=("crm__delete_record",)),
+            Rule(name="rest", effect=Effect.ALLOW),
+        )
+    )
+    assert visible_tools(policy, _principal(), _tools("crm__delete_record", "crm__read")) == [
+        ToolDefinition(name="crm__read")
+    ]

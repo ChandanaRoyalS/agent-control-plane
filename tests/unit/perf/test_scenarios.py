@@ -123,7 +123,10 @@ def test_a_pre_dispatch_refusal_is_an_http_403_with_no_rpc_body() -> None:
     """The fast path refuses before a body is parsed (ADR 0043), so there is no
     JSON-RPC frame to read. A classifier that only looked inside the body would
     score the fastest, most common refusal as a transport failure."""
-    assert classify(403, '{"error": "forbidden"}') is Outcome.REFUSED
+    assert (
+        classify(403, '{"jsonrpc": "2.0", "id": null, "error": {"code": -32040}}')
+        is Outcome.REFUSED
+    )
     assert classify(403, "") is Outcome.REFUSED
 
 

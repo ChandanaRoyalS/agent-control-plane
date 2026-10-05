@@ -21,9 +21,8 @@ import pytest
 from acp.exceptions import PolicyDeniedError
 from acp.identity.principal import Actor, Principal
 from acp.policy.enforce import APPROVAL_EVENT, enforce_call
-from acp.policy.evaluate import Verdict, evaluate
+from acp.policy.evaluate import Verdict, could_ever_allow, evaluate
 from acp.policy.filtering import visible_tools
-from acp.policy.predispatch import could_ever_allow
 from acp.policy.schema import Effect, Policy, Rule
 from acp.upstream.models import ToolDefinition
 

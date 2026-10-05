@@ -15,6 +15,22 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-05
+
+Item 2 of the external review: a learned classifier on the request path,
+measured once on data nobody here shaped. On BIPIA's held-out split it
+catches 64% of the attacks at the threshold allowed to withhold, where the
+patterns withhold none; it also flags 2% of clean documents, and
+character-level disguises defeat it
+([ADR 0075](docs/decisions/0075-a-learned-classifier-measured-once.md)).
+It runs in report mode by default and withholds only when an operator turns it
+on ([ADR 0076](docs/decisions/0076-the-learned-classifier-withholds-only-by-choice.md)).
+
+**Minor** under ADR 0058: one new setting, `ACP_FIREWALL_LEARNED`; no default
+changed. Two things an operator will notice: firewall logs gain
+`learned_classifier` findings, and each screened result costs about 1 ms per
+thousand characters more.
+
 ### Added
 
 - The learned classifier's data (ADR 0074): BIPIA's contexts and attack
@@ -619,7 +635,8 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.2.0
 [2.1.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.1.0
 [2.0.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.0.0
 [1.3.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.3.1

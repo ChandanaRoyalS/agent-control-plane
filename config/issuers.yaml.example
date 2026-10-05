@@ -28,6 +28,11 @@ issuers:
   # document to name the same issuer it was fetched for.
   - issuer: https://idp.corp.example/realms/acp
     audience: agent-control-plane
+    # With more than one issuer, all but at most one must carry a `tenant`
+    # label: principals are keyed on (tenant, subject) in the cache, the
+    # budgets and the approval binding, so two unlabelled issuers would make
+    # the partner's "alice" and the corporate "alice" one person (ADR 0070).
+    tenant: corp
 
   # An explicit `jwks_url` is honoured, for servers that publish no metadata at
   # all. It skips the §3.3 check, so the gateway logs a warning on every start:
@@ -36,6 +41,7 @@ issuers:
   - issuer: https://idp.partner.example/
     audience: agent-control-plane-partner
     jwks_url: https://idp.partner.example/protocol/openid-connect/certs
+    tenant: partner
 
     # Optional, and narrower than the global ACP_AUTH_ALGORITHMS default. A
     # server known to sign only with ES256 should not have RSA accepted on its

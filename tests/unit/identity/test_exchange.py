@@ -52,11 +52,13 @@ def registry(*, token_endpoint: str = TOKEN_ENDPOINT) -> IssuerRegistry:
                 policy=TokenPolicy(issuer=ISSUER, audience="gw"),
                 keys=JwksCache("https://idp.corp.test/keys"),
                 token_endpoint=token_endpoint,
+                tenant="corp",
             ),
             IssuerRegistration(
                 policy=TokenPolicy(issuer=PARTNER, audience="gw-partner"),
                 keys=JwksCache("https://idp.partner.test/keys"),
                 token_endpoint=PARTNER_ENDPOINT,
+                tenant="partner",
             ),
         ]
     )

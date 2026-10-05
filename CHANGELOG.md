@@ -17,6 +17,33 @@ without somebody accepting the change.
 
 ### Security
 
+- **An operator audience that an issuer in `ACP_AUTH_ISSUERS_FILE` already
+  mints was accepted** (ADR 0070; W4 of the 2026-10-05 external review). The
+  settings model checked the collision only against `ACP_AUTH_AUDIENCE`; a
+  token from such an issuer was valid on the gateway and on the approval
+  channel, so an agent could approve its own call. The registry now refuses
+  the audience against every registered issuer, at startup.
+- **Two issuers without a `tenant` label shared one principal namespace**
+  (ADR 0070; W5). Both stamped `tenant=None`, and the result cache, the
+  budget account and the approval binding key on `(tenant, subject)`, so
+  issuer A's `alice` read issuer B's `alice`'s cached results. A registry
+  with more than one unlabelled issuer is refused at startup; the example
+  issuers file now labels both of its issuers. **A deployment with two
+  unlabelled issuers must label all but one of them to upgrade.**
+- **Two processes writing one audit file produced two interleaved chains**
+  (ADR 0070; W6). The sink holds an exclusive advisory lock on the chain for
+  its lifetime, so a second gateway on the same path refuses to start, and
+  `append` is serialised in-process so the synchronous `record` path from
+  several threads is one chain step at a time. The chain remains unsigned;
+  the README and threat model now say so where they said "tamper-evident".
+- **The Redis clients had no timeouts and the library's default pool**
+  (ADR 0070; W7). A hung Redis held every budgeted or held call indefinitely,
+  and the two-hundred-and-first concurrent command was an error rather than a
+  queue. Both stores now build their client with a 2 s connect and 1 s
+  command timeout, a 1,024-connection pool and idle health checks, and a
+  store that cannot be reached refuses the call with a new typed,
+  recoverable error (`-32070`) rather than an internal error or a wait.
+
 - **Argument-level `deny` and `require_approval` rules could be bypassed by
   re-spelling or omitting the constrained argument** (ADR 0068; W1 of the
   2026-10-05 external review). `deny crm__delete where dataset=production`

@@ -35,8 +35,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from pathlib import Path
-from typing import Protocol
+from typing import IO, Protocol
+
+import fcntl  # POSIX only, like the deployment target (a Linux container)
 
 from acp.audit.chain import GENESIS, SEQ_START, Chain, Entry
 from acp.audit.record import AuditRecord
@@ -213,6 +216,15 @@ class FileAuditSink:
     be slower *and* weaker: it opens a window in which the path can be swapped
     between entries, and an audit sink following a rename to somewhere else is
     the whole attack.
+
+    **One writer, by construction** (ADR 0070). The chain is a sequence, and a
+    sequence has one author. Inside the process a lock serialises `append`, so
+    the synchronous `record` path called from two threads cannot interleave a
+    chain step with another's write. Across processes the file carries an
+    exclusive advisory lock for as long as this sink holds it, so a second
+    gateway pointed at the same path refuses to start rather than producing
+    two chains in one file — which `acp audit verify` would report as broken,
+    correctly, and nobody could repair.
     """
 
     def __init__(self, path: Path, *, fsync: bool = True) -> None:
@@ -221,9 +233,11 @@ class FileAuditSink:
         # Line buffered, so a crash loses at most the entry being written rather
         # than everything since the last block filled.
         self._handle = path.open("a", encoding="utf-8", buffering=1)
+        _claim(self._handle, path)
         self._path = path
         self._chain = Chain(head=head, seq=seq)
         self._fsync = fsync
+        self._lock = threading.Lock()
 
     @property
     def blocking(self) -> bool:
@@ -251,23 +265,25 @@ class FileAuditSink:
         # — which left a `prev` no entry had and made an untampered file verify
         # as tampered. Raised as `AuditSerialisationError`, an `OSError`, so
         # the writer treats it exactly like a disk that refused the write.
-        try:
-            entry = self._chain.append(record)
-            line = json.dumps(entry.as_dict(), separators=(",", ":"), allow_nan=False) + "\n"
-        except (TypeError, ValueError) as exc:
-            raise AuditSerialisationError(f"audit record is not JSON-encodable: {exc}") from exc
-        try:
-            self._handle.write(line)
-            self._handle.flush()
-            if self._fsync:
-                os.fsync(self._handle.fileno())
-        except OSError:
-            # Rewind, so the next attempt reuses this sequence number. The caller
-            # decides whether an unwritable record stops the call (it does, by
-            # default) — see `acp.audit.writer`.
-            self._chain = Chain(head=entry.prev, seq=entry.seq - 1)
-            raise
-        return entry
+        with self._lock:
+            try:
+                entry = self._chain.append(record)
+                line = json.dumps(entry.as_dict(), separators=(",", ":"), allow_nan=False) + "\n"
+            except (TypeError, ValueError) as exc:
+                msg = f"audit record is not JSON-encodable: {exc}"
+                raise AuditSerialisationError(msg) from exc
+            try:
+                self._handle.write(line)
+                self._handle.flush()
+                if self._fsync:
+                    os.fsync(self._handle.fileno())
+            except OSError:
+                # Rewind, so the next attempt reuses this sequence number. The
+                # caller decides whether an unwritable record stops the call (it
+                # does, by default) — see `acp.audit.writer`.
+                self._chain = Chain(head=entry.prev, seq=entry.seq - 1)
+                raise
+            return entry
 
     @property
     def head(self) -> str:
@@ -282,4 +298,27 @@ class FileAuditSink:
         return self._path
 
     def close(self) -> None:
+        # Closing the descriptor releases the advisory lock with it.
         self._handle.close()
+
+
+def _claim(handle: IO[str], path: Path) -> None:
+    """Take the exclusive advisory lock on the open chain, or refuse to start.
+
+    Non-blocking: a second process waiting for the first to exit would be a
+    gateway that starts the moment its sibling crashes and then writes a
+    chain the sibling's restart cannot continue. Refusing is the honest
+    answer, and the message names the path so the operator can see which two
+    deployments were pointed at one file. Advisory, so a process that does
+    not ask is not stopped — `acp audit verify` reads without asking, as it
+    should.
+    """
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        handle.close()
+        msg = (
+            f"the audit chain at {path} is held by another process; two writers "
+            f"would produce two chains in one file. Give each gateway its own path."
+        )
+        raise ConfigurationError(msg) from exc

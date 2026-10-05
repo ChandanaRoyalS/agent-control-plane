@@ -211,7 +211,7 @@ def measured() -> str:
             53,
         ),
         overhead_tile(),
-        ("19", "deliberate breakages, caught by the tests written to catch them", 23),
+        ("20", "deliberate breakages, caught by the tests written to catch them", 23),
     )
     return "\n".join(
         f'      <a class="tile" href="{adr(number)}">'
@@ -284,8 +284,9 @@ def subsystems() -> str:
                 "A hash chain, verified against an anchor the gateway cannot reach",
                 "What it does not detect is asserted as a passing test",
                 "A tenant comes from the registration that verified the token",
+                "One writer per chain, enforced at the file",
             ],
-            [50, 51],
+            [50, 51, 70],
         ),
         (
             "Performance",

@@ -115,6 +115,23 @@ class IssuerRegistry:
             msg = "an issuer registry needs at least one authorization server"
             raise ConfigurationError(msg)
 
+        unlabelled = sorted(r.issuer for r in self._by_issuer.values() if r.tenant is None)
+        if len(unlabelled) > 1:
+            # Two issuers with no tenant label both stamp `tenant=None`, and
+            # everything downstream keys on (tenant, subject): the result
+            # cache, the budget account, the approval binding. Issuer A's
+            # "alice" would be served issuer B's alice's cached results and
+            # drain her budget. That is ADR 0051's failure, reachable through
+            # configuration, and refusing it here is cheaper than keying on
+            # the issuer everywhere (ADR 0070).
+            msg = (
+                f"issuers {unlabelled!r} have no `tenant` label: principals from "
+                f"different authorization servers would share one namespace in the "
+                f"cache, the budgets and the approval binding. Label all but at most "
+                f"one of them."
+            )
+            raise ConfigurationError(msg)
+
     def __len__(self) -> int:
         return len(self._by_issuer)
 
@@ -157,7 +174,25 @@ class IssuerRegistry:
         The key caches are *shared*, not copied: one JWKS fetch per issuer
         serves both listeners, and `aclose` on the original closes both. The
         derived registry must therefore never be closed on its own.
+
+        Refused when any registered issuer already mints tokens for
+        ``audience``: such a token would be a valid agent token on the gateway
+        and a valid operator token on the channel, and an agent could approve
+        its own call — the one thing the two-listener design exists to prevent
+        (ADR 0049). The settings model checks the single-issuer environment
+        variables; this is the same check for a registry loaded from a file
+        (ADR 0070).
         """
+        colliding = sorted(
+            r.issuer for r in self._by_issuer.values() if r.policy.audience == audience
+        )
+        if colliding:
+            msg = (
+                f"operator audience {audience!r} is also the gateway audience of "
+                f"issuers {colliding!r}: a token for the gateway would also open the "
+                f"approval channel, so an agent could approve its own call"
+            )
+            raise ConfigurationError(msg)
         return IssuerRegistry(
             replace(registration, policy=replace(registration.policy, audience=audience))
             for registration in self._by_issuer.values()

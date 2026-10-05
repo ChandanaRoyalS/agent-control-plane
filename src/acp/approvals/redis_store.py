@@ -48,7 +48,7 @@ from redis.asyncio import Redis, WatchError
 
 from acp.approvals.record import ApprovalRequest, State
 from acp.exceptions import ConfigurationError
-from acp.redis_url import REDIS_SCHEMES
+from acp.redis_url import REDIS_SCHEMES, client_for, unavailable
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +85,9 @@ class RedisApprovalStore:
 
     @classmethod
     def from_url(cls, url: str, **kwargs: Any) -> RedisApprovalStore:
-        """A store on the Redis at ``url`` (``redis://``, ``rediss://``, ``unix://``)."""
-        return cls(Redis.from_url(url, **kwargs))
+        """A store on the Redis at ``url`` (``redis://``, ``rediss://``, ``unix://``),
+        with the timeouts and pool every store here has (`acp.redis_url`)."""
+        return cls(client_for(url), **kwargs)
 
     async def ping(self) -> None:
         """Refuse to start a gateway whose approval store it cannot reach.
@@ -110,7 +111,7 @@ class RedisApprovalStore:
 
     async def create(self, request: ApprovalRequest) -> None:
         ttl = max(1, int(request.expires_at - request.created_at + self._grace))
-        async with self._redis.pipeline(transaction=True) as pipe:
+        async with unavailable("approval"), self._redis.pipeline(transaction=True) as pipe:
             # NX: a token is 256 random bits and never reissued, so a collision
             # is a bug and must not silently overwrite somebody's record.
             pipe.set(key_for(request.token), encode(request), ex=ttl, nx=True)
@@ -118,7 +119,8 @@ class RedisApprovalStore:
             await pipe.execute()
 
     async def get(self, token: str) -> ApprovalRequest | None:
-        raw = await self._redis.get(key_for(token))
+        async with unavailable("approval"):
+            raw = await self._redis.get(key_for(token))
         return None if raw is None else decode(raw)
 
     async def decide(
@@ -160,7 +162,7 @@ class RedisApprovalStore:
         """
         key = key_for(token)
         for _ in range(MAX_CAS_ATTEMPTS):
-            async with self._redis.pipeline(transaction=True) as pipe:
+            async with unavailable("approval"), self._redis.pipeline(transaction=True) as pipe:
                 try:
                     await pipe.watch(key)
                     raw = await pipe.get(key)
@@ -191,11 +193,12 @@ class RedisApprovalStore:
     # -- ApprovalReader -------------------------------------------------------------
 
     async def pending(self) -> tuple[ApprovalRequest, ...]:
-        members = await self._redis.smembers(PENDING_SET)
-        tokens = sorted(m.decode() if isinstance(m, bytes) else str(m) for m in members)
-        if not tokens:
-            return ()
-        raws = await self._redis.mget([key_for(t) for t in tokens])
+        async with unavailable("approval"):
+            members = await self._redis.smembers(PENDING_SET)
+            tokens = sorted(m.decode() if isinstance(m, bytes) else str(m) for m in members)
+            if not tokens:
+                return ()
+            raws = await self._redis.mget([key_for(t) for t in tokens])
         held: list[ApprovalRequest] = []
         gone: list[str] = []
         for token, raw in zip(tokens, raws, strict=True):
@@ -208,6 +211,7 @@ class RedisApprovalStore:
             else:
                 gone.append(token)
         if gone:
-            await self._redis.srem(PENDING_SET, *gone)
+            async with unavailable("approval"):
+                await self._redis.srem(PENDING_SET, *gone)
         held.sort(key=lambda r: r.created_at)
         return tuple(held)

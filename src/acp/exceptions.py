@@ -408,3 +408,20 @@ class AuditUnavailableError(ACPError):
 
     code = -32060
     recoverable = True
+
+
+class StateStoreUnavailableError(ACPError):
+    """The shared store for approvals or budgets could not be reached in time.
+
+    Raised instead of the client library's own error so that the request path
+    fails **closed and legibly** (ADR 0070): a call whose budget could not be
+    charged, or whose approval could not be read, is refused with a code the
+    agent can act on rather than served unchecked or left hanging on a socket
+    with no timeout. ``recoverable`` is true in the sense that matters to the
+    agent — the store comes back, the identical call then succeeds — and the
+    wire message names nothing about which store or where, for the reason
+    `AuditUnavailableError` gives.
+    """
+
+    code = -32070
+    recoverable = True

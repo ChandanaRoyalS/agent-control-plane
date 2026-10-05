@@ -2,13 +2,13 @@
 
 An MCP gateway that sits between AI agents and the tools they call: it decides
 who may call what, screens what comes back for prompt injection, holds risky
-calls for a human, and records every decision in a tamper-evident log.
+calls for a human, and records every decision in a hash-chained log.
 
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~2,100 tests · 95% coverage · 69 architecture decisions · 4 mutation harnesses
-proving 19 deliberate breakages are caught**
+**~2,100 tests · 95% coverage · 70 architecture decisions · 4 mutation harnesses
+proving 20 deliberate breakages are caught**
 
 ## Why
 
@@ -153,7 +153,7 @@ built to make its own claims checkable:
 - **Every change is a pull request** against a protected `main`, through the
   same `make check` CI runs: lint, format, strict types, ~2,100 tests, an 80%
   coverage floor.
-- **Mutation harnesses** break the security invariants on purpose (19 ways) and
+- **Mutation harnesses** break the security invariants on purpose (20 ways) and
   fail if the tests do not notice.
 - **The release surface is a file**, and a test fails when it changes unannounced
   ([ADR 0058](docs/decisions/0058-a-version-is-a-promise-about-a-surface.md)).
@@ -211,7 +211,9 @@ somebody looking for gaps.
   it does not reason about meaning, so `dataset: prod-eu` is not `production`
   to it.
 - **The hash chain cannot detect tail truncation or a wholesale rewrite** without
-  an external anchor; both are asserted as passing tests.
+  an external anchor; both are asserted as passing tests. It is not signed:
+  whoever can write the file can rewrite it consistently. One writer per file
+  is enforced; one file per process is not fixed.
 - **Tool descriptions are screened but cannot be fenced.** A description with
   a detectable payload is withheld from the catalogue; a politely worded one
   reaches the model, and only the policy stands between it and the call.

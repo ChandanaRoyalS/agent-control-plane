@@ -29,7 +29,11 @@ import pytest
 from acp.config import GatewaySettings
 from acp.exceptions import ConfigurationError
 from acp.identity import ProviderMetadata, TokenValidator
-from acp.runtime import build_protected_resource, build_token_validator
+from acp.runtime import (
+    build_operator_validator,
+    build_protected_resource,
+    build_token_validator,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -48,6 +52,7 @@ def settings(
     resource: str = "",
     issuers_file: Path | None = None,
     required: bool = False,
+    operator_audience: str = "",
 ) -> GatewaySettings:
     """Explicit keyword arguments, never a `**dict` splat.
 
@@ -68,6 +73,7 @@ def settings(
         # happens when one is or is not — so the assertion would be answering
         # the question under test.
         auth_required=required,
+        approval_operator_audience=operator_audience,
     )
 
 
@@ -188,9 +194,11 @@ def test_an_issuers_file_becomes_one_registration_per_server(
 issuers:
   - issuer: {ISSUER}
     audience: {AUDIENCE}
+    tenant: corp
   - issuer: {PARTNER}
     audience: {AUDIENCE}-partner
     jwks_url: {PARTNER}keys
+    tenant: partner
 """,
         encoding="utf-8",
     )
@@ -259,9 +267,11 @@ def test_the_authorization_servers_are_the_registry_not_a_second_list(
 issuers:
   - issuer: {ISSUER}
     audience: {RESOURCE}
+    tenant: corp
   - issuer: {PARTNER}
     audience: {RESOURCE}
     jwks_url: {PARTNER}keys
+    tenant: partner
 """,
         encoding="utf-8",
     )
@@ -389,3 +399,60 @@ def test_the_insecure_host_list_reaches_discovery(monkeypatch: pytest.MonkeyPatc
     )
 
     assert fake.insecure_hosts == ["keycloak"]
+
+
+# ---------------------------------------------------------------------------
+# The operator audience against every issuer, not only the env-var one
+# ---------------------------------------------------------------------------
+
+
+def test_an_operator_audience_one_file_issuer_already_mints_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """W4 of the external review (ADR 0070). The settings model refuses
+    `ACP_APPROVAL_OPERATOR_AUDIENCE == ACP_AUTH_AUDIENCE`, but an issuers file
+    carries one audience per issuer, and a collision with any of them is a
+    token that calls tools on :8080 and approves them on :9090."""
+    install(monkeypatch, FakeDiscovery())
+    path = tmp_path / "issuers.yaml"
+    path.write_text(
+        f"""
+issuers:
+  - issuer: {ISSUER}
+    audience: {AUDIENCE}
+    tenant: corp
+  - issuer: {PARTNER}
+    audience: {AUDIENCE}-partner
+    jwks_url: {PARTNER}keys
+    tenant: partner
+""",
+        encoding="utf-8",
+    )
+    config = settings(issuers_file=path, operator_audience=f"{AUDIENCE}-partner")
+    validator = anyio.run(build_token_validator, config)
+
+    with pytest.raises(ConfigurationError, match="approve its own call"):
+        build_operator_validator(config, validator)
+
+
+def test_two_unlabelled_file_issuers_refuse_to_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """W5 of the external review (ADR 0070), from the file: the shape the
+    example issuers file itself had until this change."""
+    install(monkeypatch, FakeDiscovery())
+    path = tmp_path / "issuers.yaml"
+    path.write_text(
+        f"""
+issuers:
+  - issuer: {ISSUER}
+    audience: {AUDIENCE}
+  - issuer: {PARTNER}
+    audience: {AUDIENCE}-partner
+    jwks_url: {PARTNER}keys
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="no `tenant` label"):
+        anyio.run(build_token_validator, settings(issuers_file=path))

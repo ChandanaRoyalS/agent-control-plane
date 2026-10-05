@@ -267,3 +267,60 @@ def test_the_memory_sink_refuses_the_same_record() -> None:
     with pytest.raises(AuditSerialisationError):
         sink.append(unencodable(1))
     assert sink.length == 1
+
+
+# ---------------------------------------------------------------------------
+# One writer, by construction (ADR 0070)
+# ---------------------------------------------------------------------------
+
+
+def test_a_second_sink_on_the_same_path_refuses_to_start(tmp_path: Path) -> None:
+    """W6 of the external review: two sinks on one file produced two chains in
+    one file, which verify reported as broken and nobody could repair. The
+    second now fails at construction, naming the path."""
+    first = FileAuditSink(tmp_path / "audit.jsonl", fsync=False)
+
+    with pytest.raises(ConfigurationError, match="held by another process"):
+        FileAuditSink(tmp_path / "audit.jsonl", fsync=False)
+
+    first.close()
+
+
+def test_closing_the_sink_releases_the_path(tmp_path: Path) -> None:
+    """A restart is the normal case, and it must continue the chain rather
+    than be refused by its own predecessor's lock."""
+    first = FileAuditSink(tmp_path / "audit.jsonl", fsync=False)
+    first.append(record(1))
+    first.close()
+
+    second = FileAuditSink(tmp_path / "audit.jsonl", fsync=False)
+    second.append(record(2))
+    second.close()
+
+    report = verify((tmp_path / "audit.jsonl").read_text().splitlines())
+    assert report.intact
+    assert report.entries == 2
+
+
+def test_concurrent_appends_from_threads_produce_one_intact_chain(tmp_path: Path) -> None:
+    """The synchronous `record` path, called from many threads at once, was
+    eight threads to a hundred-odd breaks. Each append is one indivisible
+    chain step and write."""
+    import threading  # noqa: PLC0415
+
+    sink = FileAuditSink(tmp_path / "audit.jsonl", fsync=False)
+
+    def hammer(offset: int) -> None:
+        for i in range(50):
+            sink.append(record(offset * 100 + i))
+
+    threads = [threading.Thread(target=hammer, args=(n,)) for n in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    sink.close()
+
+    report = verify((tmp_path / "audit.jsonl").read_text().splitlines())
+    assert report.entries == 400
+    assert report.intact

@@ -209,7 +209,7 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
       <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">2.14&times;</span><span class="caption">of throughput is what durability costs, measured</span></a>
       <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">12.6&times;</span><span class="caption">p95 on a path with no disk write &mdash; a defect a load harness found</span></a>
       <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md"><span class="figure">2.5&times;</span><span class="caption">a direct call on a cache miss, recorded 2026-10-04 with its switch settings</span></a>
-      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md"><span class="figure">19</span><span class="caption">deliberate breakages, caught by the tests written to catch them</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md"><span class="figure">20</span><span class="caption">deliberate breakages, caught by the tests written to catch them</span></a>
   </div>
   <p class="note">Every figure links to the decision record that produced it, including the two
   that record a prediction the author got wrong.</p>
@@ -252,8 +252,8 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
       <article class="card">
         <h3>Audit</h3>
         <p class="claim">A call this gateway cannot record does not happen.</p>
-        <ul><li>A hash chain, verified against an anchor the gateway cannot reach</li><li>What it does not detect is asserted as a passing test</li><li>A tenant comes from the registration that verified the token</li></ul>
-        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0050-an-audit-record-is-not-a-log-line.md">0050</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0051-a-tenant-is-an-issuer-not-a-claim.md">0051</a></p>
+        <ul><li>A hash chain, verified against an anchor the gateway cannot reach</li><li>What it does not detect is asserted as a passing test</li><li>A tenant comes from the registration that verified the token</li><li>One writer per chain, enforced at the file</li></ul>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0050-an-audit-record-is-not-a-log-line.md">0050</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0051-a-tenant-is-an-issuer-not-a-claim.md">0051</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0070-the-fleet-release-made-true.md">0070</a></p>
       </article>
       <article class="card">
         <h3>Performance</h3>
@@ -295,7 +295,7 @@ make audit-verify       # walk the chain it just wrote</pre>
 
 <footer>
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane">Repository</a> &middot;
-  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/README.md">69 architecture decisions</a> &middot;
+  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/README.md">70 architecture decisions</a> &middot;
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/THREAT_MODEL.md">Threat model</a> &middot;
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.3.0">v1.3.0</a>
   <p style="margin-top:10px;color:var(--faint)">This page is generated from files in the

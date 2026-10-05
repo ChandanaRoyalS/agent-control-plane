@@ -23,6 +23,13 @@ without somebody accepting the change.
   advance in `TRANSFORMER_DESIGN`; `--unseal` refuses any other and refuses a
   second look. PyTorch is added per command, not as a dependency. Not on the
   request path.
+- The transformer's record, `corpus/learned/transformer.json`: one run, scored
+  once on the sealed sets as a second look. At its enforce threshold it catches
+  91.6% of BIPIA's held-out attacks (linear: 64.2%) and flags 1.0% of clean
+  contexts (2.0%), clearing the bar ADR 0077 set in advance. On the internal
+  corpora it is worse: 2.8% of benign documents withheld (0.9%) and 2.7% of
+  attacks caught (8.1%). A test now checks the record against the fixed design
+  and the linear model's data.
 
 ## [2.2.0] - 2026-10-05
 

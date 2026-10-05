@@ -1,0 +1,597 @@
+{
+ "model": {
+  "design": {
+   "base": "distilbert/distilroberta-base",
+   "epochs": 3,
+   "batch_size": 16,
+   "learning_rate": 2e-05,
+   "weight_decay": 0.01,
+   "warmup_share": 0.06,
+   "max_tokens": 512,
+   "seed": 0,
+   "limit": null
+  },
+  "validation": {
+   "recall": 1.0,
+   "fpr": 0.0091
+  },
+  "validation_enforce": {
+   "recall": 0.9837,
+   "fpr": 0.0
+  },
+  "train_windows": 3003,
+  "train_windows_truncated": 90,
+  "epoch_losses": [
+   0.2676,
+   0.0199,
+   0.0088
+  ],
+  "train_seconds": 662.6,
+  "device": "mps",
+  "train_digest": "2d17f6574523a4fd237084cdd29ef3586c17769bcbd5e5d12cd6eeb156876647",
+  "validation_digest": "0dcfa8ea1fddfcb97423825a944b7221adb53de8f36ace7fe022e6760e7fc31e",
+  "weights_sha256": "b6e6d1b3108d7345fed2f4639d651aab8201065eb6be0f48c07d3e479635f4fc",
+  "versions": {
+   "python": "3.14.7",
+   "torch": "2.14.1",
+   "transformers": "5.18.0",
+   "platform": "Darwin arm64"
+  }
+ },
+ "threshold": 0.005509348189217806,
+ "enforce_threshold": 0.9990630017051697,
+ "latency_ms_per_1k_chars": {
+  "mps": 12.68,
+  "cpu": 30.18
+ },
+ "open": [
+  {
+   "set": "validation/injecagent",
+   "kind": "attacks",
+   "learned": {
+    "hits": 170,
+    "total": 170,
+    "rate": 1.0,
+    "low": null,
+    "high": null
+   },
+   "learned_enforce": {
+    "hits": 168,
+    "total": 170,
+    "rate": 0.9882,
+    "low": 0.9647,
+    "high": 1.0
+   },
+   "patterns": {
+    "hits": 90,
+    "total": 170,
+    "rate": 0.5294,
+    "low": null,
+    "high": null
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 170,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "validation/injecagent",
+   "kind": "benign",
+   "learned": {
+    "hits": 1,
+    "total": 65,
+    "rate": 0.0154,
+    "low": 0.0,
+    "high": 0.0462
+   },
+   "learned_enforce": {
+    "hits": 0,
+    "total": 65,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   },
+   "patterns": {
+    "hits": 29,
+    "total": 65,
+    "rate": 0.4462,
+    "low": 0.3231,
+    "high": 0.5692
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 65,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "validation/bipia",
+   "kind": "attacks",
+   "learned": {
+    "hits": 76,
+    "total": 76,
+    "rate": 1.0,
+    "low": null,
+    "high": null
+   },
+   "learned_enforce": {
+    "hits": 74,
+    "total": 76,
+    "rate": 0.9737,
+    "low": 0.9342,
+    "high": 1.0
+   },
+   "patterns": {
+    "hits": 12,
+    "total": 76,
+    "rate": 0.1579,
+    "low": 0.0,
+    "high": 0.3158
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 76,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "validation/bipia",
+   "kind": "benign",
+   "learned": {
+    "hits": 1,
+    "total": 126,
+    "rate": 0.0079,
+    "low": 0.0,
+    "high": 0.0238
+   },
+   "learned_enforce": {
+    "hits": 0,
+    "total": 126,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   },
+   "patterns": {
+    "hits": 2,
+    "total": 126,
+    "rate": 0.0159,
+    "low": 0.0,
+    "high": 0.0397
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 126,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "validation/stdlib",
+   "kind": "benign",
+   "learned": {
+    "hits": 1,
+    "total": 137,
+    "rate": 0.0073,
+    "low": 0.0,
+    "high": 0.0219
+   },
+   "learned_enforce": {
+    "hits": 0,
+    "total": 137,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   },
+   "patterns": {
+    "hits": 3,
+    "total": 137,
+    "rate": 0.0219,
+    "low": 0.0,
+    "high": 0.0511
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 137,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "internal_benign",
+   "kind": "benign",
+   "learned": {
+    "hits": 16,
+    "total": 106,
+    "rate": 0.1509,
+    "low": 0.0849,
+    "high": 0.217
+   },
+   "learned_enforce": {
+    "hits": 3,
+    "total": 106,
+    "rate": 0.0283,
+    "low": 0.0,
+    "high": 0.066
+   },
+   "patterns": {
+    "hits": 23,
+    "total": 106,
+    "rate": 0.217,
+    "low": 0.1415,
+    "high": 0.2925
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 106,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "internal_attacks",
+   "kind": "attacks",
+   "learned": {
+    "hits": 11,
+    "total": 37,
+    "rate": 0.2973,
+    "low": 0.1622,
+    "high": 0.4324
+   },
+   "learned_enforce": {
+    "hits": 1,
+    "total": 37,
+    "rate": 0.027,
+    "low": 0.0,
+    "high": 0.0811
+   },
+   "patterns": {
+    "hits": 21,
+    "total": 37,
+    "rate": 0.5676,
+    "low": 0.4054,
+    "high": 0.7297
+   },
+   "withheld": {
+    "hits": 5,
+    "total": 37,
+    "rate": 0.1351,
+    "low": 0.0541,
+    "high": 0.2432
+   }
+  }
+ ],
+ "sealed": [
+  {
+   "set": "bipia_test",
+   "kind": "attacks",
+   "learned": {
+    "hits": 495,
+    "total": 500,
+    "rate": 0.99,
+    "low": 0.98,
+    "high": 0.998
+   },
+   "learned_enforce": {
+    "hits": 458,
+    "total": 500,
+    "rate": 0.916,
+    "low": 0.876,
+    "high": 0.952
+   },
+   "patterns": {
+    "hits": 97,
+    "total": 500,
+    "rate": 0.194,
+    "low": 0.128,
+    "high": 0.26
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 500,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "bipia_test",
+   "kind": "benign",
+   "learned": {
+    "hits": 17,
+    "total": 200,
+    "rate": 0.085,
+    "low": 0.045,
+    "high": 0.125
+   },
+   "learned_enforce": {
+    "hits": 2,
+    "total": 200,
+    "rate": 0.01,
+    "low": 0.0,
+    "high": 0.025
+   },
+   "patterns": {
+    "hits": 3,
+    "total": 200,
+    "rate": 0.015,
+    "low": 0.0,
+    "high": 0.035
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 200,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1",
+   "kind": "attacks",
+   "learned": {
+    "hits": 304,
+    "total": 500,
+    "rate": 0.608,
+    "low": 0.574,
+    "high": 0.64
+   },
+   "learned_enforce": {
+    "hits": 238,
+    "total": 500,
+    "rate": 0.476,
+    "low": 0.446,
+    "high": 0.508
+   },
+   "patterns": {
+    "hits": 105,
+    "total": 500,
+    "rate": 0.21,
+    "low": 0.18,
+    "high": 0.24
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 500,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/alternating_case",
+   "kind": "attacks",
+   "learned": {
+    "hits": 70,
+    "total": 71,
+    "rate": 0.9859,
+    "low": 0.9577,
+    "high": 1.0
+   },
+   "learned_enforce": {
+    "hits": 65,
+    "total": 71,
+    "rate": 0.9155,
+    "low": 0.8451,
+    "high": 0.9718
+   },
+   "patterns": {
+    "hits": 14,
+    "total": 71,
+    "rate": 0.1972,
+    "low": 0.1127,
+    "high": 0.2958
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 71,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/base64_split",
+   "kind": "attacks",
+   "learned": {
+    "hits": 54,
+    "total": 71,
+    "rate": 0.7606,
+    "low": 0.662,
+    "high": 0.8592
+   },
+   "learned_enforce": {
+    "hits": 32,
+    "total": 71,
+    "rate": 0.4507,
+    "low": 0.338,
+    "high": 0.5634
+   },
+   "patterns": {
+    "hits": 2,
+    "total": 71,
+    "rate": 0.0282,
+    "low": 0.0,
+    "high": 0.0704
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 71,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/homoglyph",
+   "kind": "attacks",
+   "learned": {
+    "hits": 15,
+    "total": 72,
+    "rate": 0.2083,
+    "low": 0.125,
+    "high": 0.3056
+   },
+   "learned_enforce": {
+    "hits": 4,
+    "total": 72,
+    "rate": 0.0556,
+    "low": 0.0139,
+    "high": 0.1111
+   },
+   "patterns": {
+    "hits": 1,
+    "total": 72,
+    "rate": 0.0139,
+    "low": 0.0,
+    "high": 0.0417
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 72,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/leet",
+   "kind": "attacks",
+   "learned": {
+    "hits": 11,
+    "total": 71,
+    "rate": 0.1549,
+    "low": 0.0845,
+    "high": 0.2394
+   },
+   "learned_enforce": {
+    "hits": 1,
+    "total": 71,
+    "rate": 0.0141,
+    "low": 0.0,
+    "high": 0.0423
+   },
+   "patterns": {
+    "hits": 2,
+    "total": 71,
+    "rate": 0.0282,
+    "low": 0.0,
+    "high": 0.0704
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 71,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/reworded_override",
+   "kind": "attacks",
+   "learned": {
+    "hits": 71,
+    "total": 71,
+    "rate": 1.0,
+    "low": null,
+    "high": null
+   },
+   "learned_enforce": {
+    "hits": 66,
+    "total": 71,
+    "rate": 0.9296,
+    "low": 0.8732,
+    "high": 0.9859
+   },
+   "patterns": {
+    "hits": 13,
+    "total": 71,
+    "rate": 0.1831,
+    "low": 0.0986,
+    "high": 0.2817
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 71,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/spaced",
+   "kind": "attacks",
+   "learned": {
+    "hits": 11,
+    "total": 72,
+    "rate": 0.1528,
+    "low": 0.0833,
+    "high": 0.2361
+   },
+   "learned_enforce": {
+    "hits": 3,
+    "total": 72,
+    "rate": 0.0417,
+    "low": 0.0,
+    "high": 0.0972
+   },
+   "patterns": {
+    "hits": 1,
+    "total": 72,
+    "rate": 0.0139,
+    "low": 0.0,
+    "high": 0.0417
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 72,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/zero_width",
+   "kind": "attacks",
+   "learned": {
+    "hits": 72,
+    "total": 72,
+    "rate": 1.0,
+    "low": null,
+    "high": null
+   },
+   "learned_enforce": {
+    "hits": 67,
+    "total": 72,
+    "rate": 0.9306,
+    "low": 0.8611,
+    "high": 0.9861
+   },
+   "patterns": {
+    "hits": 72,
+    "total": 72,
+    "rate": 1.0,
+    "low": null,
+    "high": null
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 72,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  }
+ ],
+ "sealed_on": "b6e6d1b3108d7345fed2f4639d651aab8201065eb6be0f48c07d3e479635f4fc",
+ "second_look": "BIPIA test and evasion v1 were first scored for the linear model (ADR 0075); this design was fixed before this model saw them (ADR 0077)"
+}

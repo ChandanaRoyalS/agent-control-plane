@@ -38,17 +38,24 @@ A learned classifier, trained here, was scored once on [BIPIA](https://github.co
 tables and code answers with 125 attacker instructions no one here wrote
 ([ADR 0075](docs/decisions/0075-a-learned-classifier-measured-once.md)).
 
-| sealed set | learned classifier, enforce threshold | patterns, any finding | patterns, withheld |
-|---|---|---|---|
-| BIPIA test attacks (500) | 64.2% [57–71] | 19.4% | 0% |
-| BIPIA test clean (200), flagged | 2.0% [0.5–4] | 1.5% | 0% |
-| evasion v1: the same attacks disguised (500) | 28.8% [25–33] | 21.0% | 0% |
+| sealed set | learned classifier, enforce threshold | transformer, enforce threshold (second look) | patterns, any finding | patterns, withheld |
+|---|---|---|---|---|
+| BIPIA test attacks (500) | 64.2% [57–71] | 91.6% [88–95] | 19.4% | 0% |
+| BIPIA test clean (200), flagged | 2.0% [0.5–4] | 1.0% [0–2.5] | 1.5% | 0% |
+| evasion v1: the same attacks disguised (500) | 28.8% [25–33] | 47.6% [45–51] | 21.0% | 0% |
 
 It catches polite injections the patterns miss, at a false-positive rate above
 the 0% it showed on validation, and homoglyphs, spacing, leetspeak and base64
 defeat it. It runs in report mode by default and withholds only when
 `ACP_FIREWALL_LEARNED=enforce` and `ACP_FIREWALL_MODE=enforce` are both set
 ([ADR 0076](docs/decisions/0076-the-learned-classifier-withholds-only-by-choice.md)).
+
+A fine-tuned DistilRoBERTa, fixed in advance and trained once on the same splits,
+does better on BIPIA but worse on this project's own documents: it withholds 2.8%
+of the internal benign corpus (the linear model 0.9%) and catches 2.7% of the
+internal attacks (8.1%). It costs about 30 ms per thousand characters on a CPU and
+is not on the request path
+([ADR 0077](docs/decisions/0077-a-transformer-fixed-before-it-is-trained.md)).
 
 ## Quickstart
 
@@ -220,8 +227,9 @@ The full threat model is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 - **Attacks split across two documents** pass: screening sees one result at a
   time.
 - **The only model that can withhold is linear**, over character n-grams, and
-  only when you turn it on; a transformer is the next step. The
-  model demo measures two small local models on one task.
+  only when you turn it on. The transformer that beat it on BIPIA did worse on
+  this project's own documents and is not served. The model demo measures two
+  small local models on one task.
 - **An argument-level `deny` checks spelling, not meaning**: `prod-eu` is not
   `production` to it ([ADR 0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md)).
 - **The audit chain is not signed.** Whoever can write the file can rewrite it
@@ -231,7 +239,7 @@ The full threat model is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 ## What I would do with another month
 
-1. **Run the transformer fixed in [ADR 0077](docs/decisions/0077-a-transformer-fixed-before-it-is-trained.md)** on the same splits, and see whether it lowers the 2% of benign documents the linear classifier withholds.
+1. **Train on more than one source of attacks.** Both learned models learned BIPIA's style: the transformer catches 92% of its held-out attacks and 3% of this project's own ([ADR 0077](docs/decisions/0077-a-transformer-fixed-before-it-is-trained.md)).
 2. **Grow the evasion corpus** with paraphrase and translation, which need a model to generate.
 3. **Record the model demo on more models and tasks.**
 4. **Sign the audit chain**, which is a key-management decision before it is code.

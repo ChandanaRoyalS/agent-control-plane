@@ -15,6 +15,25 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-10-05
+
+The image now runs natively on arm64 (Apple silicon, Graviton), and item 2 of
+the external review closes with a transformer measured against the linear
+classifier ([ADR 0077](docs/decisions/0077-a-transformer-fixed-before-it-is-trained.md)).
+
+**Patch** under ADR 0058: no setting, command, audit field or protocol
+revision changed. The platforms an image is built for are not part of that
+surface.
+
+### Changed
+
+- The release publishes one manifest list for `linux/amd64` and
+  `linux/arm64`. Each platform's image is built alone and checked under its own
+  platform (architecture, no mock upstreams, uid 10001, reported version)
+  before anything is pushed; the published tags point at those checked images,
+  which also stay available as `<version>-amd64` and `<version>-arm64`. A test
+  holds the workflow to that order.
+
 ### Added
 
 - `scripts/transformer.py` and `make train-transformer` / `make
@@ -651,7 +670,8 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v2.2.1...HEAD
+[2.2.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.2.1
 [2.2.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.2.0
 [2.1.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.1.0
 [2.0.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.0.0

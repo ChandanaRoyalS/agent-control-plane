@@ -30,7 +30,7 @@ jobs:
   release:
     name: verify · publish
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -121,62 +121,84 @@ jobs:
       # Build, assert, then push. Never the other way round.
       # ------------------------------------------------------------------
 
+      - name: Set up QEMU
+        # arm64 is built and checked under emulation on this amd64 runner, so
+        # one job builds, checks and publishes both. The image installs wheels
+        # only (nothing compiles), which keeps the emulated build to minutes.
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build the gateway image
+      # One build per platform, each loaded so it can be run. The docker
+      # exporter cannot load a manifest list, and buildx attaches a provenance
+      # attestation by default -- which turns the build's output into one. Off,
+      # so `load: true` produces a single image the checks can run.
+
+      - name: Build the gateway image (amd64)
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64
           push: false
           load: true
-          # The docker exporter cannot load a manifest list, and buildx attaches
-          # a provenance attestation by default -- which turns the build's
-          # output into one. Off, so `load: true` produces a single image this
-          # job can actually run its assertions against.
           provenance: false
           build-args: WITH_MOCKS=false
-          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}-amd64
 
-      - name: Confirm the published image contains no mock upstreams
-        # `WITH_MOCKS` is a build argument, and a build argument with a typo in
-        # its name is silently ignored — the build succeeds and ships two
-        # servers with deliberately controllable failure modes inside an
-        # artifact whose purpose is to be a security boundary. Checked rather
-        # than trusted, on the exact image about to be pushed.
-        run: |
-          if docker run --rm --entrypoint python \
-               "${IMAGE}:${{ steps.version.outputs.version }}" \
-               -c "import acp.mocks" 2>/dev/null; then
-            echo "::error::acp.mocks is importable in the image about to be published"
-            exit 1
-          fi
-          echo "acp.mocks is absent, as intended"
+      - name: Build the gateway image (arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: false
+          load: true
+          provenance: false
+          build-args: WITH_MOCKS=false
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}-arm64
 
-      - name: Confirm the published image does not run as root
+      - name: Check both images
+        # Run on each image about to be pushed, under its own platform:
+        # - it is the architecture its tag says;
+        # - it contains no mock upstreams. `WITH_MOCKS` is a build argument, and
+        #   one with a typo in its name is silently ignored, shipping two servers
+        #   with controllable failure modes inside a security boundary;
+        # - it does not run as root;
+        # - it reports the version it is tagged with: the tag, the code and the
+        #   artifact agreeing (the first two were checked before the build).
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          uid=$(docker run --rm --entrypoint id \
-                  "${IMAGE}:${{ steps.version.outputs.version }}" -u)
-          echo "container uid: $uid"
-          [ "$uid" = "10001" ]
+          for arch in amd64 arm64; do
+            ref="${IMAGE}:${VERSION}-${arch}"
+            run="docker run --rm --platform linux/${arch}"
+            echo "--- ${ref}"
 
-      - name: Confirm the image reports the version it is tagged with
-        # The tag, the code and the artifact, agreeing. Two of the three were
-        # checked before the build; this is the third.
-        run: |
-          reported=$(docker run --rm --entrypoint python \
-                       "${IMAGE}:${{ steps.version.outputs.version }}" \
-                       -c "import acp; print(acp.__version__)")
-          echo "reported: $reported"
-          case "$reported" in
-            *"${{ steps.version.outputs.version }}"*) ;;
-            *) echo "::error::image reports '$reported'"; exit 1 ;;
-          esac
+            built=$(docker image inspect --format '{{.Architecture}}' "$ref")
+            echo "architecture: $built"
+            [ "$built" = "$arch" ] || { echo "::error::${ref} is ${built}"; exit 1; }
+
+            if $run --entrypoint python "$ref" -c "import acp.mocks" 2>/dev/null; then
+              echo "::error::acp.mocks is importable in ${ref}"
+              exit 1
+            fi
+            echo "acp.mocks is absent, as intended"
+
+            uid=$($run --entrypoint id "$ref" -u)
+            echo "container uid: $uid"
+            [ "$uid" = "10001" ] || { echo "::error::${ref} runs as uid ${uid}"; exit 1; }
+
+            reported=$($run --entrypoint python "$ref" -c "import acp; print(acp.__version__)")
+            echo "reported: $reported"
+            [ "$reported" = "$VERSION" ] || { echo "::error::${ref} reports ${reported}"; exit 1; }
+          done
 
       - name: Log in to ghcr.io
-        # Deliberately after every assertion. A login before the checks would
-        # mean a failed check leaves a session open to a registry for the rest
-        # of the job.
+        # Deliberately after every check. A login before them would mean a
+        # failed check leaves a session open to a registry for the rest of the
+        # job.
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -184,17 +206,30 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push
-        # Three tags: the exact version, the minor line, and `latest`. `latest`
-        # is a convenience and a hazard — it is what somebody gets when they
-        # forget to pin — so the README pins a version everywhere it shows a
-        # `docker run`.
+        # The two checked images are pushed under per-platform tags, then joined
+        # into one manifest list under three tags: the exact version, the minor
+        # line, and `latest`. The list points at the images that were checked,
+        # not at a rebuild. `latest` is a convenience and a hazard -- it is what
+        # somebody gets when they forget to pin -- so the README pins a version
+        # everywhere it shows a `docker run`.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          MINOR: ${{ steps.version.outputs.minor }}
         run: |
-          version="${{ steps.version.outputs.version }}"
-          docker tag "${IMAGE}:${version}" "${IMAGE}:${{ steps.version.outputs.minor }}"
-          docker tag "${IMAGE}:${version}" "${IMAGE}:latest"
-          docker push "${IMAGE}:${version}"
-          docker push "${IMAGE}:${{ steps.version.outputs.minor }}"
-          docker push "${IMAGE}:latest"
+          docker push "${IMAGE}:${VERSION}-amd64"
+          docker push "${IMAGE}:${VERSION}-arm64"
+          for tag in "$VERSION" "$MINOR" latest; do
+            docker buildx imagetools create --tag "${IMAGE}:${tag}" \
+              "${IMAGE}:${VERSION}-amd64" "${IMAGE}:${VERSION}-arm64"
+          done
+
+      - name: Confirm the published tag serves both platforms
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}" | tee /tmp/manifest
+          grep -q "linux/amd64" /tmp/manifest
+          grep -q "linux/arm64" /tmp/manifest
 
       - name: Publish the release
         env:

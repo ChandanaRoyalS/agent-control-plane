@@ -58,9 +58,9 @@ docker compose down
 The released image, verified by the release workflow, runs as uid 10001:
 
 ```bash
-docker pull ghcr.io/chandanaroyals/agent-control-plane:1.3.1
+docker pull ghcr.io/chandanaroyals/agent-control-plane:2.0.0
 docker run --rm --entrypoint python \
-  ghcr.io/chandanaroyals/agent-control-plane:1.3.1 \
+  ghcr.io/chandanaroyals/agent-control-plane:2.0.0 \
   -c "import acp; print(acp.__version__)"
 ```
 
@@ -155,6 +155,14 @@ in [`perf/results/`](perf/results/), with locust's raw output beside it:
 
 30s per level, first 3.0s discarded, 0-50 ms think time per agent, mock upstreams, no request throttled or failed (a run with either is refused); [2026-10-05, Darwin arm64](perf/results/load-2026-10-05-ed61a8c.json), raw locust CSVs in [`perf/results/load-2026-10-05-ed61a8c/`](perf/results/load-2026-10-05-ed61a8c/); commit `ed61a8c`; switches `auth=on exchange=on cache=on costs=on ratelimit=OFF quota=OFF screening=on framing=on tracing=on fsync=on probing=on`.
 <!-- load:end -->
+
+From 20 to 50 agents, throughput rises 39% while the time to serve a call
+rises about sevenfold, so the gateway saturates in between. Calls that write
+an audit record slow down together; listings, which write none, barely move.
+That points at the audit writer, which syncs every entry to disk one at a time
+([ADR 0053](docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md)).
+It is a reading of these numbers, not yet a measurement: the same run with
+`fsync` off would confirm or refute it.
 
 Every number above comes from a harness in this repository, and two of them
 gate CI: the firewall cannot get worse on the internal corpus or on InjecAgent
@@ -292,7 +300,7 @@ In this order, because the first one changes what the project is evidence of:
 | 1–4 · Foundation, identity, policy, budgets | **complete** | Resilient passthrough, delegated auth with scoped token exchange, deny-by-default argument-level policy, quotas and per-principal caching |
 | 5–7 · Firewall, approvals, audit | **complete** | Detectors and corpora, human-in-the-loop on a separate listener, hash-chained audit log, multi-tenancy, threat model |
 | 8–9 · Performance, demo | **complete** | Load harness and published overhead, live console, scripted attack demo |
-| 10 · Release | **v1.3.1 released** | Published to ghcr; machine-checked release surface |
+| 10 · Release | **v2.0.0 released** | Published to ghcr; machine-checked release surface |
 | 11 · External evaluation | **complete** | InjecAgent, two held-out splits scored once, text detectors vs policy measured |
 
 ## License

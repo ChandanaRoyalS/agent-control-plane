@@ -116,6 +116,7 @@ If you have ten minutes and want the ones that carry the most weight:
 | [0073](0073-a-model-decides-the-calls.md) | a local model served by Ollama drives the demo agent over seeded trials on each path, every transcript is committed, and the README quotes the newest record |
 | [0074](0074-the-classifiers-data-before-the-classifier.md) | the learned classifier's data comes first: BIPIA imported with its test split sealed, an evasion corpus of seven disguises built from it (W9), stdlib docstrings as benign training text, and splits by group with a leakage test over every set |
 | [0075](0075-a-learned-classifier-measured-once.md) | a linear classifier over character n-grams, trained and thresholded on validation only and scored once on the sealed sets: 64% of BIPIA's held-out attacks at an enforce threshold (patterns: 0% withheld), 2% of clean contexts flagged, and character-level disguises defeat it |
+| [0076](0076-the-learned-classifier-withholds-only-by-choice.md) | the learned classifier runs in report mode by default and withholds only when `ACP_FIREWALL_LEARNED` and `ACP_FIREWALL_MODE` are both `enforce`: it misses ADR 0039's zero-benign bar (2% of clean BIPIA), so withholding is an operator's measured choice, not a default |
 
 ## Approvals, audit, tenancy
 

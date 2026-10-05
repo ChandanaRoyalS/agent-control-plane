@@ -29,7 +29,19 @@ without somebody accepting the change.
   weights and scored in pure Python. Scored once on the sealed sets: 64% of
   BIPIA's held-out attacks at its enforce threshold against 0% withheld by the
   patterns, with 2% of clean contexts flagged. CI refits it and fails if the
-  committed weights differ. Not yet on the request path.
+  committed weights differ.
+- `ACP_FIREWALL_LEARNED` (`off`, `report`, `enforce`; default `report`) puts
+  the learned classifier on the request path (ADR 0076). In `report` it logs a
+  `learned_classifier` finding, MEDIUM at its report threshold and HIGH where
+  `enforce` would withhold, and changes nothing a caller receives. It withholds
+  only when this and `ACP_FIREWALL_MODE` are both `enforce`. Tool descriptions
+  are not scored.
+
+### Changed
+
+- With the firewall on (the default, `report`), every tool result is now also
+  scored by the learned classifier: about 1 ms per thousand characters, on a
+  worker thread. `ACP_FIREWALL_LEARNED=off` restores the previous cost.
 
 ## [2.1.0] - 2026-10-05
 

@@ -13,7 +13,7 @@ import logging
 import secrets
 from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Final
 
@@ -29,6 +29,8 @@ from acp.firewall.catalogue import (
 )
 from acp.firewall.classifier import OllamaClassifier
 from acp.firewall.findings import Confidence, Family, Finding
+from acp.firewall.learned import DETECTOR_NAME as LEARNED_NAME
+from acp.firewall.learned import LearnedModel
 from acp.firewall.screen import MAX_SCREENED_CHARS, Screener, Screening, ScreenPolicy
 from acp.observability import metrics
 from acp.upstream.models import CallToolResult, ContentBlock, ToolDefinition
@@ -51,6 +53,23 @@ class Mode(StrEnum):
 
     ENFORCE = "enforce"
     """Withhold content that crosses the bar below."""
+
+
+class LearnedMode(StrEnum):
+    """What the learned classifier may do (ADR 0076); withholding also needs `Mode.ENFORCE`."""
+
+    OFF = "off"
+    """Not scored."""
+
+    REPORT = "report"
+    """Scored and logged: MEDIUM at the report threshold, HIGH at the enforce one.
+
+    Never a trigger, so a HIGH here counts what ``enforce`` would withhold
+    without ``would_refuse`` changing meaning.
+    """
+
+    ENFORCE = "enforce"
+    """A HIGH learned finding is a trigger, as an `ENFORCEABLE` detector's is."""
 
 
 ENFORCEABLE: Final = frozenset({"bidirectional_override", "encoded_payload"})
@@ -130,15 +149,19 @@ def truncation_trigger(screening: Screening) -> Finding:
     )
 
 
-def triggers_for(screening: Screening) -> tuple[Finding, ...]:
+def triggers_for(
+    screening: Screening, *, also: AbstractSet[str] = frozenset()
+) -> tuple[Finding, ...]:
     """The findings that justify withholding: HIGH from an `ENFORCEABLE` detector.
 
-    A truncated screening also adds `UNEXAMINED_TAIL` (ADR 0069).
+    ``also`` adds detectors a deployment opted into (only the learned classifier,
+    ADR 0076). A truncated screening also adds `UNEXAMINED_TAIL` (ADR 0069).
     """
+    enforceable = ENFORCEABLE | also
     found = tuple(
         finding
         for finding in screening.findings
-        if finding.confidence is Confidence.HIGH and finding.detector in ENFORCEABLE
+        if finding.confidence is Confidence.HIGH and finding.detector in enforceable
     )
     if screening.truncated:
         return (*found, truncation_trigger(screening))
@@ -195,11 +218,17 @@ class Firewall:
         allowed_hosts: AbstractSet[str] = frozenset(),
         max_chars: int = MAX_SCREENED_CHARS,
         classifier: OllamaClassifier | None = None,
+        learned: LearnedModel | None = None,
+        learned_enforces: bool = False,
     ) -> None:
         self._enforce = enforce
         self._allowed_hosts = frozenset(allowed_hosts)
         self._max_chars = max_chars
         self._classifier = classifier
+        self._learned = learned
+        self._also: frozenset[str] = (
+            frozenset({LEARNED_NAME}) if learned is not None and learned_enforces else frozenset()
+        )
 
     async def ainspect(
         self,
@@ -208,13 +237,14 @@ class Firewall:
         tool: str,
         tools: AbstractSet[str] = frozenset(),
     ) -> Inspection:
-        """`inspect`, on a limited worker thread when a classifier is attached.
+        """`inspect`, on a limited worker thread when a model is attached.
 
-        The classifier is a blocking HTTP call that would otherwise stall the loop
-        (the bug class of ADR 0053); without one, it runs inline. `inspect` stays
-        synchronous for the harness and tests.
+        The Ollama classifier is a blocking HTTP call and the learned one costs
+        about a millisecond per thousand characters; either would otherwise stall
+        the loop (the bug class of ADR 0053). Without one, it runs inline.
+        `inspect` stays synchronous for the harness and tests.
         """
-        if self._classifier is None:
+        if self._classifier is None and self._learned is None:
             return self.inspect(result, tool=tool, tools=tools)
         return await to_thread.run_sync(
             functools.partial(self.inspect, result, tool=tool, tools=tools),
@@ -238,10 +268,12 @@ class Firewall:
             classifier=self._classifier,
         )
         # Text blocks only; resource links are a known gap (ADR 0037).
-        screening = screener.screen_all(
-            [block.text for block in result.content if block.text is not None]
-        )
-        triggers = triggers_for(screening)
+        texts = [block.text for block in result.content if block.text is not None]
+        screening = screener.screen_all(texts)
+        learned = self._learned_finding(texts)
+        if learned is not None:
+            screening = replace(screening, findings=(*screening.findings, learned))
+        triggers = triggers_for(screening, also=self._also)
 
         if not (triggers and self._enforce):
             self._record(tool, screening, decision=_verdict(screening, triggers), triggers=triggers)
@@ -255,6 +287,28 @@ class Firewall:
             refused=True,
             incident=incident,
             triggers=triggers,
+        )
+
+    def _learned_finding(self, texts: Sequence[str]) -> Finding | None:
+        """The learned classifier's finding on the screened text, if it crosses a threshold.
+
+        Scores what the patterns saw (the first ``max_chars``); a longer result is
+        already a trigger. Its evidence is the score, never document text.
+        """
+        model = self._learned
+        if model is None or not texts:
+            return None
+        score = model.score("\n".join(texts)[: self._max_chars])
+        if score < model.threshold:
+            return None
+        return Finding(
+            detector=LEARNED_NAME,
+            family=Family.PLAIN_ASSERTION,
+            confidence=(Confidence.HIGH if score >= model.enforce_threshold else Confidence.MEDIUM),
+            evidence=(
+                f"score {score:.3f}; reports at {model.threshold:.3f}, "
+                f"withholds at {model.enforce_threshold:.3f}"
+            ),
         )
 
     # -- the catalogue -------------------------------------------------------
@@ -303,7 +357,11 @@ class Firewall:
         return CatalogueInspection(served=serve(inspections), inspections=inspections)
 
     async def ainspect_catalogue(self, tools: Sequence[ToolDefinition]) -> CatalogueInspection:
-        """`inspect_catalogue`, off the event loop when a model is attached (as `ainspect`)."""
+        """`inspect_catalogue`, off the event loop when Ollama is attached.
+
+        The learned classifier does not screen descriptions: it was never measured on
+        them (ADR 0076).
+        """
         if self._classifier is None:
             return self.inspect_catalogue(tools)
         return await to_thread.run_sync(
@@ -365,10 +423,19 @@ def firewall_for(
     *,
     allowed_hosts: AbstractSet[str] = frozenset(),
     classifier: OllamaClassifier | None = None,
+    learned: LearnedModel | None = None,
+    learned_mode: LearnedMode = LearnedMode.OFF,
 ) -> Firewall | None:
-    """The firewall for ``mode``, or ``None`` when off (zero request-path cost)."""
+    """The firewall for ``mode``, or ``None`` when off (zero request-path cost).
+
+    ``learned`` is attached unless ``learned_mode`` is off.
+    """
     if mode is Mode.OFF:
         return None
     return Firewall(
-        enforce=mode is Mode.ENFORCE, allowed_hosts=allowed_hosts, classifier=classifier
+        enforce=mode is Mode.ENFORCE,
+        allowed_hosts=allowed_hosts,
+        classifier=classifier,
+        learned=None if learned_mode is LearnedMode.OFF else learned,
+        learned_enforces=learned_mode is LearnedMode.ENFORCE,
     )

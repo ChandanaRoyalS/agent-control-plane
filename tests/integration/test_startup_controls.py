@@ -42,6 +42,11 @@ def test_the_banner_names_every_control() -> None:
 
     assert set(SAFETY_CONTROLS) <= set(states)
     assert {"rate_limit", "quota", "result_cache", "approval_store", "budget_store"} <= set(states)
+    assert states["firewall_learned"] == "report"
+
+
+def test_the_learned_classifier_is_off_when_the_firewall_is() -> None:
+    assert control_states(bare(firewall_mode=Mode.OFF))["firewall_learned"] == "off"
 
 
 def test_the_banner_warns_when_a_safety_control_is_off(caplog: pytest.LogCaptureFixture) -> None:

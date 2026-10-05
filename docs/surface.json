@@ -187,6 +187,11 @@
       "default": "5.0"
     },
     {
+      "variable": "ACP_FIREWALL_LEARNED",
+      "type": "LearnedMode(off|report|enforce)",
+      "default": "report"
+    },
+    {
       "variable": "ACP_FIREWALL_MODE",
       "type": "Mode(off|report|enforce)",
       "default": "report"

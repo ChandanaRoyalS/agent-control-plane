@@ -103,7 +103,7 @@ class ApprovalReader(Protocol):
     that both sides over-satisfy.
     """
 
-    def pending(self) -> tuple[ApprovalRequest, ...]:
+    async def pending(self) -> tuple[ApprovalRequest, ...]:
         """Everything still awaiting a person, oldest first."""
 
 
@@ -279,7 +279,9 @@ def build_pending(reader: ApprovalReader, auth: OperatorAuthenticator) -> Any:
         return JSONResponse(
             {
                 "pending": [
-                    as_view(held, now) for held in reader.pending() if operator.may_answer(held)
+                    as_view(held, now)
+                    for held in await reader.pending()
+                    if operator.may_answer(held)
                 ],
                 "operator": operator.subject,
                 "notice": UNTRUSTED_NOTICE,
@@ -423,7 +425,7 @@ def build_decide(
 
         token = request.path_params["token"]
         now = time.time()
-        held = store.get(token)
+        held = await store.get(token)
         refusal = _unanswerable(held, now)
         if refusal is None and held is not None and not operator.may_answer(held):
             # After `_unanswerable`, so an operator is told "no such request"
@@ -444,7 +446,7 @@ def build_decide(
                 status_code=503,
             )
 
-        decided = store.decide(token, approved=answer.approved, reason=answer.reason)
+        decided = await store.decide(token, approved=answer.approved, reason=answer.reason)
         if decided is None:  # pragma: no cover — the lookup above already found it
             return JSONResponse({"error": "no such request"}, status_code=404)
         return JSONResponse({**as_view(decided, now), "notice": UNTRUSTED_NOTICE})

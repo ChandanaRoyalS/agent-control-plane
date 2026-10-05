@@ -29,6 +29,7 @@ dependencies = [
     "uvicorn>=0.34",
     "pyjwt[crypto]>=2.10",
     "anyio>=4.14.2",
+    "redis>=5.2",
 ]
 
 [project.scripts]
@@ -44,6 +45,7 @@ dev = [
     "hypothesis>=6.123",
     "types-pyyaml>=6.0",
     "pre-commit>=4.0",
+    "fakeredis>=2.26",
 ]
 perf = [
     "locust>=2.46.3",

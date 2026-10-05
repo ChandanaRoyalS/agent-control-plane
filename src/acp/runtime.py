@@ -25,6 +25,7 @@ from typing import Any
 from starlette.applications import Starlette
 
 from acp.approvals import DEFAULT_TTL_SECONDS, ApprovalStore, InMemoryApprovalStore
+from acp.approvals.redis_store import RedisApprovalStore
 from acp.audit import AuditLog, FileAuditSink
 from acp.audit.chain import Entry
 from acp.budget import CostTable, QuotaCounter, RateLimiter, load_costs
@@ -391,9 +392,15 @@ def build_approval_store(
     held, nothing can ever answer it, and each caller waits out the TTL and is
     refused. That is a warning rather than a refusal to start, because a
     replicated deployment may legitimately answer approvals from a different
-    process against a shared store — a real configuration this project's
-    in-memory store cannot yet serve, and one that should not be pre-emptively
-    banned. What it must not be is quiet.
+    process against a shared store (`ACP_APPROVAL_STORE_URL`, ADR 0066). What
+    it must not be is quiet.
+
+    **Which store** is decided by that one setting: a Redis every replica
+    shares when it is set, this process's memory when it is not. The Redis
+    store is returned unpinged; `gateway_from_settings` pings it before it
+    serves, so that an unreachable store refuses to start rather than holding
+    calls nobody can answer. Tests of the assembly build the store without a
+    network.
     """
     if policy is None or not policy.gates_calls:
         return None
@@ -418,7 +425,10 @@ def build_approval_store(
         extra={
             "gated_rules": sorted(_gated_rule_names(policy)),
             "ttl_seconds": settings.approval_ttl_seconds,
-            "max_pending": settings.approval_max_pending,
+            "max_pending": None
+            if settings.approval_store_shared
+            else settings.approval_max_pending,
+            "store": "redis" if settings.approval_store_shared else "memory",
             "operator_channel": bool(
                 settings.approval_operator_token or settings.approval_operator_audience
             ),
@@ -439,6 +449,8 @@ def build_approval_store(
                 ),
             },
         )
+    if settings.approval_store_shared:
+        return RedisApprovalStore.from_url(settings.approval_store_url)
     return InMemoryApprovalStore(max_pending=settings.approval_max_pending)
 
 
@@ -971,6 +983,11 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     )
     firewall = build_firewall(settings)
     approvals = build_approval_store(settings, policy)
+    if isinstance(approvals, RedisApprovalStore):
+        # Fail at startup, where somebody is watching, not on the first gated
+        # call, where the caller would wait out a TTL for a decision that was
+        # never stored.
+        await approvals.ping()
     # The trace console's hub. Built unconditionally and cheap when nobody is
     # watching — an empty subscriber list and a 50-event ring. Whether the console is
     # *reachable* is decided by `console_routes`, which needs the operator
@@ -1019,6 +1036,8 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         # The key cache owns an HTTP connection pool, for the same reason the
         # upstream clients do and with the same consequence for leaking it.
         await store.aclose()
+        if isinstance(approvals, RedisApprovalStore):
+            await approvals.aclose()
         if exchanger is not None:
             await exchanger.aclose()
         if validator is not None:

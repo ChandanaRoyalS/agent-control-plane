@@ -25,11 +25,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from acp.approvals.operator import MIN_OPERATOR_TOKEN_LENGTH
 from acp.approvals.record import DEFAULT_TTL_SECONDS
+from acp.approvals.redis_store import APPROVAL_STORE_SCHEMES
 from acp.approvals.store import DEFAULT_MAX_PENDING
 from acp.exceptions import ConfigurationError
 from acp.firewall.decision import Mode as FirewallMode
@@ -187,6 +188,23 @@ class GatewaySettings(BaseSettings):
     gates a tool can start one request per call and is under no obligation to
     retry, so the bound turns "fill the gateway's memory" into "somebody has to
     ask again".
+    """
+
+    approval_store_url: str = ""
+    """Redis the held approvals live in, shared by every replica.
+
+    Empty keeps them in this process's memory, which is correct for exactly one
+    gateway: a second replica refuses a retry the first one was told to wait
+    for, and a restart forgets every pending decision (ADR 0066). Set it —
+    ``redis://``, ``rediss://`` or ``unix://`` — and the record a caller is
+    handed on one replica is the record an operator decides on another and the
+    one the retry spends on a third. The gateway refuses to start if the Redis
+    is unreachable, because a store that is configured and absent would hold
+    every gated call with nothing to hold it in. The URL may carry a password;
+    put it in the secret store like any other credential.
+
+    With a shared store ``approval_max_pending`` does not apply: the bound is
+    time, enforced by Redis as a TTL on each record, rather than a count.
     """
 
     health_probing_enabled: bool = True
@@ -595,6 +613,20 @@ class GatewaySettings(BaseSettings):
     @property
     def authentication_configured(self) -> bool:
         return bool(self.auth_issuers_file or (self.auth_issuer and self.auth_audience))
+
+    @property
+    def approval_store_shared(self) -> bool:
+        """Whether held approvals live in a store every replica can reach."""
+        return bool(self.approval_store_url)
+
+    @field_validator("approval_store_url")
+    @classmethod
+    def _approval_store_url_is_redis(cls, value: str) -> str:
+        if value and not value.startswith(APPROVAL_STORE_SCHEMES):
+            schemes = ", ".join(APPROVAL_STORE_SCHEMES)
+            msg = f"ACP_APPROVAL_STORE_URL must start with one of {schemes}"
+            raise ValueError(msg)
+        return value
 
     @property
     def secret_store_configured(self) -> bool:

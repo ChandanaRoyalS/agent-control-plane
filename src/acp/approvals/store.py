@@ -1,16 +1,18 @@
 """Where pending approvals live, behind a seam.
 
-**The honest cut, stated first.** The shipped store is in memory, per process —
-and unlike the rate limiter's identical cut (ADR 0032, ADR 0044), this one
-affects *correctness* rather than accuracy. A replicated gateway that answers
+**Two stores, one protocol.** The default is in memory, per process — correct
+for a single instance and nothing else: a replicated gateway that answers
 `input_required` from one instance and receives the retry on another cannot
 resolve the token, and the caller sees a refusal for a call a human approved.
+`acp.approvals.redis_store` is the shared one (ADR 0066), selected by
+`ACP_APPROVAL_STORE_URL`. `create`, `get`, `decide` and `consume` are the same
+four operations against a shared row, and nothing above this module knows where
+the record is.
 
-That is a real limitation and it is why `ApprovalStore` is a protocol with three
-methods and no assumptions about locality. The Redis or Postgres implementation
-is a class, not a redesign: `create`, `get`, `decide` and `consume` are the same
-four operations against a shared row. Nothing above this module knows where the
-record is.
+**The protocol is async because one of its implementations talks to a network.**
+The in-memory store never awaits anything; it carries the `async` so the request
+path has one call shape and a store that *does* block cannot be wired in by
+accident on the event loop (ADR 0053).
 
 **Why the state cannot live in the token instead.** A self-contained signed token
 would make the gateway genuinely stateless, and it is wrong. The approval
@@ -51,17 +53,25 @@ class ApprovalStore(Protocol):
     `decide` is the only way in, and it is called by the operator side.
     """
 
-    def create(self, request: ApprovalRequest) -> None:
+    async def create(self, request: ApprovalRequest) -> None:
         """Hold a new pending request."""
 
-    def get(self, token: str) -> ApprovalRequest | None:
+    async def get(self, token: str) -> ApprovalRequest | None:
         """The request for this token, or ``None`` if there is not one."""
 
-    def decide(self, token: str, *, approved: bool, reason: str = "") -> ApprovalRequest | None:
+    async def decide(
+        self, token: str, *, approved: bool, reason: str = ""
+    ) -> ApprovalRequest | None:
         """Record a human's answer. ``None`` if the token is unknown."""
 
-    def consume(self, token: str) -> None:
-        """Mark an approval spent. Called once, when the retry proceeds."""
+    async def consume(self, token: str) -> bool:
+        """Spend an approval. ``True`` if this call was the one that spent it.
+
+        Only an ``APPROVED`` record is spent, and only once: a store shared
+        between replicas can see two retries carrying the same approved token
+        at the same moment, and exactly one of them may proceed. The caller
+        that gets ``False`` refuses — the approval has already been used.
+        """
 
 
 class InMemoryApprovalStore:
@@ -94,7 +104,7 @@ class InMemoryApprovalStore:
         self._pending: dict[str, ApprovalRequest] = {}
         self._max_pending = max_pending
 
-    def create(self, request: ApprovalRequest) -> None:
+    async def create(self, request: ApprovalRequest) -> None:
         while len(self._pending) >= self._max_pending:
             self._pending.pop(self._victim(request))
         self._pending[request.token] = request
@@ -113,10 +123,12 @@ class InMemoryApprovalStore:
                     return request.token
         return next(iter(self._pending))
 
-    def get(self, token: str) -> ApprovalRequest | None:
+    async def get(self, token: str) -> ApprovalRequest | None:
         return self._pending.get(token)
 
-    def decide(self, token: str, *, approved: bool, reason: str = "") -> ApprovalRequest | None:
+    async def decide(
+        self, token: str, *, approved: bool, reason: str = ""
+    ) -> ApprovalRequest | None:
         held = self._pending.get(token)
         if held is None:
             return None
@@ -130,15 +142,17 @@ class InMemoryApprovalStore:
         self._pending[token] = decided
         return decided
 
-    def consume(self, token: str) -> None:
+    async def consume(self, token: str) -> bool:
         held = self._pending.get(token)
-        if held is not None:
-            self._pending[token] = held.consumed()
+        if held is None or held.state is not State.APPROVED:
+            return False
+        self._pending[token] = held.consumed()
+        return True
 
     def __len__(self) -> int:
         return len(self._pending)
 
-    def pending(self) -> tuple[ApprovalRequest, ...]:
+    async def pending(self) -> tuple[ApprovalRequest, ...]:
         """Everything still awaiting a person, oldest first.
 
         For the operator side and for tests. Not part of the protocol:

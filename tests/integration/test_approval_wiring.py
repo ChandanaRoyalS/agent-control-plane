@@ -21,16 +21,20 @@ it" and "five minutes because nothing read what I set" is the whole control.
 from __future__ import annotations
 
 import logging
+from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any
 
 import anyio
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from acp.admin import build_admin_app
 from acp.approvals import APPROVALS_PATH, InMemoryApprovalStore, request_for
+from acp.approvals.redis_store import RedisApprovalStore
 from acp.config import GatewaySettings
+from acp.exceptions import ConfigurationError
 from acp.policy import Effect, Policy, Rule
 from acp.runtime import build_approval_store, gateway_from_settings
 
@@ -76,6 +80,7 @@ def settings_for(
     approval_operator_token: str = "",
     approval_ttl_seconds: float = 300.0,
     approval_max_pending: int = 256,
+    approval_store_url: str = "",
 ) -> GatewaySettings:
     """Settings with the approval fields named explicitly.
 
@@ -96,8 +101,15 @@ def settings_for(
         approval_operator_token=approval_operator_token,
         approval_ttl_seconds=approval_ttl_seconds,
         approval_max_pending=approval_max_pending,
+        approval_store_url=approval_store_url,
         **extra,
     )
+
+
+def run_sync[T](coro: Coroutine[Any, Any, T]) -> T:
+    """Drive one store call from a synchronous test that already owns its own
+    `anyio.run` for the gateway round-trip; two event loops cannot nest."""
+    return anyio.run(lambda: coro)
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +133,7 @@ def test_a_policy_that_gates_a_call_builds_a_store() -> None:
     assert store is not None
 
 
-def test_the_configured_bound_reaches_the_store() -> None:
+async def test_the_configured_bound_reaches_the_store() -> None:
     """The bound is a security limit before a memory one — a caller whose policy
     gates a tool can start one held request per call and never retry."""
     store = build_approval_store(
@@ -140,9 +152,77 @@ def test_the_configured_bound_reaches_the_store() -> None:
             now=float(index),
         )
         assert request is not None
-        store.create(request)
+        await store.create(request)
 
-    assert len(store.pending()) == 2
+    assert len(await store.pending()) == 2
+
+
+# ---------------------------------------------------------------------------
+# Which store: one setting, presence-based (ADR 0066)
+# ---------------------------------------------------------------------------
+
+
+def test_no_store_url_means_this_processs_memory() -> None:
+    store = build_approval_store(settings_for(approval_operator_token=CREDENTIAL), GATED)
+
+    assert isinstance(store, InMemoryApprovalStore)
+
+
+def test_a_store_url_means_the_shared_store() -> None:
+    """Built, not yet pinged — the ping is `gateway_from_settings`' job, so
+    that the assembly can be asserted without a Redis to reach."""
+    store = build_approval_store(
+        settings_for(approval_operator_token=CREDENTIAL, approval_store_url="redis://redis.test/0"),
+        GATED,
+    )
+
+    assert isinstance(store, RedisApprovalStore)
+
+
+def test_the_store_url_must_be_a_redis_url() -> None:
+    """A typo here is a gateway that holds every gated call in nothing. Refused
+    at load, where the message names the setting, rather than at the first
+    connection attempt."""
+    with pytest.raises(ValidationError, match="ACP_APPROVAL_STORE_URL"):
+        settings_for(approval_store_url="postgres://db.test/approvals")
+
+
+def test_the_startup_line_names_the_store(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.INFO, logger="acp.runtime"):
+        build_approval_store(
+            settings_for(
+                approval_operator_token=CREDENTIAL, approval_store_url="redis://redis.test/0"
+            ),
+            GATED,
+        )
+
+    [enabled] = [r for r in caplog.records if r.message == "approval.enabled"]
+    assert getattr(enabled, "store", None) == "redis"
+    assert getattr(enabled, "max_pending", 0) is None, "the count bound does not apply"
+
+
+def test_an_unreachable_shared_store_refuses_to_start(tmp_path: Path) -> None:
+    """The failure happens at startup, where somebody is watching, and names
+    the store — not on the first gated call, where the caller would wait out
+    a TTL for a decision that was never held anywhere."""
+    policy_file = tmp_path / "policy.yaml"
+    policy_file.write_text(GATED_YAML)
+    upstreams_file = tmp_path / "upstreams.yaml"
+    upstreams_file.write_text(UPSTREAMS_YAML)
+    settings = settings_for(
+        policy_file=policy_file,
+        upstreams_file=upstreams_file,
+        approval_operator_token=CREDENTIAL,
+        # A port nothing listens on; the client fails fast rather than hanging.
+        approval_store_url="redis://127.0.0.1:1/0",
+    )
+
+    async def _run() -> None:
+        async with gateway_from_settings(settings):
+            pass  # pragma: no cover - never reached
+
+    with pytest.raises(ConfigurationError, match="approval store"):
+        anyio.run(_run)
 
 
 # ---------------------------------------------------------------------------
@@ -272,5 +352,5 @@ def test_the_configured_ttl_is_the_ttl_the_caller_gets(keypair: Keypair) -> None
 
     anyio.run(_run)
 
-    held = store.pending()[0]
+    held = (run_sync(store.pending()))[0]
     assert held.expires_at - held.created_at == pytest.approx(12.0)

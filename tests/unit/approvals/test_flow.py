@@ -58,13 +58,13 @@ def a_request(
     return request
 
 
-def held(store: InMemoryApprovalStore, **kwargs: Any) -> ApprovalRequest:
+async def held(store: InMemoryApprovalStore, **kwargs: Any) -> ApprovalRequest:
     request = a_request(**kwargs)
-    store.create(request)
+    await store.create(request)
     return request
 
 
-def retry(
+async def retry(
     store: InMemoryApprovalStore,
     token: str | None,
     *,
@@ -74,7 +74,7 @@ def retry(
     arguments: dict[str, Any] | None = None,
     now: float = NOW + 1.0,
 ) -> Any:
-    return resolve(
+    return await resolve(
         store,
         token,
         tenant=None,
@@ -91,28 +91,28 @@ def retry(
 # ---------------------------------------------------------------------------
 
 
-def test_an_approved_call_proceeds() -> None:
+async def test_an_approved_call_proceeds() -> None:
     store = a_store()
-    request = held(store)
-    store.decide(request.token, approved=True)
+    request = await held(store)
+    await store.decide(request.token, approved=True)
 
-    resolution = retry(store, request.token)
+    resolution = await retry(store, request.token)
 
     assert resolution.outcome is Outcome.PROCEED
     assert resolution.proceed
 
 
-def test_a_pending_call_waits_rather_than_being_refused() -> None:
+async def test_a_pending_call_waits_rather_than_being_refused() -> None:
     """The only outcome that is not a refusal. Nothing changes: the caller is
     told to come back with the same token."""
     store = a_store()
-    request = held(store)
+    request = await held(store)
 
-    resolution = retry(store, request.token)
+    resolution = await retry(store, request.token)
 
     assert resolution.outcome is Outcome.WAIT
-    assert store.get(request.token) is not None
-    assert store.get(request.token).state is State.PENDING  # type: ignore[union-attr]
+    assert await store.get(request.token) is not None
+    assert (await store.get(request.token)).state is State.PENDING  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ def test_a_pending_call_waits_rather_than_being_refused() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_an_approval_does_not_authorise_a_different_call() -> None:
+async def test_an_approval_does_not_authorise_a_different_call() -> None:
     """**The attack the fingerprint exists to stop.**
 
     A human reads "delete test-1" and approves it. The agent retries the same
@@ -128,61 +128,63 @@ def test_an_approval_does_not_authorise_a_different_call() -> None:
     would execute it, and every other test in this file would still pass.
     """
     store = a_store()
-    request = held(store, arguments={"record_id": "test-1", "hard": False})
-    store.decide(request.token, approved=True)
+    request = await held(store, arguments={"record_id": "test-1", "hard": False})
+    await store.decide(request.token, approved=True)
 
-    resolution = retry(store, request.token, arguments={"record_id": "production", "hard": True})
+    resolution = await retry(
+        store, request.token, arguments={"record_id": "production", "hard": True}
+    )
 
     assert resolution.outcome is Outcome.REFUSE
     assert "does not match" in resolution.reason
 
 
-def test_changing_one_argument_is_enough_to_break_the_binding() -> None:
+async def test_changing_one_argument_is_enough_to_break_the_binding() -> None:
     """Not just a different record — a different *anything*. The approval is for
     the call the operator read, down to the last argument."""
     store = a_store()
-    request = held(store, arguments={"record_id": "test-1", "hard": False})
-    store.decide(request.token, approved=True)
+    request = await held(store, arguments={"record_id": "test-1", "hard": False})
+    await store.decide(request.token, approved=True)
 
-    resolution = retry(store, request.token, arguments={"record_id": "test-1", "hard": True})
+    resolution = await retry(store, request.token, arguments={"record_id": "test-1", "hard": True})
 
     assert resolution.outcome is Outcome.REFUSE
 
 
-def test_the_same_call_written_differently_still_matches() -> None:
+async def test_the_same_call_written_differently_still_matches() -> None:
     """Canonicalised, so key order is not a re-ask. A false *mismatch* is a
     nuisance rather than a hole, but a flow that re-asks at random is one people
     route around."""
     store = a_store()
-    request = held(store, arguments={"record_id": "test-1", "hard": False})
-    store.decide(request.token, approved=True)
+    request = await held(store, arguments={"record_id": "test-1", "hard": False})
+    await store.decide(request.token, approved=True)
 
-    resolution = retry(store, request.token, arguments={"hard": False, "record_id": "test-1"})
+    resolution = await retry(store, request.token, arguments={"hard": False, "record_id": "test-1"})
 
     assert resolution.outcome is Outcome.PROCEED
 
 
-def test_an_approval_is_not_transferable_between_callers() -> None:
+async def test_an_approval_is_not_transferable_between_callers() -> None:
     """Alice's approval, retried by bob. The subject is inside the fingerprint
     *and* checked explicitly — belt and braces, because this is the check that
     turns an approval into a bearer credential if it is missing."""
     store = a_store()
-    request = held(store)
-    store.decide(request.token, approved=True)
+    request = await held(store)
+    await store.decide(request.token, approved=True)
 
-    resolution = retry(store, request.token, subject="bob@example.test")
+    resolution = await retry(store, request.token, subject="bob@example.test")
 
     assert resolution.outcome is Outcome.REFUSE
 
 
-def test_a_different_acting_agent_breaks_the_binding() -> None:
+async def test_a_different_acting_agent_breaks_the_binding() -> None:
     """Both identities, per ADR 0015. Two agents acting for one person are not
     interchangeable — which is the entire reason this project carries an actor."""
     store = a_store()
-    request = held(store, actor="agent-support")
-    store.decide(request.token, approved=True)
+    request = await held(store, actor="agent-support")
+    await store.decide(request.token, approved=True)
 
-    resolution = retry(store, request.token, actor="agent-research")
+    resolution = await retry(store, request.token, actor="agent-research")
 
     assert resolution.outcome is Outcome.REFUSE
 
@@ -192,35 +194,35 @@ def test_a_different_acting_agent_breaks_the_binding() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_an_approval_expires_and_the_default_is_deny() -> None:
+async def test_an_approval_expires_and_the_default_is_deny() -> None:
     store = a_store()
-    request = held(store)
-    store.decide(request.token, approved=True)
+    request = await held(store)
+    await store.decide(request.token, approved=True)
 
-    resolution = retry(store, request.token, now=NOW + DEFAULT_TTL_SECONDS + 1)
+    resolution = await retry(store, request.token, now=NOW + DEFAULT_TTL_SECONDS + 1)
 
     assert resolution.outcome is Outcome.REFUSE
     assert "expired" in resolution.reason
 
 
-def test_expiry_is_checked_before_the_state_so_a_late_yes_does_not_count() -> None:
+async def test_expiry_is_checked_before_the_state_so_a_late_yes_does_not_count() -> None:
     """An operator who approves after the window has closed has approved
     nothing. Checked at resolution rather than by a sweeper, so the answer is
     right even when no background job ran."""
     store = a_store()
-    request = held(store)
+    request = await held(store)
     late = NOW + DEFAULT_TTL_SECONDS + 60
-    store.decide(request.token, approved=True)
+    await store.decide(request.token, approved=True)
 
-    assert retry(store, request.token, now=late).outcome is Outcome.REFUSE
+    assert (await retry(store, request.token, now=late)).outcome is Outcome.REFUSE
 
 
-def test_a_request_is_still_live_one_second_before_it_lapses() -> None:
+async def test_a_request_is_still_live_one_second_before_it_lapses() -> None:
     store = a_store()
-    request = held(store)
-    store.decide(request.token, approved=True)
+    request = await held(store)
+    await store.decide(request.token, approved=True)
 
-    resolution = retry(store, request.token, now=NOW + DEFAULT_TTL_SECONDS - 1)
+    resolution = await retry(store, request.token, now=NOW + DEFAULT_TTL_SECONDS - 1)
 
     assert resolution.outcome is Outcome.PROCEED
 
@@ -230,62 +232,83 @@ def test_a_request_is_still_live_one_second_before_it_lapses() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_no_token_is_a_refusal() -> None:
-    assert retry(a_store(), None).outcome is Outcome.REFUSE
-    assert retry(a_store(), "").outcome is Outcome.REFUSE
+async def test_no_token_is_a_refusal() -> None:
+    assert (await retry(a_store(), None)).outcome is Outcome.REFUSE
+    assert (await retry(a_store(), "")).outcome is Outcome.REFUSE
 
 
-def test_an_invented_token_is_a_refusal() -> None:
-    assert retry(a_store(), new_token()).outcome is Outcome.REFUSE
+async def test_an_invented_token_is_a_refusal() -> None:
+    assert (await retry(a_store(), new_token())).outcome is Outcome.REFUSE
 
 
-def test_a_denied_request_is_a_refusal() -> None:
+async def test_a_denied_request_is_a_refusal() -> None:
     store = a_store()
-    request = held(store)
-    store.decide(request.token, approved=False, reason="not this quarter")
+    request = await held(store)
+    await store.decide(request.token, approved=False, reason="not this quarter")
 
-    resolution = retry(store, request.token)
+    resolution = await retry(store, request.token)
 
     assert resolution.outcome is Outcome.REFUSE
     assert "refused" in resolution.reason
 
 
-def test_an_approval_is_single_use() -> None:
+async def test_an_approval_is_single_use() -> None:
     """One approval, one call. Without this, a human's yes to one delete is a
     yes to every delete until the token lapses."""
     store = a_store()
-    request = held(store)
-    store.decide(request.token, approved=True)
+    request = await held(store)
+    await store.decide(request.token, approved=True)
 
-    assert retry(store, request.token).outcome is Outcome.PROCEED
-    assert retry(store, request.token).outcome is Outcome.REFUSE
+    assert (await retry(store, request.token)).outcome is Outcome.PROCEED
+    assert (await retry(store, request.token)).outcome is Outcome.REFUSE
 
 
-def test_the_token_is_spent_by_resolve_not_by_the_caller() -> None:
+async def test_the_token_is_spent_by_resolve_not_by_the_caller() -> None:
     """Consumed inside `resolve`, because a caller that has to remember to spend
     it is one that eventually does not — and that failure is silent."""
     store = a_store()
-    request = held(store)
-    store.decide(request.token, approved=True)
+    request = await held(store)
+    await store.decide(request.token, approved=True)
 
-    retry(store, request.token)
+    await retry(store, request.token)
 
-    assert store.get(request.token).state is State.CONSUMED  # type: ignore[union-attr]
+    assert (await store.get(request.token)).state is State.CONSUMED  # type: ignore[union-attr]
 
 
-def test_a_refusal_never_names_which_of_the_seven_it_was_to_the_caller() -> None:
+async def test_a_retry_that_loses_the_race_to_spend_is_refused() -> None:
+    """Two retries carry the same approved token, on two replicas of a shared
+    store. Both read APPROVED. Only one `consume` succeeds, and the other is a
+    refusal — not a second PROCEED on the strength of a stale read."""
+
+    class SpentUnderneath(InMemoryApprovalStore):
+        async def consume(self, token: str) -> bool:
+            # Somebody else spent it between our read and our write.
+            await InMemoryApprovalStore.consume(self, token)
+            return False
+
+    store = SpentUnderneath()
+    request = await held(store)
+    await store.decide(request.token, approved=True)
+
+    result = await retry(store, request.token)
+
+    assert result.outcome is Outcome.REFUSE
+    assert result.reason == "approval already used"
+
+
+async def test_a_refusal_never_names_which_of_the_seven_it_was_to_the_caller() -> None:
     """The reason is on the `Resolution`, for the log. What reaches the caller is
     decided by the request path, and there is nothing here it could leak by
     accident — every refusal is the same `Outcome`."""
     store = a_store()
-    request = held(store)
-    store.decide(request.token, approved=False)
+    request = await held(store)
+    await store.decide(request.token, approved=False)
 
     outcomes = {
-        retry(store, None).outcome,
-        retry(store, new_token()).outcome,
-        retry(store, request.token).outcome,
-        retry(store, request.token, subject="bob").outcome,
+        (await retry(store, None)).outcome,
+        (await retry(store, new_token())).outcome,
+        (await retry(store, request.token)).outcome,
+        (await retry(store, request.token, subject="bob")).outcome,
     }
 
     assert outcomes == {Outcome.REFUSE}
@@ -359,7 +382,7 @@ def test_no_tenant_is_not_the_same_as_any_tenant() -> None:
     ) != fingerprint(tenant="", subject=SUBJECT, actor=ACTOR, tool=TOOL, arguments={})
 
 
-def test_an_approval_from_another_tenant_is_refused_by_name() -> None:
+async def test_an_approval_from_another_tenant_is_refused_by_name() -> None:
     """One tenant's operator says yes; the identical call arrives from the
     other tenant's alice wearing the token. Refused on the tenant check —
     before the fingerprint comparison would also catch it, because an
@@ -375,10 +398,10 @@ def test_an_approval_from_another_tenant_is_refused_by_name() -> None:
         now=NOW,
     )
     assert request is not None
-    store.create(request)
-    store.decide(request.token, approved=True)
+    await store.create(request)
+    await store.decide(request.token, approved=True)
 
-    resolution = resolve(
+    resolution = await resolve(
         store,
         request.token,
         tenant="globex",
@@ -393,7 +416,7 @@ def test_an_approval_from_another_tenant_is_refused_by_name() -> None:
 
     # And the approval was NOT consumed by the failed attempt: the tenant it
     # belongs to can still spend it.
-    honest = resolve(
+    honest = await resolve(
         store,
         request.token,
         tenant="acme",

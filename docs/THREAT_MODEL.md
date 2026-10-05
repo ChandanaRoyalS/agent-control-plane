@@ -358,10 +358,17 @@ of findings, not of screenings.
 
 ### 6.5 In-memory state: two different severities
 
-- **The approval store** is per process. Unlike the rate limiter's identical
-  cut, this one affects **correctness**: a replicated deployment where the
-  retry lands on a different process cannot resolve the approval. A restart
-  drops every pending approval.
+- **The approval store is per process by default.** Unlike the rate limiter's
+  identical cut, this one affects **correctness**: a replicated deployment
+  where the retry lands on a different process cannot resolve the approval,
+  and a restart drops every pending one. Setting `ACP_APPROVAL_STORE_URL`
+  closes it (ADR 0066): every replica holds, decides and spends the same
+  record in Redis, an approved token is spent exactly once however many
+  retries carry it, and the gateway refuses to start if the store is
+  unreachable. What remains is the default — a deployment that scales out
+  without setting it has the bug this item always described — and the Redis
+  itself, which is now part of the trust base: whoever can write to it can
+  write an `APPROVED` record.
 - **The audit chain is one file per process.** A replicated fleet writes
   several independent chains with no global ordering between them.
 

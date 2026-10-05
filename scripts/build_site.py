@@ -270,8 +270,9 @@ def subsystems() -> str:
             [
                 "An approval is granted to a call, fingerprinted, not to a token",
                 "Answered on the admin listener, and that placement is the control",
+                "Held in Redis when replicated, and spent exactly once",
             ],
-            [48, 49],
+            [48, 49, 66],
         ),
         (
             "Audit",

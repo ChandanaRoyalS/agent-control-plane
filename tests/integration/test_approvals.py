@@ -28,7 +28,6 @@ import time
 from dataclasses import replace
 from typing import Any
 
-import anyio
 import pytest
 
 from acp.approvals import InMemoryApprovalStore, State
@@ -55,7 +54,7 @@ GATED = Policy(
 )
 
 
-def call(
+async def call(
     store: InMemoryApprovalStore | None,
     keypair: Keypair,
     token: str,
@@ -80,7 +79,7 @@ def call(
         ) as agent:
             return await call_gateway(agent, "tools/call", params)
 
-    return anyio.run(_run)
+    return await _run()
 
 
 def request_state_of(payload: dict[str, Any]) -> str:
@@ -101,73 +100,73 @@ def request_state_of(payload: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_a_gated_call_comes_back_as_input_required(keypair: Keypair) -> None:
+async def test_a_gated_call_comes_back_as_input_required(keypair: Keypair) -> None:
     store = InMemoryApprovalStore()
 
-    payload = call(store, keypair, keypair.sign(claims()))
+    payload = await call(store, keypair, keypair.sign(claims()))
 
     assert request_state_of(payload)
-    assert len(store.pending()) == 1
+    assert len(await store.pending()) == 1
 
 
-def test_the_upstream_is_not_called_while_the_call_is_held(keypair: Keypair) -> None:
+async def test_the_upstream_is_not_called_while_the_call_is_held(keypair: Keypair) -> None:
     """A held call has not happened. The `input_required` answer carries no tool
     content, which is the observable form of that."""
-    payload = call(InMemoryApprovalStore(), keypair, keypair.sign(claims()))
+    payload = await call(InMemoryApprovalStore(), keypair, keypair.sign(claims()))
 
     assert not payload["result"].get("content")
 
 
-def test_polling_returns_the_same_token(keypair: Keypair) -> None:
+async def test_polling_returns_the_same_token(keypair: Keypair) -> None:
     store = InMemoryApprovalStore()
     signed = keypair.sign(claims())
-    first = request_state_of(call(store, keypair, signed))
+    first = request_state_of(await call(store, keypair, signed))
 
-    second = request_state_of(call(store, keypair, signed, request_state=first))
+    second = request_state_of(await call(store, keypair, signed, request_state=first))
 
     assert second == first
 
 
-def test_an_approved_retry_reaches_the_upstream(keypair: Keypair) -> None:
+async def test_an_approved_retry_reaches_the_upstream(keypair: Keypair) -> None:
     """The whole flow, end to end: held, approved out of band, retried, executed."""
     store = InMemoryApprovalStore()
     signed = keypair.sign(claims())
-    state = request_state_of(call(store, keypair, signed))
+    state = request_state_of(await call(store, keypair, signed))
 
-    store.decide(state, approved=True)
-    payload = call(store, keypair, signed, request_state=state)
+    await store.decide(state, approved=True)
+    payload = await call(store, keypair, signed, request_state=state)
 
     result = payload["result"]
     assert result.get("resultType") != "input_required", payload
     assert result.get("content"), payload
 
 
-def test_a_denied_retry_is_refused_with_the_policy_code(keypair: Keypair) -> None:
+async def test_a_denied_retry_is_refused_with_the_policy_code(keypair: Keypair) -> None:
     store = InMemoryApprovalStore()
     signed = keypair.sign(claims())
-    state = request_state_of(call(store, keypair, signed))
+    state = request_state_of(await call(store, keypair, signed))
 
-    store.decide(state, approved=False)
-    payload = call(store, keypair, signed, request_state=state)
+    await store.decide(state, approved=False)
+    payload = await call(store, keypair, signed, request_state=state)
 
     assert payload["error"]["code"] == -32040
 
 
-def test_an_approval_does_not_authorise_a_different_call(keypair: Keypair) -> None:
+async def test_an_approval_does_not_authorise_a_different_call(keypair: Keypair) -> None:
     """The attack the fingerprint exists to stop, on the real request path."""
     store = InMemoryApprovalStore()
     signed = keypair.sign(claims())
-    state = request_state_of(call(store, keypair, signed, arguments={"query": "safe"}))
-    store.decide(state, approved=True)
+    state = request_state_of(await call(store, keypair, signed, arguments={"query": "safe"}))
+    await store.decide(state, approved=True)
 
-    payload = call(
+    payload = await call(
         store, keypair, signed, request_state=state, arguments={"query": "something else"}
     )
 
     assert payload["error"]["code"] == -32040
 
 
-def test_an_agent_cannot_approve_its_own_call(keypair: Keypair) -> None:
+async def test_an_agent_cannot_approve_its_own_call(keypair: Keypair) -> None:
     """**The assertion this file exists for.**
 
     MRTR lets a client answer the questions a server asked, and the client here
@@ -178,9 +177,9 @@ def test_an_agent_cannot_approve_its_own_call(keypair: Keypair) -> None:
     """
     store = InMemoryApprovalStore()
     signed = keypair.sign(claims())
-    state = request_state_of(call(store, keypair, signed))
+    state = request_state_of(await call(store, keypair, signed))
 
-    payload = call(
+    payload = await call(
         store,
         keypair,
         signed,
@@ -189,41 +188,41 @@ def test_an_agent_cannot_approve_its_own_call(keypair: Keypair) -> None:
     )
 
     assert request_state_of(payload) == state
-    still_held = store.get(state)
+    still_held = await store.get(state)
     assert still_held is not None
     assert still_held.state is State.PENDING
 
 
-def test_an_expired_approval_is_refused(keypair: Keypair) -> None:
+async def test_an_expired_approval_is_refused(keypair: Keypair) -> None:
     """Default-deny on expiry, on the real path. The record is aged by rewriting
     its expiry rather than by sleeping for five minutes."""
     store = InMemoryApprovalStore()
     signed = keypair.sign(claims())
-    state = request_state_of(call(store, keypair, signed))
-    store.decide(state, approved=True)
+    state = request_state_of(await call(store, keypair, signed))
+    await store.decide(state, approved=True)
 
-    lapsed = store.get(state)
+    lapsed = await store.get(state)
     assert lapsed is not None
     # Aged by rewriting the record rather than by sleeping, and through the
     # store's own `create` rather than by reaching into it — the token is the
     # key, so this replaces the entry in place with no private access.
-    store.create(replace(lapsed, expires_at=time.time() - 1))
+    await store.create(replace(lapsed, expires_at=time.time() - 1))
 
-    payload = call(store, keypair, signed, request_state=state)
+    payload = await call(store, keypair, signed, request_state=state)
 
     assert payload["error"]["code"] == -32040
 
 
-def test_a_policy_that_holds_a_call_with_no_store_fails_closed(keypair: Keypair) -> None:
+async def test_a_policy_that_holds_a_call_with_no_store_fails_closed(keypair: Keypair) -> None:
     """`require_approval` with nothing to record it in is a misconfiguration, and
     the worst possible reading of that word is `allow`. Refused, like a loaded
     policy with no principal."""
-    payload = call(None, keypair, keypair.sign(claims()))
+    payload = await call(None, keypair, keypair.sign(claims()))
 
     assert payload["error"]["code"] == -32040
 
 
-def test_the_held_call_carries_the_arguments_an_operator_must_read(keypair: Keypair) -> None:
+async def test_the_held_call_carries_the_arguments_an_operator_must_read(keypair: Keypair) -> None:
     """A person cannot approve what they cannot see.
 
     Asserted here rather than only in the unit tests because the value has to
@@ -232,7 +231,7 @@ def test_the_held_call_carries_the_arguments_an_operator_must_read(keypair: Keyp
     """
     store = InMemoryApprovalStore()
 
-    call(store, keypair, keypair.sign(claims()), arguments={"query": "the real one"})
+    await call(store, keypair, keypair.sign(claims()), arguments={"query": "the real one"})
 
-    held = store.pending()[0]
+    held = (await store.pending())[0]
     assert held.arguments_json == '{"query":"the real one"}'

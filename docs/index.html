@@ -246,8 +246,8 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
         <h3>Approvals</h3>
         <p class="claim">An agent cannot approve its own call because it cannot address
             the thing that approves calls.</p>
-        <ul><li>An approval is granted to a call, fingerprinted, not to a token</li><li>Answered on the admin listener, and that placement is the control</li></ul>
-        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0048-an-approval-is-for-a-call-not-a-token.md">0048</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md">0049</a></p>
+        <ul><li>An approval is granted to a call, fingerprinted, not to a token</li><li>Answered on the admin listener, and that placement is the control</li><li>Held in Redis when replicated, and spent exactly once</li></ul>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0048-an-approval-is-for-a-call-not-a-token.md">0048</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0049-the-operator-channel-is-not-the-agents-channel.md">0049</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0066-an-approval-is-a-fact-about-the-fleet.md">0066</a></p>
       </article>
       <article class="card">
         <h3>Audit</h3>
@@ -295,7 +295,7 @@ make audit-verify       # walk the chain it just wrote</pre>
 
 <footer>
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane">Repository</a> &middot;
-  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/README.md">65 architecture decisions</a> &middot;
+  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/README.md">66 architecture decisions</a> &middot;
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/THREAT_MODEL.md">Threat model</a> &middot;
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.2.0">v1.2.0</a>
   <p style="margin-top:10px;color:var(--faint)">This page is generated from files in the

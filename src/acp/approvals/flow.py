@@ -115,12 +115,13 @@ def _binding_failure(
 
 
 _STATE_REFUSALS = {
+    State.APPROVED: "approval already used",  # approved when read, spent before we could
     State.DENIED: "approval was refused",
     State.CONSUMED: "approval already used",
 }
 
 
-def resolve(
+async def resolve(
     store: ApprovalStore,
     token: str | None,
     *,
@@ -141,7 +142,7 @@ def resolve(
     if not token:
         return Resolution(Outcome.REFUSE, "no request_state supplied")
 
-    held = store.get(token)
+    held = await store.get(token)
     if held is None:
         return Resolution(Outcome.REFUSE, "unknown request_state")
 
@@ -153,11 +154,13 @@ def resolve(
 
     if held.state is State.PENDING:
         return Resolution(Outcome.WAIT, "awaiting a decision", held)
-    refusal = _STATE_REFUSALS.get(held.state)
-    if refusal is not None:
-        return Resolution(Outcome.REFUSE, refusal, held)
 
-    store.consume(token)
+    # Read as approved a moment ago and spent by somebody else since — a retry
+    # on another replica, or the same retry delivered twice — is refused the
+    # same way as a token that was already spent when we read it. One proceeds.
+    spent = held.state is State.APPROVED and await store.consume(token)
+    if not spent:
+        return Resolution(Outcome.REFUSE, _STATE_REFUSALS[held.state], held)
     return Resolution(Outcome.PROCEED, "approved", held)
 
 
@@ -191,7 +194,7 @@ class Gate:
     """
 
 
-def gate(
+async def gate(
     store: ApprovalStore,
     *,
     token: str | None,
@@ -217,7 +220,7 @@ def gate(
     eviction rather than the process.
     """
     if token:
-        resolution = resolve(
+        resolution = await resolve(
             store,
             token,
             tenant=tenant,
@@ -249,5 +252,5 @@ def gate(
         # Unfingerprintable arguments. Refused rather than held, because an
         # approval that cannot be bound to a call is an approval for anything.
         return Gate(Outcome.REFUSE, "call cannot be fingerprinted")
-    store.create(request)
+    await store.create(request)
     return Gate(Outcome.WAIT, "approval requested", request.token, request.expires_at)

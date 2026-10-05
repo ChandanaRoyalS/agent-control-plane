@@ -15,10 +15,25 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-05
+
 Item 5 of the external review. The official MCP Python client now drives
 the gateway in the test suite, and its first run found three defects that
 2,212 tests had not ([ADR 0072](docs/decisions/0072-a-real-client-reads-the-refusal.md)).
-And a local model can now be the demo's agent instead of a parser.
+And a local model can now be the demo's agent instead of a parser
+([ADR 0073](docs/decisions/0073-a-model-decides-the-calls.md)). With
+qwen2.5:7b over ten seeded trials per path, the injected runbook got the
+compensation table into a created ticket in 2 trials directly and in none
+through the gateway, where every ticket the model attempted was held for a
+person. The read itself was allowed on both paths: the compose policy permits
+it. llama3.2 never got past the first call on either path; in 17 of 20 trials
+it described the attack's calls in its answer without making them.
+
+**Minor** under ADR 0058: one new error code and one new verdict column, no
+setting changed. Two behaviours a client can see did change, both toward what
+the documentation already said: a tool with an argument-scoped rule now
+appears in `tools/list`, and a pre-dispatch 403 now carries a JSON-RPC error
+body instead of `{"error": "forbidden"}`. The status code is unchanged.
 
 ### Added
 
@@ -38,6 +53,10 @@ And a local model can now be the demo's agent instead of a parser.
   model writes into its prose as JSON are read and marked; a trial that
   names the payroll file without calling for it is counted as *described
   only*; and records are kept per model.
+- The first two model records: llama3.2 and qwen2.5:7b, ten seeded trials per
+  path each, under `docs/demo/model/`. `--rejudge WHY` recomputes recorded
+  verdicts from their transcripts after a definition changes, notes the
+  reason in the record and the README, and refuses to drop a recorded leak.
 
 ### Fixed
 
@@ -56,6 +75,11 @@ And a local model can now be the demo's agent instead of a parser.
   front of an `allow`). Calls to it were still served; agents could not find
   it. Visibility now asks the same "could any arguments permit this"
   question as the pre-dispatch check.
+- The model demo's leak markers matched case-sensitively, so a held ticket
+  titled "Compensation Review 2026" counted as the model stopping, not the
+  gateway. Matching is now case-insensitive; the two committed records were
+  re-judged from their transcripts (one gateway trial moved from *model
+  stopped* to *held for approval*), and both say so.
 
 ## [2.0.0] - 2026-10-05
 
@@ -567,7 +591,8 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.1.0
 [2.0.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.0.0
 [1.3.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.3.1
 [1.3.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.3.0

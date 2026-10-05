@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install check fmt lint types test cov clean image up down logs smoke \
-        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check eval-descriptions eval-external eval-actions eval-hf-detector eval-classifier load-record \
+        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check eval-descriptions eval-external eval-actions eval-hf-detector eval-classifier train eval-learned load-record \
         attack-demo attack-demo-enforce model-demo model-demo-record
 
 help:  ## Show this help
@@ -208,6 +208,12 @@ eval:  ## Measure the firewall: false positives first, then recall and precision
 
 eval-check:  ## Fail if any measured count got worse than corpus/eval-baseline.json
 	uv run python scripts/evaluate.py --check
+
+train:  ## Refit the learned classifier from the committed corpora (ADR 0075)
+	uv run python scripts/train_classifier.py
+
+eval-learned:  ## The learned classifier beside the patterns, on validation and report-only sets
+	uv run python scripts/evaluate_learned.py
 
 eval-descriptions:  ## Screen 1,102 benign tool descriptions nobody here wrote (ADR 0065)
 	uv run python scripts/evaluate_descriptions.py

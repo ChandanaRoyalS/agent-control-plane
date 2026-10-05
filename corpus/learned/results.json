@@ -1,0 +1,573 @@
+{
+ "model": {
+  "C": 8.0,
+  "features": 193,
+  "window": 1500,
+  "stride": 1200,
+  "target_fpr": 0.01,
+  "validation": {
+   "recall": 0.9309,
+   "fpr": 0.0091
+  },
+  "validation_enforce": {
+   "recall": 0.874,
+   "fpr": 0.0
+  },
+  "train_documents": 2835,
+  "validation_documents": 574,
+  "train_digest": "2d17f6574523a4fd237084cdd29ef3586c17769bcbd5e5d12cd6eeb156876647",
+  "validation_digest": "0dcfa8ea1fddfcb97423825a944b7221adb53de8f36ace7fe022e6760e7fc31e",
+  "sklearn": "1.9.1"
+ },
+ "threshold": 0.46409772,
+ "enforce_threshold": 0.77619998,
+ "open": [
+  {
+   "set": "validation/injecagent",
+   "kind": "attacks",
+   "learned": {
+    "hits": 170,
+    "total": 170,
+    "rate": 1.0,
+    "low": null,
+    "high": null
+   },
+   "learned_enforce": {
+    "hits": 163,
+    "total": 170,
+    "rate": 0.9588,
+    "low": 0.9235,
+    "high": 0.9941
+   },
+   "patterns": {
+    "hits": 90,
+    "total": 170,
+    "rate": 0.5294,
+    "low": null,
+    "high": null
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 170,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "validation/injecagent",
+   "kind": "benign",
+   "learned": {
+    "hits": 1,
+    "total": 65,
+    "rate": 0.0154,
+    "low": 0.0,
+    "high": 0.0462
+   },
+   "learned_enforce": {
+    "hits": 0,
+    "total": 65,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   },
+   "patterns": {
+    "hits": 29,
+    "total": 65,
+    "rate": 0.4462,
+    "low": 0.3231,
+    "high": 0.5692
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 65,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "validation/bipia",
+   "kind": "attacks",
+   "learned": {
+    "hits": 59,
+    "total": 76,
+    "rate": 0.7763,
+    "low": 0.6053,
+    "high": 0.9211
+   },
+   "learned_enforce": {
+    "hits": 52,
+    "total": 76,
+    "rate": 0.6842,
+    "low": 0.5,
+    "high": 0.8553
+   },
+   "patterns": {
+    "hits": 12,
+    "total": 76,
+    "rate": 0.1579,
+    "low": 0.0,
+    "high": 0.3684
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 76,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "validation/bipia",
+   "kind": "benign",
+   "learned": {
+    "hits": 1,
+    "total": 126,
+    "rate": 0.0079,
+    "low": 0.0,
+    "high": 0.0238
+   },
+   "learned_enforce": {
+    "hits": 0,
+    "total": 126,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   },
+   "patterns": {
+    "hits": 2,
+    "total": 126,
+    "rate": 0.0159,
+    "low": 0.0,
+    "high": 0.0397
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 126,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "validation/stdlib",
+   "kind": "benign",
+   "learned": {
+    "hits": 1,
+    "total": 137,
+    "rate": 0.0073,
+    "low": 0.0,
+    "high": 0.0219
+   },
+   "learned_enforce": {
+    "hits": 0,
+    "total": 137,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   },
+   "patterns": {
+    "hits": 3,
+    "total": 137,
+    "rate": 0.0219,
+    "low": 0.0,
+    "high": 0.0511
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 137,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "internal_benign",
+   "kind": "benign",
+   "learned": {
+    "hits": 7,
+    "total": 106,
+    "rate": 0.066,
+    "low": 0.0189,
+    "high": 0.1132
+   },
+   "learned_enforce": {
+    "hits": 1,
+    "total": 106,
+    "rate": 0.0094,
+    "low": 0.0,
+    "high": 0.0283
+   },
+   "patterns": {
+    "hits": 23,
+    "total": 106,
+    "rate": 0.217,
+    "low": 0.1415,
+    "high": 0.2925
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 106,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "internal_attacks",
+   "kind": "attacks",
+   "learned": {
+    "hits": 5,
+    "total": 37,
+    "rate": 0.1351,
+    "low": 0.027,
+    "high": 0.2432
+   },
+   "learned_enforce": {
+    "hits": 3,
+    "total": 37,
+    "rate": 0.0811,
+    "low": 0.0,
+    "high": 0.1892
+   },
+   "patterns": {
+    "hits": 21,
+    "total": 37,
+    "rate": 0.5676,
+    "low": 0.4054,
+    "high": 0.7297
+   },
+   "withheld": {
+    "hits": 5,
+    "total": 37,
+    "rate": 0.1351,
+    "low": 0.0541,
+    "high": 0.2432
+   }
+  }
+ ],
+ "sealed": [
+  {
+   "set": "bipia_test",
+   "kind": "attacks",
+   "learned": {
+    "hits": 398,
+    "total": 500,
+    "rate": 0.796,
+    "low": 0.736,
+    "high": 0.852
+   },
+   "learned_enforce": {
+    "hits": 321,
+    "total": 500,
+    "rate": 0.642,
+    "low": 0.574,
+    "high": 0.708
+   },
+   "patterns": {
+    "hits": 97,
+    "total": 500,
+    "rate": 0.194,
+    "low": 0.128,
+    "high": 0.26
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 500,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "bipia_test",
+   "kind": "benign",
+   "learned": {
+    "hits": 16,
+    "total": 200,
+    "rate": 0.08,
+    "low": 0.045,
+    "high": 0.12
+   },
+   "learned_enforce": {
+    "hits": 4,
+    "total": 200,
+    "rate": 0.02,
+    "low": 0.005,
+    "high": 0.04
+   },
+   "patterns": {
+    "hits": 3,
+    "total": 200,
+    "rate": 0.015,
+    "low": 0.0,
+    "high": 0.035
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 200,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1",
+   "kind": "attacks",
+   "learned": {
+    "hits": 205,
+    "total": 500,
+    "rate": 0.41,
+    "low": 0.368,
+    "high": 0.448
+   },
+   "learned_enforce": {
+    "hits": 144,
+    "total": 500,
+    "rate": 0.288,
+    "low": 0.254,
+    "high": 0.326
+   },
+   "patterns": {
+    "hits": 105,
+    "total": 500,
+    "rate": 0.21,
+    "low": 0.18,
+    "high": 0.24
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 500,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/alternating_case",
+   "kind": "attacks",
+   "learned": {
+    "hits": 58,
+    "total": 71,
+    "rate": 0.8169,
+    "low": 0.7183,
+    "high": 0.9014
+   },
+   "learned_enforce": {
+    "hits": 46,
+    "total": 71,
+    "rate": 0.6479,
+    "low": 0.5352,
+    "high": 0.7606
+   },
+   "patterns": {
+    "hits": 14,
+    "total": 71,
+    "rate": 0.1972,
+    "low": 0.1127,
+    "high": 0.2958
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 71,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/base64_split",
+   "kind": "attacks",
+   "learned": {
+    "hits": 5,
+    "total": 71,
+    "rate": 0.0704,
+    "low": 0.0141,
+    "high": 0.1408
+   },
+   "learned_enforce": {
+    "hits": 0,
+    "total": 71,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   },
+   "patterns": {
+    "hits": 2,
+    "total": 71,
+    "rate": 0.0282,
+    "low": 0.0,
+    "high": 0.0704
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 71,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/homoglyph",
+   "kind": "attacks",
+   "learned": {
+    "hits": 8,
+    "total": 72,
+    "rate": 0.1111,
+    "low": 0.0417,
+    "high": 0.1806
+   },
+   "learned_enforce": {
+    "hits": 1,
+    "total": 72,
+    "rate": 0.0139,
+    "low": 0.0,
+    "high": 0.0417
+   },
+   "patterns": {
+    "hits": 1,
+    "total": 72,
+    "rate": 0.0139,
+    "low": 0.0,
+    "high": 0.0417
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 72,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/leet",
+   "kind": "attacks",
+   "learned": {
+    "hits": 14,
+    "total": 71,
+    "rate": 0.1972,
+    "low": 0.1127,
+    "high": 0.2958
+   },
+   "learned_enforce": {
+    "hits": 3,
+    "total": 71,
+    "rate": 0.0423,
+    "low": 0.0,
+    "high": 0.0986
+   },
+   "patterns": {
+    "hits": 2,
+    "total": 71,
+    "rate": 0.0282,
+    "low": 0.0,
+    "high": 0.0704
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 71,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/reworded_override",
+   "kind": "attacks",
+   "learned": {
+    "hits": 58,
+    "total": 71,
+    "rate": 0.8169,
+    "low": 0.7183,
+    "high": 0.9014
+   },
+   "learned_enforce": {
+    "hits": 45,
+    "total": 71,
+    "rate": 0.6338,
+    "low": 0.5211,
+    "high": 0.7324
+   },
+   "patterns": {
+    "hits": 13,
+    "total": 71,
+    "rate": 0.1831,
+    "low": 0.0986,
+    "high": 0.2817
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 71,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/spaced",
+   "kind": "attacks",
+   "learned": {
+    "hits": 5,
+    "total": 72,
+    "rate": 0.0694,
+    "low": 0.0139,
+    "high": 0.1389
+   },
+   "learned_enforce": {
+    "hits": 2,
+    "total": 72,
+    "rate": 0.0278,
+    "low": 0.0,
+    "high": 0.0694
+   },
+   "patterns": {
+    "hits": 1,
+    "total": 72,
+    "rate": 0.0139,
+    "low": 0.0,
+    "high": 0.0417
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 72,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  },
+  {
+   "set": "evasion_v1/zero_width",
+   "kind": "attacks",
+   "learned": {
+    "hits": 57,
+    "total": 72,
+    "rate": 0.7917,
+    "low": 0.6944,
+    "high": 0.875
+   },
+   "learned_enforce": {
+    "hits": 47,
+    "total": 72,
+    "rate": 0.6528,
+    "low": 0.5417,
+    "high": 0.7639
+   },
+   "patterns": {
+    "hits": 72,
+    "total": 72,
+    "rate": 1.0,
+    "low": null,
+    "high": null
+   },
+   "withheld": {
+    "hits": 0,
+    "total": 72,
+    "rate": 0.0,
+    "low": null,
+    "high": null
+   }
+  }
+ ],
+ "sealed_on": "0ced9b2feee0dbafe8793b2f6d921475888763d61010d9fae9ac94738068138b"
+}

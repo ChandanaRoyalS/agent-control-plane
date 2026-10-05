@@ -15,6 +15,16 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+### Added
+
+- The learned classifier's data (ADR 0074): BIPIA's contexts and attack
+  instructions imported from a pinned commit with its test split sealed; an
+  evasion corpus of 500 documents, each sealed test attack disguised one of seven
+  ways (W9 of the external review); CPython standard-library docstrings as benign
+  training text; and `acp.corpus.training`, which assembles train, validation,
+  report-only and sealed sets by group and fails if any two share a group or a
+  text.
+
 ## [2.1.0] - 2026-10-05
 
 Item 5 of the external review. The official MCP Python client now drives

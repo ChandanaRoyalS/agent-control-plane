@@ -114,6 +114,7 @@ If you have ten minutes and want the ones that carry the most weight:
 | [0071](0071-the-safe-defaults.md) | a bare start refuses without an audit file unless told otherwise, the firewall defaults to report, and every start logs which controls are on and warns about the safety ones that are off |
 | [0072](0072-a-real-client-reads-the-refusal.md) | the official MCP client drives the gateway in the suite; the fast-path 403 carries the handler's JSON-RPC error, a held call from a pre-2026-07-28 client is refused legibly, and the catalogue shows a tool some call could reach |
 | [0073](0073-a-model-decides-the-calls.md) | a local model served by Ollama drives the demo agent over seeded trials on each path, every transcript is committed, and the README quotes the newest record |
+| [0074](0074-the-classifiers-data-before-the-classifier.md) | the learned classifier's data comes first: BIPIA imported with its test split sealed, an evasion corpus of seven disguises built from it (W9), stdlib docstrings as benign training text, and splits by group with a leakage test over every set |
 
 ## Approvals, audit, tenancy
 

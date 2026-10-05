@@ -7,18 +7,68 @@ in many contexts); benign rates resample documents.
 
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Protocol
 
+from acp.corpus.bipia import load_bipia
 from acp.corpus.harness import DEFAULT_DEPLOYMENT, DEFAULT_SEED, _screen
+from acp.corpus.loader import default_root
 from acp.corpus.metrics import DEFAULT_RESAMPLES, Proportion, measure, measure_clustered
-from acp.corpus.training import Example
+from acp.corpus.training import Datasets, Example
 from acp.firewall import Firewall
-from acp.firewall.learned import LearnedModel
 
 LABELS: Final = {1: "attacks", 0: "benign"}
+TARGET_FPR: Final = 0.01
+"""The report threshold's validation false-positive budget, for every learned model."""
+
+
+class Scorer(Protocol):
+    """Anything scored like `acp.firewall.learned.LearnedModel`: a document to a score."""
+
+    @property
+    def threshold(self) -> float: ...
+
+    @property
+    def enforce_threshold(self) -> float: ...
+
+    def score(self, text: str) -> float: ...
+
+
+@dataclass(frozen=True, slots=True)
+class OperatingPoints:
+    """Both thresholds and what they did on validation (ADR 0075's rules)."""
+
+    threshold: float
+    """The lowest with at most `TARGET_FPR` of benign documents at or above it."""
+    fpr: float
+    recall: float
+    enforce_threshold: float
+    """Above every benign validation score."""
+    enforce_recall: float
+
+
+def operating_points(
+    benign: Sequence[float], attacks: Sequence[float], *, target_fpr: float = TARGET_FPR
+) -> OperatingPoints:
+    """Choose both thresholds from validation scores alone."""
+    ordered = sorted(benign)
+    allowed = math.floor(target_fpr * len(ordered))
+    threshold = ordered[-(allowed + 1)] + 1e-9 if ordered else 0.5
+    enforce = (ordered[-1] if ordered else 0.5) + 1e-6
+
+    def share(scores: Sequence[float], bar: float) -> float:
+        return sum(s >= bar for s in scores) / len(scores) if scores else 0.0
+
+    return OperatingPoints(
+        threshold=threshold,
+        fpr=share(ordered, threshold),
+        recall=share(attacks, threshold),
+        enforce_threshold=enforce,
+        enforce_recall=share(attacks, enforce),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +100,7 @@ def _rate(
 def compare(
     name: str,
     examples: Sequence[Example],
-    model: LearnedModel,
+    model: Scorer,
     *,
     seed: int = DEFAULT_SEED,
     resamples: int = DEFAULT_RESAMPLES,
@@ -103,3 +153,34 @@ def as_json(rows: Sequence[Row]) -> list[dict[str, object]]:
         }
         for r in rows
     ]
+
+
+def open_sets(data: Datasets) -> dict[str, list[Example]]:
+    """Validation by source, then the report-only sets: what may be looked at freely."""
+    sets: dict[str, list[Example]] = {}
+    for e in data.validation:
+        sets.setdefault(f"validation/{e.source}", []).append(e)
+    for name, members in data.report.items():
+        sets[name] = list(members)
+    return sets
+
+
+def sealed_sets(data: Datasets) -> dict[str, list[Example]]:
+    """The sealed sets, then evasion v1 by disguise; empty unless ``data`` was unsealed."""
+    if not data.sealed:
+        return {}
+    sets = {name: list(members) for name, members in data.sealed.items()}
+    by_transform: dict[str, list[Example]] = {}
+    for d in load_bipia(default_root() / "external" / "evasion"):
+        by_transform.setdefault(f"evasion_v1/{d.category}", []).append(
+            Example(d.id, d.text, 1, d.group, "evasion", d.planted)
+        )
+    sets.update(sorted(by_transform.items()))
+    return sets
+
+
+def score_sets(sets: dict[str, list[Example]], model: Scorer) -> list[Row]:
+    rows: list[Row] = []
+    for name, members in sets.items():
+        rows += compare(name, members, model)
+    return rows

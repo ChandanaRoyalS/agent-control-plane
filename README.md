@@ -7,7 +7,7 @@ calls for a human, and records every decision in a hash-chained log.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~2,300 tests · 95% branch coverage · 76 decision records ·
+**~2,300 tests · 95% branch coverage · 77 decision records ·
 20 hand-picked breakages, each caught by the test meant to catch it**
 
 ## Why
@@ -231,7 +231,7 @@ The full threat model is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 ## What I would do with another month
 
-1. **Train a small transformer against the same splits**, and measure whether it lowers the 2% of benign documents the linear classifier withholds.
+1. **Run the transformer fixed in [ADR 0077](docs/decisions/0077-a-transformer-fixed-before-it-is-trained.md)** on the same splits, and see whether it lowers the 2% of benign documents the linear classifier withholds.
 2. **Grow the evasion corpus** with paraphrase and translation, which need a model to generate.
 3. **Record the model demo on more models and tasks.**
 4. **Sign the audit chain**, which is a key-management decision before it is code.

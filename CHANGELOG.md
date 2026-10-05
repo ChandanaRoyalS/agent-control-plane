@@ -15,6 +15,15 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/transformer.py` and `make train-transformer` / `make
+  eval-transformer` (ADR 0077): fine-tunes DistilRoBERTa on the linear
+  classifier's exact splits and scores it on the same rows. The run is fixed in
+  advance in `TRANSFORMER_DESIGN`; `--unseal` refuses any other and refuses a
+  second look. PyTorch is added per command, not as a dependency. Not on the
+  request path.
+
 ## [2.2.0] - 2026-10-05
 
 Item 2 of the external review: a learned classifier on the request path,

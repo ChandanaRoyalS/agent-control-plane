@@ -10,7 +10,7 @@ from itertools import pairwise
 import pytest
 
 from acp.corpus.loader import default_root
-from acp.corpus.training import assemble
+from acp.corpus.training import TRANSFORMER_DESIGN, assemble, data_digest
 from acp.firewall.learned import (
     MODEL_PATH,
     STRIDE,
@@ -80,14 +80,8 @@ def test_the_committed_model_was_trained_on_todays_data() -> None:
     model = load_model()
     data = assemble()
 
-    def digest(examples) -> str:  # type: ignore[no-untyped-def]
-        h = hashlib.sha256()
-        for e in sorted(examples, key=lambda e: e.id):
-            h.update(f"{e.id}\0{e.label}\0{e.text}\0".encode())
-        return h.hexdigest()
-
-    assert model.meta["train_digest"] == digest(data.train)
-    assert model.meta["validation_digest"] == digest(data.validation)
+    assert model.meta["train_digest"] == data_digest(data.train)
+    assert model.meta["validation_digest"] == data_digest(data.validation)
 
 
 def test_the_sealed_result_belongs_to_the_committed_model() -> None:
@@ -103,3 +97,20 @@ def test_from_json_round_trips() -> None:
     model = from_json(raw)
     assert model.weights == {"w:a": 1.0}
     assert model.meta == {}
+
+
+TRANSFORMER_RECORD = default_root() / "learned" / "transformer.json"
+
+
+@pytest.mark.skipif(not TRANSFORMER_RECORD.exists(), reason="the transformer has not been scored")
+def test_the_transformer_record_is_the_preregistered_run_on_the_same_splits() -> None:
+    """ADR 0077: one run of the design fixed before training, on the linear model's
+    exact data, with its sealed result tied to its weights."""
+    record = json.loads(TRANSFORMER_RECORD.read_text(encoding="utf-8"))
+    linear = load_model()
+
+    assert record["model"]["design"] == TRANSFORMER_DESIGN
+    assert record["model"]["train_digest"] == linear.meta["train_digest"]
+    assert record["model"]["validation_digest"] == linear.meta["validation_digest"]
+    assert record["sealed"], "the sealed sets have not been scored"
+    assert record["sealed_on"] == record["model"]["weights_sha256"]

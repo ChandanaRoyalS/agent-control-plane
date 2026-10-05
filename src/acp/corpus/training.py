@@ -16,19 +16,33 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from acp.corpus.bipia import ATTACK, BipiaDocument, default_bipia_dir, load_bipia
 from acp.corpus.external import load_external_split
 from acp.corpus.heldout import load_development_attacks
 from acp.corpus.loader import default_root, load_benign
+from acp.firewall.learned import normalise, windows
 
 VALIDATION_SALT: Final = "acp-classifier-validation-v1"
 VALIDATION_SHARE: Final = 5
 """One group in five goes to validation."""
+TRANSFORMER_DESIGN: Final[dict[str, Any]] = {
+    "base": "distilbert/distilroberta-base",
+    "epochs": 3,
+    "batch_size": 16,
+    "learning_rate": 2e-5,
+    "weight_decay": 0.01,
+    "warmup_share": 0.06,
+    "max_tokens": 512,
+    "seed": 0,
+    "limit": None,
+}
+"""The transformer run fixed in ADR 0077 before any training; only it may see sealed sets."""
 FILLER_CHARS: Final = (40, 160)
 """Length bounds for a benign sentence standing in for a removed instruction."""
 
@@ -170,3 +184,57 @@ def check_disjoint(sets: dict[str, Sequence[Example]]) -> None:
                     what = "group" if owners is owner_of_group else "text"
                     msg = f"{e.id}: its {what} is in both {other} and {name}"
                     raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class LabelledWindows:
+    """Training windows of normalised text, for any model trained on these splits."""
+
+    texts: list[str]
+    labels: list[int]
+    skipped: Counter[str]
+
+
+def labelled_windows(examples: Iterable[Example]) -> LabelledWindows:
+    """Windows of each example, labelled by how much of the planted instruction they hold.
+
+    A window of an attack document is a positive if it holds at least half of the
+    instruction, a negative if it holds none of it (that text is benign context),
+    and is skipped otherwise, as is an attack whose instruction cannot be located.
+    """
+    texts: list[str] = []
+    labels: list[int] = []
+    skipped: Counter[str] = Counter()
+    for e in examples:
+        text = normalise(e.text)
+        span: tuple[int, int] | None = None
+        if e.label == 1:
+            planted = normalise(e.planted)
+            start = text.find(planted) if planted else -1
+            if start < 0:
+                skipped["attack without a locatable instruction"] += 1
+                continue
+            span = (start, start + len(planted))
+        for start, window in windows(text):
+            if span is None:
+                label = 0
+            else:
+                overlap = max(0, min(span[1], start + len(window)) - max(span[0], start))
+                if overlap >= (span[1] - span[0]) / 2:
+                    label = 1
+                elif overlap == 0:
+                    label = 0
+                else:
+                    skipped["window with part of an instruction"] += 1
+                    continue
+            texts.append(window)
+            labels.append(label)
+    return LabelledWindows(texts, labels, skipped)
+
+
+def data_digest(examples: Iterable[Example]) -> str:
+    """A hash of ids, labels and texts: two models with equal digests saw the same data."""
+    h = hashlib.sha256()
+    for e in sorted(examples, key=lambda e: e.id):
+        h.update(f"{e.id}\0{e.label}\0{e.text}\0".encode())
+    return h.hexdigest()

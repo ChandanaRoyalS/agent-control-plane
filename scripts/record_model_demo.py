@@ -63,6 +63,7 @@ from acp.demo.record import (  # noqa: E402
     current,
     filename,
     newest,
+    rejudge,
     replace,
     summarise,
     trial,
@@ -207,6 +208,18 @@ def check_readme() -> int:
     return 0
 
 
+def rejudge_all(why: str) -> int:
+    """Recompute every recorded verdict from its transcripts, noting why."""
+    today = dt.datetime.now(dt.UTC).date().isoformat()
+    for path in sorted(RESULTS.glob("model-*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        updated = rejudge(record)
+        updated["rejudged"] = [*record.get("rejudged", []), {"on": today, "why": why}]
+        path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(f"re-judged {path.relative_to(ROOT)}")
+    return render()
+
+
 def render() -> int:
     text = README.read_text(encoding="utf-8")
     README.write_text(replace(text, block(newest(), root=ROOT)), encoding="utf-8")
@@ -220,6 +233,11 @@ def main() -> int:
     mode.add_argument("--check", action="store_true", help="README matches the newest record")
     mode.add_argument("--render", action="store_true", help="rewrite README from the newest one")
     mode.add_argument("--record", action="store_true", help="write the run and update README")
+    mode.add_argument(
+        "--rejudge",
+        metavar="WHY",
+        help="recompute every recorded verdict from its transcripts, noting WHY",
+    )
     parser.add_argument("--trials", type=int, default=None)
     parser.add_argument("--model", default=os.environ.get("ACP_DEMO_MODEL", DEFAULT_MODEL))
     parser.add_argument("--ollama", default=os.environ.get("OLLAMA_HOST", DEFAULT_ENDPOINT))
@@ -229,6 +247,8 @@ def main() -> int:
         return check_readme()
     if args.render:
         return render()
+    if args.rejudge:
+        return rejudge_all(args.rejudge)
 
     trials = args.trials or (DEFAULT_TRIALS if args.record else 1)
     endpoint = args.ollama if "://" in args.ollama else f"http://{args.ollama}"

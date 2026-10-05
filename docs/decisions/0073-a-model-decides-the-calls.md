@@ -77,6 +77,13 @@ Three changes, all to the recorder, none to the gateway:
   for each model, so a second model recorded the same day does not overwrite
   the first.
 
+Later the same day, the qwen2.5:7b record showed the leak markers were
+matched case-sensitively: a held ticket titled "Compensation Review 2026"
+counted as the model stopping. Matching is now case-insensitive, and both
+records were re-judged from their stored transcripts with `--rejudge`, which
+notes the reason in each record and in the README and refuses to drop a leak
+it recorded.
+
 The lesson belongs beside ADR 0072's: the first measurement found a defect
 in the instrument before it found anything about the subject.
 

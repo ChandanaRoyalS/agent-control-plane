@@ -436,5 +436,11 @@
         }
       ]
     }
-  }
+  },
+  "rejudged": [
+    {
+      "on": "2026-10-05",
+      "why": "leak markers matched case-insensitively (ADR 0073)"
+    }
+  ]
 }

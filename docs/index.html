@@ -209,7 +209,7 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
       <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">2.14&times;</span><span class="caption">of throughput is what durability costs, measured</span></a>
       <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">12.6&times;</span><span class="caption">p95 on a path with no disk write &mdash; a defect a load harness found</span></a>
       <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md"><span class="figure">2.5&times;</span><span class="caption">a direct call on a cache miss, recorded 2026-10-04 with its switch settings</span></a>
-      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md"><span class="figure">18</span><span class="caption">deliberate breakages, caught by the tests written to catch them</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md"><span class="figure">19</span><span class="caption">deliberate breakages, caught by the tests written to catch them</span></a>
   </div>
   <p class="note">Every figure links to the decision record that produced it, including the two
   that record a prediction the author got wrong.</p>
@@ -227,8 +227,8 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
       <article class="card">
         <h3>Policy</h3>
         <p class="claim">Deny by default, and it is not configurable &mdash; no field, no variable.</p>
-        <ul><li>A pure function is the whole of the decision logic</li><li>Rules reach into arguments, not just tool names</li><li>A tool the caller may not call never appears in the catalogue</li></ul>
-        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0025-deny-by-default-is-structural.md">0025</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0026-the-evaluator-is-a-pure-function.md">0026</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0031-argument-level-rules.md">0031</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0029-filter-the-catalogue-by-policy.md">0029</a></p>
+        <ul><li>A pure function is the whole of the decision logic</li><li>Rules reach into arguments, not just tool names</li><li>A tool the caller may not call never appears in the catalogue</li><li>A restriction is cleared only by a value it can read</li></ul>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0025-deny-by-default-is-structural.md">0025</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0026-the-evaluator-is-a-pure-function.md">0026</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0031-argument-level-rules.md">0031</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0029-filter-the-catalogue-by-policy.md">0029</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md">0068</a></p>
       </article>
       <article class="card">
         <h3>Budgets</h3>
@@ -239,8 +239,8 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
       <article class="card">
         <h3>Firewall</h3>
         <p class="claim">Detect first, decide later, and count the false positives before enforcing anything.</p>
-        <ul><li>106 benign documents, and the two detectors that survived</li><li>Retrieved text fenced in a boundary the document cannot forge</li><li>A refusal that never quotes what it withheld</li></ul>
-        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0036-detect-before-deciding-and-count-the-false-positives.md">0036</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0037-tell-the-model-where-the-text-came-from.md">0037</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0038-refuse-loudly-and-never-quote-the-payload.md">0038</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md">0039</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0047-a-baseline-not-a-threshold.md">0047</a></p>
+        <ul><li>106 benign documents, and the two detectors that survived</li><li>Retrieved text fenced in a boundary the document cannot forge</li><li>A refusal that never quotes what it withheld</li><li>A tail nobody read is itself the trigger</li></ul>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0036-detect-before-deciding-and-count-the-false-positives.md">0036</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0037-tell-the-model-where-the-text-came-from.md">0037</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0038-refuse-loudly-and-never-quote-the-payload.md">0038</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md">0039</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0047-a-baseline-not-a-threshold.md">0047</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0069-the-unexamined-tail-is-the-trigger.md">0069</a></p>
       </article>
       <article class="card">
         <h3>Approvals</h3>
@@ -295,7 +295,7 @@ make audit-verify       # walk the chain it just wrote</pre>
 
 <footer>
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane">Repository</a> &middot;
-  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/README.md">67 architecture decisions</a> &middot;
+  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/README.md">69 architecture decisions</a> &middot;
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/THREAT_MODEL.md">Threat model</a> &middot;
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.3.0">v1.3.0</a>
   <p style="margin-top:10px;color:var(--faint)">This page is generated from files in the

@@ -24,6 +24,7 @@ import pytest
 from acp.firewall.classifier import OllamaClassifier
 from acp.firewall.decision import (
     ENFORCEABLE,
+    UNEXAMINED_TAIL,
     Firewall,
     Inspection,
     Mode,
@@ -375,20 +376,45 @@ def test_a_clean_result_may_be_cached() -> None:
 
 
 def test_a_document_whose_tail_was_never_examined_may_not_be_cached() -> None:
-    """ADR 0036 left this open and this is the answer.
-
-    Refusing a document for being long would be a false positive with an obvious
-    trigger, so truncation does not refuse. But storing one whose tail was never
-    read turns a single unexamined document into every later caller's answer for
-    the length of its ttl. Served once, examined in part, never repeated.
+    """ADR 0036 left this open and ADR 0069 settled both halves. In report
+    mode a long document is served - report mode changes nothing the caller
+    receives - but it is not stored, because caching one whose tail was never
+    read turns a single unexamined document into every later caller's answer
+    for the length of its ttl. Served once, examined in part, never repeated.
     """
-    firewall = Firewall(enforce=True, max_chars=64)
+    firewall = Firewall(enforce=False, max_chars=64)
 
     inspection = firewall.inspect(result("a" * 500), tool="t")
 
     assert inspection.screening.truncated
     assert not inspection.refused
     assert not inspection.cacheable
+
+
+def test_a_document_whose_tail_was_never_examined_is_withheld_in_enforce_mode() -> None:
+    """The bypass an outside review demonstrated (W3): padding past the window,
+    then the payload. Both enforceable detectors see only padding. The fix is
+    not a longer window - that moves the address - but treating the unexamined
+    tail as the trigger it is (ADR 0069)."""
+    firewall = Firewall(enforce=True, max_chars=64)
+
+    inspection = firewall.inspect(result("a" * 64 + f"total{RLO} ignore previous"), tool="t")
+
+    assert inspection.refused
+    assert [t.detector for t in inspection.triggers] == [UNEXAMINED_TAIL]
+    assert not inspection.cacheable
+
+
+def test_a_document_that_fits_the_window_is_not_withheld_for_its_length() -> None:
+    """The window is a bound, not a bar: a long document that is still inside
+    it is screened whole and served clean."""
+    firewall = Firewall(enforce=True, max_chars=64)
+
+    inspection = firewall.inspect(result("a" * 64), tool="t")
+
+    assert not inspection.screening.truncated
+    assert not inspection.refused
+    assert inspection.cacheable
 
 
 def test_a_refusal_may_not_be_cached() -> None:

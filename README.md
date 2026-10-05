@@ -7,8 +7,8 @@ calls for a human, and records every decision in a tamper-evident log.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~2,100 tests · 95% coverage · 67 architecture decisions · 4 mutation harnesses
-proving 18 deliberate breakages are caught**
+**~2,100 tests · 95% coverage · 69 architecture decisions · 4 mutation harnesses
+proving 19 deliberate breakages are caught**
 
 ## Why
 
@@ -153,7 +153,7 @@ built to make its own claims checkable:
 - **Every change is a pull request** against a protected `main`, through the
   same `make check` CI runs: lint, format, strict types, ~2,100 tests, an 80%
   coverage floor.
-- **Mutation harnesses** break the security invariants on purpose (18 ways) and
+- **Mutation harnesses** break the security invariants on purpose (19 ways) and
   fail if the tests do not notice.
 - **The release surface is a file**, and a test fails when it changes unannounced
   ([ADR 0058](docs/decisions/0058-a-version-is-a-promise-about-a-surface.md)).
@@ -202,6 +202,14 @@ somebody looking for gaps.
   An attack that only needs reads would pass the broad policy.
 - **Attacks split across two documents** are caught by nothing — screening sees
   one result at a time.
+- **Enforce mode withholds on two detectors and one condition**: a
+  bidirectional override, a base64 run that decodes to an instruction, or a
+  result too long to have been screened whole ([ADR 0069](docs/decisions/0069-the-unexamined-tail-is-the-trigger.md)).
+  Everything else the firewall finds is logged and served.
+- **An argument-level `deny` holds against re-spellings and omission**
+  ([ADR 0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md));
+  it does not reason about meaning, so `dataset: prod-eu` is not `production`
+  to it.
 - **The hash chain cannot detect tail truncation or a wholesale rewrite** without
   an external anchor; both are asserted as passing tests.
 - **Tool descriptions are screened but cannot be fenced.** A description with

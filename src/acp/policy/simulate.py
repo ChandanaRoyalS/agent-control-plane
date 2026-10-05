@@ -37,7 +37,7 @@ from enum import Enum
 
 from acp.policy.evaluate import Decision, Verdict, decision_for, matches_without_arguments
 from acp.policy.record import RecordedDecision, Traffic
-from acp.policy.schema import Policy
+from acp.policy.schema import RESTRICTIVE, Policy
 
 
 class Outcome(Enum):
@@ -176,13 +176,16 @@ def possible_decisions(
     rule may *possibly* match. Walking in policy order, each rule is one of
     three things.
 
-    - **Cannot apply.** Its identity or tool section does not hold, or it
-      constrains an argument the call never sent — and a missing argument is not
-      a match (ADR 0031), so this is a definite "no", not an uncertainty. Skip
-      it. Recovering these is the entire reason the log records argument names.
-    - **Definitely applies.** It matches on identity and tool and constrains no
-      arguments. It decides the call; nothing after it can be reached. Record it
-      and stop.
+    - **Cannot apply.** Its identity or tool section does not hold, or it is an
+      ``allow`` constraining an argument the call never sent — a grant a missing
+      argument cannot earn (ADR 0068), so this is a definite "no", not an
+      uncertainty. Skip it. Recovering these is the entire reason the log
+      records argument names.
+    - **Definitely applies.** It matches on identity and tool and either
+      constrains no arguments, or is a restriction (``deny``,
+      ``require_approval``) constraining an argument the call never sent — a
+      missing argument does not clear a restriction (ADR 0068). It decides the
+      call; nothing after it can be reached. Record it and stop.
     - **Might apply.** It matches on identity and tool and constrains only
       arguments the call did send. Whether it fires depends on values the log
       does not carry. Record it as one possibility and keep walking, because the
@@ -199,12 +202,16 @@ def possible_decisions(
         if not matches_without_arguments(rule, subject, actor, tool):
             continue
         if rule.args:
-            if argument_names is not None and not set(rule.args).issubset(argument_names):
-                # Constrains something this call did not send. It cannot have
-                # fired, and that is certainty rather than an assumption.
+            unsent = argument_names is not None and not set(rule.args).issubset(argument_names)
+            if unsent and rule.effect not in RESTRICTIVE:
+                # A grant constrained on something this call did not send. It
+                # cannot have fired, and that is certainty, not an assumption.
                 continue
-            reachable.append(decision_for(rule))
-            continue
+            if not unsent:
+                reachable.append(decision_for(rule))
+                continue
+            # A restriction constrained on something the call did not send
+            # holds regardless of values: it decided the call.
         reachable.append(decision_for(rule))
         return tuple(reachable)
     reachable.append(Decision(allowed=False, rule=None))

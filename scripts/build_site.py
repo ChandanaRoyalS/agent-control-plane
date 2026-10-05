@@ -211,7 +211,7 @@ def measured() -> str:
             53,
         ),
         overhead_tile(),
-        ("18", "deliberate breakages, caught by the tests written to catch them", 23),
+        ("19", "deliberate breakages, caught by the tests written to catch them", 23),
     )
     return "\n".join(
         f'      <a class="tile" href="{adr(number)}">'
@@ -240,8 +240,9 @@ def subsystems() -> str:
                 "A pure function is the whole of the decision logic",
                 "Rules reach into arguments, not just tool names",
                 "A tool the caller may not call never appears in the catalogue",
+                "A restriction is cleared only by a value it can read",
             ],
-            [25, 26, 31, 29],
+            [25, 26, 31, 29, 68],
         ),
         (
             "Budgets",
@@ -261,8 +262,9 @@ def subsystems() -> str:
                 "106 benign documents, and the two detectors that survived",
                 "Retrieved text fenced in a boundary the document cannot forge",
                 "A refusal that never quotes what it withheld",
+                "A tail nobody read is itself the trigger",
             ],
-            [36, 37, 38, 39, 47],
+            [36, 37, 38, 39, 47, 69],
         ),
         (
             "Approvals",

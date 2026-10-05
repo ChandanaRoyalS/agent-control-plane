@@ -108,6 +108,8 @@ If you have ten minutes and want the ones that carry the most weight:
 | [0065](0065-the-catalogue-is-screened-too.md) | tool descriptions are screened with the result bar and withheld in enforce mode; 0 of 1,102 external descriptions flagged, and the polite one still passes |
 | [0066](0066-an-approval-is-a-fact-about-the-fleet.md) | held approvals move to Redis behind `ACP_APPROVAL_STORE_URL`, shared by every replica; `consume` is compare-and-set so an approved token is spent exactly once; in-memory stays the default |
 | [0067](0067-a-limit-is-a-limit-on-the-fleet.md) | rate-limit buckets and quota tallies move to Redis behind `ACP_BUDGET_STORE_URL`, charged in one Lua step that checks both before debiting either; the budgets' keeper is named (`Budgets`) and the in-memory one stays the default |
+| [0068](0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md) | an argument constraint fails closed in the direction of its rule: a `deny` or `require_approval` is cleared only by a readable scalar outside the set, an `allow` is earned only by an exact one; closes the W1 bypass |
+| [0069](0069-the-unexamined-tail-is-the-trigger.md) | a screening that did not read the whole document withholds it in enforce mode; the 256 KB window stays, what it means once crossed changes; closes the W3 bypass |
 
 ## Approvals, audit, tenancy
 

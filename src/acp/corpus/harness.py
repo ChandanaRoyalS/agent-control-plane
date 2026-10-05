@@ -155,9 +155,14 @@ class Screened:
 def _screen(firewall: Firewall, text: str, *, doc_id: str, tools: AbstractSet[str]) -> Screened:
     result = CallToolResult(content=[ContentBlock(type="text", text=text)], isError=False)
     inspection = firewall.inspect(result, tool="docs__read_document", tools=frozenset(tools))
+    # Findings and triggers together: the unexamined-tail trigger (ADR 0069)
+    # is not a detector's finding, but a document withheld for it was
+    # detected by any honest reading, and `withheld` must never exceed
+    # `detected`.
+    flagged = (*inspection.screening.findings, *inspection.triggers)
     return Screened(
         id=doc_id,
-        families=frozenset(finding.family for finding in inspection.screening.findings),
+        families=frozenset(finding.family for finding in flagged),
         withheld=inspection.refused,
     )
 

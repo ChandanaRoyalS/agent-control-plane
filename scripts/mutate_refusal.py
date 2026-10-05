@@ -118,6 +118,20 @@ MUTATIONS: tuple[Mutation, ...] = (
         suite=UNIT,
     ),
     Mutation(
+        name="serve a document whose tail was never screened, in enforce mode",
+        path=DECISION,
+        anchor=(
+            "    if screening.truncated:\n        return (*found, truncation_trigger(screening))"
+        ),
+        replacement="    if screening.truncated and False:  # noqa: SIM223\n        return found",
+        # W3 of the external review: 256 KB of padding, then the payload. Both
+        # enforceable detectors see only padding, so without this trigger the
+        # document is served. Caught by the end-to-end test that sends the
+        # bytes, and by the obfuscation family's withheld count in the corpus.
+        caught_by=frozenset({"test_a_payload_past_the_screening_window_never_reaches_the_caller"}),
+        suite=INTEGRATION,
+    ),
+    Mutation(
         name="fence the gateway's own refusal like an upstream result",
         path=SERVER,
         anchor="                return to_mcp_call_tool_result(inspection.result)",

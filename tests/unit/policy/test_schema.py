@@ -147,6 +147,22 @@ def test_args_accepts_a_mapping_of_name_to_values() -> None:
     assert rule.args["doc_id"] == ("public-handbook", "public-faq")
 
 
+def test_args_accept_numbers_and_booleans_in_canonical_form() -> None:
+    """`limit: [10]` is what ADR 0031 promised and what the schema refused
+    until ADR 0068: a YAML number or boolean is kept as the string a JSON
+    argument of that value compares as."""
+    rule = Rule.model_validate(
+        {"name": "bounded", "effect": "allow", "args": {"limit": [10, 2.5], "dry_run": [True]}}
+    )
+
+    assert rule.args == {"limit": ("10", "2.5"), "dry_run": ("true",)}
+
+
+def test_args_refuse_a_non_scalar_value() -> None:
+    with pytest.raises(ValidationError, match="strings, numbers or booleans"):
+        Rule.model_validate({"name": "odd", "effect": "deny", "args": {"ids": [[1, 2]]}})
+
+
 def test_unknown_rule_field_is_still_forbidden_with_args_present() -> None:
     """extra=forbid still holds — args does not loosen the schema."""
     with pytest.raises(ValidationError):

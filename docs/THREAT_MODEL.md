@@ -219,13 +219,13 @@ close it.
 
 ### 6.1 An injection this gateway does not catch — **the largest gap**
 
-Measured, deterministic layer, enforce mode, 36 development attacks, 106 benign
+Measured, deterministic layer, enforce mode, 37 development attacks, 106 benign
 documents, 2,000 bootstrap resamples (seed 20260812):
 
 | attack family | detected | **withheld** |
 |---|---|---|
 | exfiltration | 5/5 | 0 |
-| obfuscation | 6/7 | **4** |
+| obfuscation | 7/8 | **5** |
 | direct_override | 5/6 | 0 |
 | tool_confusion | 3/4 | 0 |
 | boundary_escape | 1/4 | 0 |
@@ -242,7 +242,7 @@ Precision, on the flagged set:
 
 | firewall family | precision | interval |
 |---|---|---|
-| obfuscation | 67% (6/9) | [33%, 89%] |
+| obfuscation | 70% (7/10) | [40%, 100%] |
 | direct_override | 53% (8/15) | [27%, 80%] |
 | exfiltration | 42% (5/12) | [17%, 67%] |
 | tool_confusion | 38% (3/8) | **[0%, 75%]** |

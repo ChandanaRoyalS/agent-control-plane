@@ -15,6 +15,39 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+### Security
+
+- **Argument-level `deny` and `require_approval` rules could be bypassed by
+  re-spelling or omitting the constrained argument** (ADR 0068; W1 of the
+  2026-10-05 external review). `deny crm__delete where dataset=production`
+  matched only the exact string: `Production`, `production `,
+  `["production"]` and a call with no `dataset` at all fell through to the
+  allow behind it. A restriction is now cleared only by a scalar whose folded
+  form (NFKC, case, whitespace) is outside the set; missing or non-scalar
+  values stay restricted. `allow` rules are unchanged. **Deployed policies
+  with argument-scoped restrictions become stricter**; `acp policy simulate`
+  reports the affected calls as `newly_denied` / `newly_gated`.
+- **A payload placed past the 256 KB screening window was served in enforce
+  mode** (ADR 0069; W3 of the same review). A screening that did not read the
+  whole document is now a withholding trigger (`unexamined_tail`); report
+  mode logs it as `would_refuse`. Results over 256 KB of text are refused in
+  enforce mode and should be paged.
+
+### Fixed
+
+- Policy `args` values compare in one canonical form on both sides: a JSON
+  `true` matches a policy `true` (previously compared as Python's `True` and
+  never matched), and YAML numbers and booleans are accepted as values, so
+  `limit: [10]` matches the integer ten as ADR 0031 said.
+- The evaluation harness counts a withheld document as detected whatever
+  withheld it, keeping `withheld <= detected`.
+
+### Added
+
+- `corpus/attack/obfuscation/payload-past-the-window.txt`: the W3 attack, as a
+  regression gate; obfuscation is now 7/8 detected, 5 withheld. A seventh
+  refusal mutation removes the new trigger and must be caught end to end.
+
 ## [1.3.0] - 2026-10-05
 
 Durable state. Both stores the threat model listed as per-process — the

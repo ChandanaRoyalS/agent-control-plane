@@ -46,6 +46,7 @@ dev = [
     "types-pyyaml>=6.0",
     "pre-commit>=4.0",
     "fakeredis>=2.26",
+    "lupa>=2.0",
 ]
 perf = [
     "locust>=2.46.3",

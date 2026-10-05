@@ -250,8 +250,9 @@ def subsystems() -> str:
                 "A token bucket per principal, checked after authorization",
                 "A fixed, clock-aligned window",
                 "The one cache that sits inside the policy check",
+                "One bucket per payer for the whole fleet, when replicated",
             ],
-            [32, 33, 34, 35],
+            [32, 33, 34, 35, 67],
         ),
         (
             "Firewall",

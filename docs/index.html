@@ -233,8 +233,8 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
       <article class="card">
         <h3>Budgets</h3>
         <p class="claim">A per-tool weighted cost against a rate limit and a quota.</p>
-        <ul><li>A token bucket per principal, checked after authorization</li><li>A fixed, clock-aligned window</li><li>The one cache that sits inside the policy check</li></ul>
-        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0032-rate-limiting-token-bucket.md">0032</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0033-cost-accounting.md">0033</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0034-quotas-fixed-window.md">0034</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0035-a-result-cache-key-that-cannot-serve-the-wrong-person.md">0035</a></p>
+        <ul><li>A token bucket per principal, checked after authorization</li><li>A fixed, clock-aligned window</li><li>The one cache that sits inside the policy check</li><li>One bucket per payer for the whole fleet, when replicated</li></ul>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0032-rate-limiting-token-bucket.md">0032</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0033-cost-accounting.md">0033</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0034-quotas-fixed-window.md">0034</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0035-a-result-cache-key-that-cannot-serve-the-wrong-person.md">0035</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0067-a-limit-is-a-limit-on-the-fleet.md">0067</a></p>
       </article>
       <article class="card">
         <h3>Firewall</h3>
@@ -295,7 +295,7 @@ make audit-verify       # walk the chain it just wrote</pre>
 
 <footer>
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane">Repository</a> &middot;
-  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/README.md">66 architecture decisions</a> &middot;
+  <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/README.md">67 architecture decisions</a> &middot;
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/THREAT_MODEL.md">Threat model</a> &middot;
   <a href="https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.2.0">v1.2.0</a>
   <p style="margin-top:10px;color:var(--faint)">This page is generated from files in the

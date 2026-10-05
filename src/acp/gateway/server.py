@@ -28,14 +28,8 @@ from acp.approvals import DEFAULT_TTL_SECONDS, ApprovalStore, Outcome, gate
 from acp.audit import AuditLog
 from acp.audit import Category as AuditCategory
 from acp.audit import Outcome as AuditOutcome
-from acp.budget import (
-    CostTable,
-    QuotaCounter,
-    RateLimiter,
-    account,
-    enforce_quota,
-    enforce_rate_limit,
-)
+from acp.budget import CostTable, QuotaCounter, RateLimiter, account
+from acp.budget.charge import Budgets, LocalBudgets
 from acp.exceptions import ACPError, PolicyDeniedError
 from acp.firewall import Firewall, Inspection, frame
 from acp.firewall.catalogue import CatalogueInspection
@@ -128,13 +122,24 @@ def _framed(result: CallToolResult, tool: str, provenance: bool) -> CallToolResu
     return frame(result, tool=tool) if provenance else result
 
 
-def _charge(
+def _keeper(
+    budgets: Budgets | None, limiter: RateLimiter | None, quota: QuotaCounter | None
+) -> Budgets | None:
+    """The budgets' keeper: the one handed over, or the in-memory one wrapped
+    around whichever of the two budgets were. Neither means nothing is charged."""
+    if budgets is not None:
+        return budgets
+    if limiter is None and quota is None:
+        return None
+    return LocalBudgets(limiter, quota)
+
+
+async def _charge(
     *,
     payer: str | None,
     tool: str,
-    limiter: RateLimiter | None,
+    budgets: Budgets | None,
     costs: CostTable | None,
-    quota: QuotaCounter | None,
     charged: Callable[[str, str, float], None] | None = None,
 ) -> None:
     """Draw this call against both budgets, or raise the refusal it earns.
@@ -149,9 +154,11 @@ def _charge(
     Extracted from ``on_call_tool`` for a reason worth stating: it is the *only*
     thing between authorization and the cache, so a reader following the
     security argument in that function should be able to see the whole ordering
-    on one screen.
+    on one screen. The check-both-then-debit-both ordering (ADR 0044 §3) is the
+    keeper's to guarantee — `LocalBudgets` by awaiting nothing between the
+    four calls, `RedisBudgets` by one server-side script (ADR 0067).
     """
-    if payer is None or (limiter is None and quota is None):
+    if payer is None or budgets is None:
         return
     cost = costs.cost_of(tool) if costs is not None else 1.0
     # A monotonic clock for the rate: a wall-clock jump must not hand out or
@@ -159,19 +166,7 @@ def _charge(
     # aligns to real calendar time, not to how long the process has been running.
     mono, wall = time.monotonic(), time.time()
     try:
-        # **Check both, then debit both** (ADR 0044 §3). Debit-then-check let a
-        # call the quota refused spend its rate-limit tokens on the way to
-        # being refused, so a caller at their quota ceiling was also being
-        # drained of burst allowance for calls that never ran. Nothing awaits
-        # between the checks and the debits, so the two cannot disagree.
-        if limiter is not None:
-            enforce_rate_limit(limiter, payer, mono, cost, debit=False)
-        if quota is not None:
-            enforce_quota(quota, payer, wall, cost, debit=False)
-        if limiter is not None:
-            enforce_rate_limit(limiter, payer, mono, cost)
-        if quota is not None:
-            enforce_quota(quota, payer, wall, cost)
+        await budgets.charge(payer, cost, mono=mono, wall=wall)
     except ACPError as exc:
         raise to_mcp_error(exc) from exc
 
@@ -456,6 +451,7 @@ def build_server(
     limiter: RateLimiter | None = None,
     costs: CostTable | None = None,
     quota: QuotaCounter | None = None,
+    budgets: Budgets | None = None,
     cacheable: CacheableTools | None = None,
     results: ResultCache | None = None,
     provenance: bool = False,
@@ -481,6 +477,12 @@ def build_server(
     # single-tenant rules, which from that principal's point of view are some
     # other tenant's policy.
     policies = policy if isinstance(policy, PolicySet) or policy is None else PolicySet(policy)
+
+    # The budgets' keeper. A caller that hands over a limiter or a quota gets
+    # the in-memory one wrapped around them; a caller with a shared store
+    # hands over the keeper itself (`RedisBudgets`, ADR 0067). Neither means
+    # nothing is charged and no keeper is built.
+    keeper = _keeper(budgets, limiter, quota)
 
     # `_ctx` and `_params` are positional in the SDK's handler contract, so
     # they cannot be dropped. Underscore-prefixed until they are used:
@@ -593,12 +595,11 @@ def build_server(
 
         # After authorization: a denied call must not spend budget, and charging
         # a call we would refuse anyway is wasted work.
-        _charge(
+        await _charge(
             payer=account(principal.tenant, principal.subject) if principal is not None else None,
             tool=params.name,
-            limiter=limiter,
+            budgets=keeper,
             costs=costs,
-            quota=quota,
             charged=charged,
         )
         # The result cache, and its position in this function is the whole
@@ -691,6 +692,7 @@ def build_app(
     limiter: RateLimiter | None = None,
     costs: CostTable | None = None,
     quota: QuotaCounter | None = None,
+    budgets: Budgets | None = None,
     cacheable: CacheableTools | None = None,
     results: ResultCache | None = None,
     provenance: bool = False,
@@ -731,6 +733,7 @@ def build_app(
         limiter=limiter,
         costs=costs,
         quota=quota,
+        budgets=budgets,
         cacheable=cacheable,
         results=results,
         provenance=provenance,

@@ -202,7 +202,11 @@ def overhead_tile() -> tuple[str, str, int]:
 
 def measured() -> str:
     rows = (
-        ("0 of 106", "benign documents withheld by the injection firewall", 39),
+        (
+            "0 of 106",
+            "benign documents withheld &mdash; the set the blocking detectors were chosen on",
+            39,
+        ),
         ("75% / 38%", "recall and precision on the family this attack belongs to", 47),
         ("2.14&times;", "of throughput is what durability costs, measured", 53),
         (

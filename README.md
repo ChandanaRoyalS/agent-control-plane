@@ -7,8 +7,9 @@ calls for a human, and records every decision in a hash-chained log.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~2,100 tests · 95% coverage · 70 architecture decisions · 4 mutation harnesses
-proving 20 deliberate breakages are caught**
+**~2,200 tests (about 1,700 on the gateway itself) · 95% branch coverage ·
+70 decision records · 20 hand-picked breakages, each caught by the test meant to
+catch it**
 
 ## Why
 
@@ -18,31 +19,32 @@ the CFO. And everything the agent reads — a ticket, a README, a database row �
 lands in its context as potential instruction. This gateway puts identity,
 policy, screening, approval and audit on the one path every tool call takes.
 
-## Results on attacks nobody here wrote
+## What stops an injection here
+
+**The policy and the human approval are what stop an injected tool call.** Text
+screening logs the injections that announce themselves, and withholds only three
+narrow things: a bidirectional-override character, a base64 run that decodes to
+an instruction, and a result too long to have been screened whole
+([ADR 0069](docs/decisions/0069-the-unexamined-tail-is-the-trigger.md)).
+Everything else it finds reaches the model, fenced and logged.
 
 Measured on [InjecAgent](https://github.com/uiuc-kang-lab/InjecAgent) (ACL
-2024): poisoned tool responses written by other researchers. Half of the attacker
-instructions were sealed before any detector or policy was evaluated on them,
-then scored exactly once
-([ADR 0064](docs/decisions/0064-held-out-v2-scored-once.md)). Held-out, 35 unseen
-instructions:
+2024), poisoned tool responses written by other researchers. The held-out half
+is 35 attacker instructions, each placed in 17 user tasks, in two forms
+([ADR 0064](docs/decisions/0064-held-out-v2-scored-once.md)). Read the third
+column before the second:
 
-| layer | attack form | result |
+| what was measured | result | what it actually shows |
 |---|---|---|
-| injection firewall (text) | "IMPORTANT!!! Ignore all previous instructions…" | **595 / 595** caught |
-| injection firewall (text) | a polite request, no tell-tale phrasing | **0 / 595** caught |
-| policy — least privilege | the tool call the attack needs | **35 / 35** blocked |
-| policy — reads allowed, writes need approval | the tool call the attack needs | **35 / 35** held for a person |
-| either policy | the users' own task tools | **17 / 17** still allowed |
+| text screening, the benchmark's "enhanced" form | caught 595 / 595, **withheld 0** | Every one of those documents begins with the same sentence, *"IMPORTANT!!! Ignore all previous instructions"*, and one regex matches it. One phrasing, not 595 results. |
+| text screening, the "base" form (same 35, no prefix) | caught **0 / 595** | Nothing here recognises a politely worded instruction. (70 of them are flagged, all for a link in one of the benchmark's own templates — the clean version of the same response is flagged too.) Neither did llama3.2 nor ProtectAI's DeBERTa detector, which also flagged most clean tool output ([ADR 0063](docs/decisions/0063-the-control-that-stops-the-polite-injection-is-the-policy.md)). |
+| policy: allow exactly the user's 17 tools | 35 / 35 attack chains blocked | Close to the benchmark's construction — its attacker tools are by design not the user's tools. It shows the evaluator applies a least-privilege policy correctly, not that writing one is easy. |
+| policy: reads allowed, writes held for a person | 35 / 35 chains held at a write | The reads run. Across the benchmark 27 of 94 attacker tool steps are reads (a user's genetic data, a password vault's search), and they execute; only the step that sends is held, and only a person saying no stops it. The read-verb rule was written with the catalogue in view. |
+| either policy, the user's own task tools | 17 / 17 allowed | The cost side, on 17 tools. |
 
-**What it means:** text screening catches the injection that announces itself
-and not the one that reads like a normal request — and neither did a general
-model (llama3.2) or a purpose-built detector (ProtectAI DeBERTa), which flagged
-most clean tool output too ([ADR 0063](docs/decisions/0063-the-control-that-stops-the-polite-injection-is-the-policy.md)).
-What stops the polite attack is the policy, at the tool call it needs.
-That holds when the deployment's policy is scoped this way and a person refuses
-the held call; it does not measure how often an agent is fooled in the first
-place.
+What this measures is a gateway's rule applied to a recorded tool call. It does
+not measure how often an agent is fooled into making one, and no model is in the
+loop.
 
 ## Quickstart
 
@@ -118,12 +120,13 @@ Targets the stateless [2026-07-28 MCP specification](https://blog.modelcontextpr
 
 ## Measured, on this repository's own corpora
 
-| | measured | where |
-|---|---|---|
-| benign documents **withheld** | **0 of 106** | [ADR 0047](docs/decisions/0047-a-baseline-not-a-threshold.md) |
-| benign documents flagged | 19.8% [13–27%] | ADR 0047 |
-| internal held-out split (7 attacks) | 3/7 detected, 0 withheld, all as predicted | [ADR 0060](docs/decisions/0060-the-held-out-split-scored-once-and-what-the-model-adds.md) |
-| head-of-line blocking, found and fixed | p95 2819 ms → 35.7 ms | [ADR 0053](docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md) |
+| | measured | read it as | where |
+|---|---|---|---|
+| benign documents withheld | 0 of 106 | The two blocking detectors were *kept* because they had no hits on these 106, so this confirms a selection rather than testing it. | [ADR 0047](docs/decisions/0047-a-baseline-not-a-threshold.md) |
+| benign documents flagged | 19.8% [13–27%] | The honest false-positive number: one clean document in five is flagged. | ADR 0047 |
+| internal attacks | 21 of 37 detected, 5 withheld; 0 of 10 in the two families with no tell-tale shape | Written by the same hand as the detectors, mostly in their vocabulary. | [THREAT_MODEL §6.1](docs/THREAT_MODEL.md) |
+| internal held-out split | 3 of 7 detected, 0 withheld | Seven documents, one per family; every interval is uninformative. | [ADR 0060](docs/decisions/0060-the-held-out-split-scored-once-and-what-the-model-adds.md) |
+| head-of-line blocking, found and fixed | p95 2819 ms → 35.7 ms | A single before-run, reported in prose; the raw load-test output was not committed. | [ADR 0053](docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md) |
 
 What the gateway costs, generated from the newest committed run in
 [`perf/results/`](perf/results/) — the method is
@@ -139,9 +142,11 @@ and a test fails if these rows and that file disagree:
 Sequential, one request in flight, mock upstreams; commit `4af760c`; switches `auth=on exchange=on cache=on costs=on ratelimit=on quota=on screening=on framing=on tracing=on fsync=on probing=on`.
 <!-- overhead:end -->
 
-Every number comes from a harness in this repository, and two of them gate CI:
-the firewall cannot get worse on the internal corpus or on InjecAgent without a
-build failing.
+One machine, 150 sequential requests, a mock upstream that answers in about a
+millisecond: an upper bound on what the gateway itself adds, not a throughput
+figure, and no concurrent-load number is committed. Every number above comes
+from a harness in this repository, and two of them gate CI: the firewall cannot
+get worse on the internal corpus or on InjecAgent without a build failing.
 
 ## How this was built
 
@@ -151,23 +156,33 @@ Because generated code is easy to accept without checking, the repository is
 built to make its own claims checkable:
 
 - **Every change is a pull request** against a protected `main`, through the
-  same `make check` CI runs: lint, format, strict types, ~2,100 tests, an 80%
+  same `make check` CI runs: lint, format, strict types, the test suite, an 80%
   coverage floor.
-- **Mutation harnesses** break the security invariants on purpose (20 ways) and
-  fail if the tests do not notice.
+- **Four mutation harnesses** break four invariants on purpose, 20 hand-picked
+  ways, and fail unless the named test catches each one. A targeted check on
+  the properties that matter most, not a mutation score for the codebase.
 - **The release surface is a file**, and a test fails when it changes unannounced
   ([ADR 0058](docs/decisions/0058-a-version-is-a-promise-about-a-surface.md)).
-- **Evaluation numbers are pre-registered:** held-out splits are sealed by rule
-  and scored once, and external attacks come from people with no stake in the
-  result.
-- **A full evaluation of the repository** (October 2026) found 16 issues,
-  including real concurrency and audit-chain bugs; each fix went through its own
-  pull request with a regression test.
+- **Held-out splits are held out by convention, not by mechanism.** Nothing
+  stops a single author reading them. What the git history does show: the
+  detector patterns last changed on 2026-08-11 and the set allowed to withhold
+  on 2026-08-12, the InjecAgent corpus was imported on 2026-10-04, and each
+  split was scored once and then marked spent in its own manifest.
+- **Two reviews in October 2026.** The first found 16 issues, including
+  concurrency and audit-chain bugs. The second, an independent run against
+  v1.3.0 with exploit scripts, found two authorization bypasses — an
+  argument-level `deny` defeated by capitalising one word, and a payload placed
+  past the screening window — and four configuration holes a replicated
+  deployment would hit. Each was fixed in a pull request with a regression test
+  and a decision record ([0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md),
+  [0069](docs/decisions/0069-the-unexamined-tail-is-the-trigger.md),
+  [0070](docs/decisions/0070-the-fleet-release-made-true.md)). Its other findings
+  are below, under what this does not do.
 
 ## Decisions worth reading
 
-All 64 are in [`docs/decisions/`](docs/decisions/README.md). Start with the ones
-where the measurement disagreed with the plan:
+All of them are in [`docs/decisions/`](docs/decisions/README.md). Start with the
+ones where a measurement or a reviewer disagreed with the plan:
 
 - [0047](docs/decisions/0047-a-baseline-not-a-threshold.md) — the benign corpus
   demoted two detectors
@@ -178,6 +193,10 @@ where the measurement disagreed with the plan:
   external attacks caught, and why the result is reported that way
 - [0063](docs/decisions/0063-the-control-that-stops-the-polite-injection-is-the-policy.md)
   — no text detector separates a polite injection from a request; the policy does
+- [0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md)
+  — an outside reviewer bypassed an argument-level `deny` by sending
+  `Production`; the fix is a rule about which side of a constraint costs the
+  caller
 
 ## Development
 
@@ -196,12 +215,24 @@ make overhead       # gateway cost, with its configuration printed
 Full threat model: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md), written for
 somebody looking for gaps.
 
-- **Not security reviewed.** Do not put it in front of anything real.
+- **Not production-ready.** One outside review found two authorization bypasses
+  in a released version; both are fixed, and there are more. Do not put it in
+  front of anything real.
+- **The safety controls are off by default.** A bare `acp serve` requires
+  authentication and nothing else: no audit chain, no firewall, no cost table,
+  no cache. The compose stack turns them on; a deployment has to as well.
 - **Polite injections pass the firewall** (0 of 595 held-out); only the policy
   stops their actions, and only if it is scoped tightly and the human says no.
   An attack that only needs reads would pass the broad policy.
 - **Attacks split across two documents** are caught by nothing — screening sees
   one result at a time.
+- **The detectors match fixed phrasings.** Rewording the override, a Cyrillic
+  homoglyph, spaced-out letters, base64 split across a line, or the same
+  sentence in another language all pass them. There is no evasion corpus yet,
+  so this is stated, not measured.
+- **There is no model anywhere in the request path or the demo.** The demo
+  "agent" is a parser that follows the instructions it reads, by design, and
+  nothing tests whether a real model honours the provenance fence.
 - **Enforce mode withholds on two detectors and one condition**: a
   bidirectional override, a base64 run that decodes to an instruction, or a
   result too long to have been screened whole ([ADR 0069](docs/decisions/0069-the-unexamined-tail-is-the-trigger.md)).
@@ -221,6 +252,25 @@ somebody looking for gaps.
   by default a restart loses them and a second replica cannot see them.
 - **Rate limits and quotas are per process unless `ACP_BUDGET_STORE_URL` is
   set**; by default every replica hands out its own burst and its own quota.
+
+## What I would do with another month
+
+In this order, because the first one changes what the project is evidence of:
+
+1. **Put a model on the enforcement path and measure it.** A small fine-tuned
+   classifier, scored with intervals on the benign corpus, the internal
+   attacks, an evasion corpus and InjecAgent, allowed to withhold only above a
+   precision measured on benign data. The evaluation machinery for that exists;
+   the model does not.
+2. **Build the evasion corpus** from the phrasings above, and report it beside
+   the other numbers.
+3. **Drive the gateway with a real MCP client and a real model**: one
+   end-to-end test through the Python SDK's client, and a demo agent that is a
+   small local model rather than a parser.
+4. **Sign the audit chain** — HMAC per entry or signed checkpoints, which is a
+   key-management decision before it is code.
+5. **Commit raw load-test output** and a concurrent-throughput row beside the
+   sequential overhead.
 
 ## Roadmap
 

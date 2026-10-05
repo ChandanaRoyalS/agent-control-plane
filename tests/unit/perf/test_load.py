@@ -91,6 +91,18 @@ def test_a_run_that_started_fewer_users_than_requested_is_refused() -> None:
         runs(a_record(a_run(users_started=0)))
 
 
+@pytest.mark.parametrize("outcome", ["throttled", "upstream", "unrecorded", "failed"])
+def test_a_run_that_measured_something_other_than_the_gateway_is_refused(outcome: str) -> None:
+    """The first real run on 2026-10-05: 46% and 55% of requests throttled by
+    the compose stack's demo-sized rate limit. Its latencies described a queue,
+    and the harness said so; the recorder now refuses to quote it."""
+    run = a_run()
+    run["outcomes"][outcome] = {"count": 1, "share": 0.01, "p50_ms": 1, "p95_ms": 1, "p99_ms": 1}
+
+    with pytest.raises(LoadRecordError, match=outcome):
+        runs(a_record(run))
+
+
 def test_a_run_that_served_nothing_is_refused() -> None:
     run = summarise(
         samples("refused", [1.0]),
@@ -120,6 +132,7 @@ def test_the_block_quotes_every_level_in_order_with_its_evidence(tmp_path: Path)
     assert "perf/results/load-2026-10-05-abcdef0/" in rendered, "the raw CSVs are linked"
     assert "`abcdef0`" in rendered
     assert "auth=on audit=on" in rendered
+    assert "no request throttled or failed" in rendered
 
 
 def test_the_newest_summary_by_name_is_the_one_quoted(tmp_path: Path) -> None:
@@ -152,3 +165,15 @@ def test_the_readme_quotes_the_newest_committed_load_run() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert current(readme) == block(latest(), root=ROOT)
+
+
+def test_every_committed_raw_directory_has_its_accepted_summary() -> None:
+    """The first recorded run was refused (the gateway never started) and its
+    raw CSVs were committed anyway: 73,617 refused connections sitting in
+    perf/results/ as though they were a measurement. The recorder now keeps
+    raw output out of the tree until the summary is accepted; this keeps the
+    tree honest whatever a person commits by hand."""
+    results = ROOT / "perf" / "results"
+    for raw in results.glob("load-*"):
+        if raw.is_dir():
+            assert raw.with_suffix(".json").exists(), f"{raw.name}/ has no accepted summary"

@@ -34,7 +34,10 @@ And a local model can now be the demo's agent instead of a parser.
   gateway via the official client. `make model-demo` runs one trial per path;
   `make model-demo-record` runs ten seeded trials each, commits every
   transcript under `docs/demo/model/`, and regenerates the README rows from
-  it. A run in which the model never called a tool is refused.
+  it. A run in which the model never called a tool is refused. Calls a
+  model writes into its prose as JSON are read and marked; a trial that
+  names the payroll file without calling for it is counted as *described
+  only*; and records are kept per model.
 
 ### Fixed
 

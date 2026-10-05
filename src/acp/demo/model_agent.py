@@ -91,6 +91,9 @@ class Observation:
 class ToolCall:
     name: str
     arguments: dict[str, Any]
+    from_text: bool = False
+    """Written as JSON in the reply's prose rather than in Ollama's tool-call
+    field. Kept on the record, so a reader can see which calls needed it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +126,7 @@ class Step:
     tool: str
     arguments: dict[str, Any]
     observation: Observation
+    from_text: bool = False
 
 
 @dataclass(slots=True)
@@ -163,7 +167,9 @@ async def run_agent(
         )
         for call in reply.calls:
             observation = await caller.call(call.name, call.arguments)
-            transcript.steps.append(Step(call.name, call.arguments, observation))
+            transcript.steps.append(
+                Step(call.name, call.arguments, observation, from_text=call.from_text)
+            )
             messages.append(
                 {"role": "tool", "tool_name": call.name, "content": observation.for_model()}
             )
@@ -190,33 +196,95 @@ def ollama_tools(tools: Sequence[Tool]) -> list[dict[str, Any]]:
     ]
 
 
-def parse_reply(payload: Mapping[str, Any]) -> Reply:
-    """Ollama's chat response, read defensively.
+def _arguments(value: object) -> dict[str, Any] | None:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return value if isinstance(value, dict) else None
 
-    Small models emit arguments as an object or as a JSON string depending on
-    the model and version; both are accepted. Anything that is not a named
-    call with object arguments is dropped rather than guessed at — the model
-    then sees no result for it and usually tries again or answers.
-    """
-    message = payload.get("message")
-    if not isinstance(message, Mapping):
-        return Reply(content="")
-    content = message.get("content")
+
+def _structured(message: Mapping[str, Any]) -> list[ToolCall]:
     calls: list[ToolCall] = []
     for raw in message.get("tool_calls") or ():
         function = raw.get("function") if isinstance(raw, Mapping) else None
         if not isinstance(function, Mapping):
             continue
         name = function.get("name")
-        arguments = function.get("arguments", {})
-        if isinstance(arguments, str):
-            try:
-                arguments = json.loads(arguments)
-            except json.JSONDecodeError:
-                continue
-        if isinstance(name, str) and name and isinstance(arguments, dict):
+        arguments = _arguments(function.get("arguments", {}))
+        if isinstance(name, str) and name and arguments is not None:
             calls.append(ToolCall(name=name, arguments=arguments))
-    return Reply(content=content if isinstance(content, str) else "", calls=tuple(calls))
+    return calls
+
+
+def _json_values(text: str) -> list[object]:
+    """Every JSON object or array that starts somewhere in ``text``.
+
+    Scans rather than parses the whole reply, because the call is usually
+    wrapped in prose or a code fence.
+    """
+    decoder = json.JSONDecoder()
+    found: list[object] = []
+    index = 0
+    while index < len(text):
+        if text[index] in "{[":
+            try:
+                value, end = decoder.raw_decode(text, index)
+            except json.JSONDecodeError:
+                index += 1
+                continue
+            found.append(value)
+            index = end
+        else:
+            index += 1
+    return found
+
+
+def _written(content: str, offered: frozenset[str]) -> list[ToolCall]:
+    """Calls a model wrote into its prose as JSON.
+
+    Small models do this routinely: llama3.2 answers a tool result with
+    ``{"name": "mock-a__create_ticket", "parameters": {...}}`` in the text
+    instead of in the tool-call field. The first recorder read only the field,
+    so every such call counted as the model finishing, and a run in which the
+    model was plainly following the runbook was scored *not persuaded* (ADR
+    0073, amendment). Only a tool that was offered counts, so prose that
+    happens to contain JSON does not invent calls.
+    """
+    calls: list[ToolCall] = []
+    pending: list[object] = list(_json_values(content))
+    while pending:
+        value = pending.pop(0)
+        if isinstance(value, list):
+            pending[:0] = value
+            continue
+        if not isinstance(value, Mapping):
+            continue
+        inner = value.get("function")
+        source = inner if isinstance(inner, Mapping) else value
+        name = source.get("name")
+        arguments = _arguments(source.get("parameters", source.get("arguments", {})))
+        if isinstance(name, str) and name in offered and arguments is not None:
+            calls.append(ToolCall(name=name, arguments=arguments, from_text=True))
+    return calls
+
+
+def parse_reply(payload: Mapping[str, Any], offered: frozenset[str] = frozenset()) -> Reply:
+    """Ollama's chat response, read defensively.
+
+    Calls come from the tool-call field first. Only when it is empty are calls
+    written into the prose read (`_written`), and only for tools in
+    ``offered``. Arguments may be an object or a JSON string. Anything else is
+    dropped rather than guessed at.
+    """
+    message = payload.get("message")
+    if not isinstance(message, Mapping):
+        return Reply(content="")
+    raw = message.get("content")
+    content = raw if isinstance(raw, str) else ""
+    calls = _structured(message) or _written(content, offered)
+    return Reply(content=content, calls=tuple(calls))
 
 
 class OllamaChat:
@@ -255,4 +323,5 @@ class OllamaChat:
         )
         response.raise_for_status()
         payload = response.json()
-        return parse_reply(payload if isinstance(payload, Mapping) else {})
+        offered = frozenset(tool.name for tool in tools)
+        return parse_reply(payload if isinstance(payload, Mapping) else {}, offered)

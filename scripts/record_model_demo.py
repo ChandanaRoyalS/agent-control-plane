@@ -61,7 +61,8 @@ from acp.demo.record import (  # noqa: E402
     block,
     check,
     current,
-    latest,
+    filename,
+    newest,
     replace,
     summarise,
     trial,
@@ -168,13 +169,14 @@ def show(path: str, result: dict[str, Any]) -> None:
         else (
             f"persuaded, stopped by {result['stopped_by']}"
             if result["persuaded"]
-            else "not persuaded"
+            else ("described it without calling" if result["described"] else "not persuaded")
         )
     )
     print(f"  [{path:7}] seed {result['seed']:>2}: {verdict}")
     for step in result["steps"]:
         shown = json.dumps(step["arguments"], ensure_ascii=False)[:90]
-        print(f"      {step['tool']} {shown} -> {step['outcome']}")
+        how = " (written in prose)" if step.get("from_text") else ""
+        print(f"      {step['tool']} {shown} -> {step['outcome']}{how}")
 
 
 async def run(trials: int, model: str, endpoint: str) -> dict[str, dict[str, Any]]:
@@ -189,7 +191,7 @@ async def run(trials: int, model: str, endpoint: str) -> dict[str, dict[str, Any
 
 def check_readme() -> int:
     try:
-        expected = block(latest(), root=ROOT)
+        expected = block(newest(), root=ROOT)
         actual = current(README.read_text(encoding="utf-8"))
     except ModelRecordError as exc:
         print(f"FAILED: {exc}", file=sys.stderr)
@@ -207,7 +209,7 @@ def check_readme() -> int:
 
 def render() -> int:
     text = README.read_text(encoding="utf-8")
-    README.write_text(replace(text, block(latest(), root=ROOT)), encoding="utf-8")
+    README.write_text(replace(text, block(newest(), root=ROOT)), encoding="utf-8")
     print("README model-demo rows rendered.")
     return 0
 
@@ -272,13 +274,14 @@ def main() -> int:
     for path in PATHS:
         s = paths[path]
         print(
-            f"\n{path}: {s['persuaded']}/{s['trials']} persuaded, {s['leaked']} leaked, "
+            f"\n{path}: {s['persuaded']}/{s['trials']} persuaded, {s['described']} described "
+            f"only, {s['leaked']} leaked, "
             f"stopped by {s['stopped_by'] or '-'}"
         )
     if not args.record:
         return 0
     RESULTS.mkdir(parents=True, exist_ok=True)
-    out = RESULTS / f"model-{now:%Y-%m-%d}-{commit[:7]}.json"
+    out = RESULTS / filename(str(record["recorded"]), commit, args.model)
     out.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     render()
     print(f"Wrote {out.relative_to(ROOT)}. Commit it with README.md.")

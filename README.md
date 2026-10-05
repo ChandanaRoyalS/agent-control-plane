@@ -148,7 +148,12 @@ figure. Under concurrent agents, generated from the newest committed load run
 in [`perf/results/`](perf/results/), with locust's raw output beside it:
 
 <!-- load:begin -->
-No concurrent run has been recorded yet: `make up && make load-record`.
+| concurrent agents | throughput | served p50 | served p95 | served p99 | listed p95 |
+|---|---|---|---|---|---|
+| 20 | 653 req/s | 4 ms | 11 ms | 17 ms | 4 ms |
+| 50 | 909 req/s | 29 ms | 57 ms | 70 ms | 8 ms |
+
+30s per level, first 3.0s discarded, 0-50 ms think time per agent, mock upstreams, no request throttled or failed (a run with either is refused); [2026-10-05, Darwin arm64](perf/results/load-2026-10-05-ed61a8c.json), raw locust CSVs in [`perf/results/load-2026-10-05-ed61a8c/`](perf/results/load-2026-10-05-ed61a8c/); commit `ed61a8c`; switches `auth=on exchange=on cache=on costs=on ratelimit=OFF quota=OFF screening=on framing=on tracing=on fsync=on probing=on`.
 <!-- load:end -->
 
 Every number above comes from a harness in this repository, and two of them

@@ -1,0 +1,77 @@
+{
+  "commit": "ed61a8c7671f638ad67e293e6cbae9247755970b",
+  "dirty": false,
+  "flags": "auth=on exchange=on cache=on costs=on ratelimit=OFF quota=OFF screening=on framing=on tracing=on fsync=on probing=on",
+  "machine": {
+    "cpus": 10,
+    "machine": "arm64",
+    "python": "3.14.7",
+    "release": "25.6.0",
+    "system": "Darwin"
+  },
+  "recorded": "2026-10-05T07:53:58+00:00",
+  "run_seconds": 30,
+  "runs": [
+    {
+      "failed_to_start": 0,
+      "outcomes": {
+        "held": {
+          "count": 1212,
+          "p50_ms": 3.7,
+          "p95_ms": 9.8,
+          "p99_ms": 14.8,
+          "share": 0.0621
+        },
+        "listed": {
+          "count": 2437,
+          "p50_ms": 1.8,
+          "p95_ms": 4.4,
+          "p99_ms": 8.9,
+          "share": 0.1249
+        },
+        "served": {
+          "count": 15857,
+          "p50_ms": 3.9,
+          "p95_ms": 10.7,
+          "p99_ms": 16.9,
+          "share": 0.8129
+        }
+      },
+      "requests": 19506,
+      "throughput_rps": 653.4,
+      "users_requested": 20,
+      "users_started": 20
+    },
+    {
+      "failed_to_start": 0,
+      "outcomes": {
+        "held": {
+          "count": 1680,
+          "p50_ms": 28.0,
+          "p95_ms": 39.8,
+          "p99_ms": 60.3,
+          "share": 0.0618
+        },
+        "listed": {
+          "count": 3398,
+          "p50_ms": 2.7,
+          "p95_ms": 8.1,
+          "p99_ms": 23.4,
+          "share": 0.125
+        },
+        "served": {
+          "count": 22110,
+          "p50_ms": 28.6,
+          "p95_ms": 56.6,
+          "p99_ms": 69.5,
+          "share": 0.8132
+        }
+      },
+      "requests": 27188,
+      "throughput_rps": 909.0,
+      "users_requested": 50,
+      "users_started": 50
+    }
+  ],
+  "warmup_seconds": 3.0
+}

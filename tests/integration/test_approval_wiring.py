@@ -102,6 +102,8 @@ def settings_for(
         approval_ttl_seconds=approval_ttl_seconds,
         approval_max_pending=approval_max_pending,
         approval_store_url=approval_store_url,
+        # These tests are about approvals; a chain is somebody else's subject.
+        audit_required=False,
         **extra,
     )
 

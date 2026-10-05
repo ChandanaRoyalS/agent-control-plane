@@ -189,7 +189,7 @@
     {
       "variable": "ACP_FIREWALL_MODE",
       "type": "Mode(off|report|enforce)",
-      "default": "off"
+      "default": "report"
     },
     {
       "variable": "ACP_HEALTH_PROBE_INTERVAL",

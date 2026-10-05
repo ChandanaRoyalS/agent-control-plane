@@ -15,6 +15,26 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+### Changed — breaking
+
+- **The gateway refuses to start without an audit file** while
+  `ACP_AUDIT_REQUIRED` is true, which is the default (ADR 0071). Set
+  `ACP_AUDIT_FILE`, or set `ACP_AUDIT_REQUIRED=false` to run without a
+  record on purpose; the second is logged at WARNING every start. This is
+  the treatment `ACP_AUTH_REQUIRED` already gives a missing identity
+  provider.
+- **`ACP_FIREWALL_MODE` defaults to `report`** (was `off`). Every tool
+  result is screened and findings are logged; nothing the caller receives
+  changes. `enforce` stays opt-in; `off` is still accepted.
+
+### Added
+
+- Every start logs `gateway.controls`, the state of every control, and
+  `gateway.safety_controls_off` at WARNING naming whichever of
+  authentication, audit and the firewall is off.
+- `.env.example` documents the audit chain, which it never mentioned, and
+  its firewall section describes the current enforcement bar.
+
 ## [1.3.1] - 2026-10-05
 
 Security fixes from an independent review of v1.3.0: two authorization

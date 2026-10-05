@@ -21,16 +21,33 @@ The rules, spelled out because everything downstream assumes them:
   request with no actor at all: `None` is in no list. "Unset means any" and "set
   means one of these" are different claims, and a non-delegated request satisfies
   the first but not the second.
+- **An argument constraint fails closed in the direction of its rule** (ADR
+  0068). An `allow` constrained by an argument grants only a call that supplies
+  it as a scalar whose canonical form is exactly in the set. A `deny` or
+  `require_approval` constrained by an argument is *cleared* only by a call that
+  supplies it as a scalar whose folded form is outside the set — a missing
+  argument, a list or object where a scalar was expected, a different case or
+  stray whitespace all leave the restriction in force. The same words, "set
+  means one of these", read from the side that costs the caller.
 """
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
 from acp.identity.principal import Principal
-from acp.policy.schema import Effect, Policy, Rule
+from acp.policy.schema import RESTRICTIVE, Effect, Policy, Rule, canonical
+
+
+def folded(text: str) -> str:
+    """The form a restriction compares on: compatibility-normalised, case-folded,
+    trimmed. ``Production``, ``production `` and a full-width ``production`` (U+FF50
+    for the p) are all the production dataset to the upstream that reads them; a deny that
+    could be stepped around by any of them was never a deny."""
+    return unicodedata.normalize("NFKC", text).casefold().strip()
 
 
 class Verdict(StrEnum):
@@ -133,20 +150,27 @@ def _rule_matches(
 
     Every set field must match; an unset field (empty tuple, or empty ``args``)
     matches anything. A rule that names actors cannot match a request whose actor
-    is ``None``. A rule that constrains an argument cannot match a call that omits
-    that argument or supplies a value outside the allowed set — the same "set
-    means one of these" claim as the other fields, so a missing argument is not a
-    match any more than a missing actor is.
+    is ``None``.
+
+    Arguments are the one field read differently by effect (ADR 0068). An
+    ``allow`` constrained by an argument matches only a call that supplies it as
+    a scalar exactly in the set: the caller is asking for a grant and must earn
+    it precisely. A ``deny`` or ``require_approval`` constrained by an argument
+    matches *unless* the call supplies it as a scalar whose folded form is
+    outside the set: the caller is asking to be let past a restriction, and a
+    missing, unreadable or merely re-spelled value does not clear it. Either way
+    the doubtful case costs the caller, which is the only reading under which an
+    argument-level deny is a deny.
     """
     if not matches_without_arguments(rule, subject, actor, tool):
         return False
+    restrictive = rule.effect in RESTRICTIVE
     for name, allowed in rule.args.items():
-        if name not in arguments:
-            return False
-        # Compare as a string: policy values are strings (YAML scalars), and a
-        # tool argument's JSON value may be a number or bool. Matching by string
-        # form keeps the exact-match model simple and predictable across types.
-        if str(arguments[name]) not in allowed:
+        value = canonical(arguments[name]) if name in arguments else None
+        if restrictive:
+            if value is not None and folded(value) not in {folded(a) for a in allowed}:
+                return False
+        elif value is None or value not in allowed:
             return False
     return True
 

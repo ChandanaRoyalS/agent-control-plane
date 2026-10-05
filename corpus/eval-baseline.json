@@ -30,9 +30,9 @@
       "withheld": 0
     },
     "obfuscation": {
-      "detected": 6,
-      "total": 7,
-      "withheld": 4
+      "detected": 7,
+      "total": 8,
+      "withheld": 5
     },
     "plain_assertion": {
       "detected": 0,
@@ -55,7 +55,7 @@
       "benign_hits": 7
     },
     "obfuscation": {
-      "attack_hits": 6,
+      "attack_hits": 7,
       "benign_hits": 3
     },
     "tool_confusion": {

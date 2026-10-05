@@ -109,14 +109,37 @@ def test_a_rule_constraining_an_argument_the_call_sent_is_only_a_possibility() -
     assert [decision.rule for decision in possible] == ["deny-secret", "allow-search"]
 
 
-def test_a_rule_constraining_an_argument_the_call_never_sent_cannot_have_fired() -> None:
+def test_a_grant_constraining_an_argument_the_call_never_sent_cannot_have_fired() -> None:
     """**The reason the log records argument names at all.**
 
-    A missing argument is not a match (ADR 0031), so this is certainty rather
-    than an assumption — a definite answer recovered from a field that records
-    nothing sensitive. Without it this call would be reported as indeterminate
-    and a reviewer would have to check it by hand.
+    A missing argument cannot earn a grant (ADR 0068), so this is certainty
+    rather than an assumption — a definite answer recovered from a field that
+    records nothing sensitive. Without it this call would be reported as
+    indeterminate and a reviewer would have to check it by hand.
     """
+    policy = Policy(
+        rules=(
+            Rule(
+                name="allow-public",
+                effect=Effect.ALLOW,
+                tools=(TOOL,),
+                args={"doc_id": ("public",)},
+            ),
+            Rule(name="deny-rest", effect=Effect.DENY, tools=(TOOL,)),
+        )
+    )
+
+    possible = possible_decisions(policy, "alice", None, TOOL, frozenset({"query"}))
+
+    assert len(possible) == 1
+    assert possible[0].rule == "deny-rest"
+
+
+def test_a_restriction_constraining_an_argument_the_call_never_sent_did_fire() -> None:
+    """The other half of ADR 0068, and the simulator must agree with the
+    evaluator about it: a deny on `doc_id = secret` holds a call that sent no
+    `doc_id`, so the call was decided by the deny, with certainty, and the
+    allow behind it was never reached."""
     policy = Policy(
         rules=(
             Rule(
@@ -129,7 +152,7 @@ def test_a_rule_constraining_an_argument_the_call_never_sent_cannot_have_fired()
     possible = possible_decisions(policy, "alice", None, TOOL, frozenset({"query"}))
 
     assert len(possible) == 1
-    assert possible[0].rule == "allow-search"
+    assert possible[0].rule == "deny-secret"
 
 
 def test_an_unknown_argument_set_cannot_rule_anything_out() -> None:

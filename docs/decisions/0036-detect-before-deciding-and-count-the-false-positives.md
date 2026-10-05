@@ -1,6 +1,6 @@
 # ADR 0036 — Detect before deciding, and make the false positives countable
 
-**Status:** accepted
+**Status:** amended by [ADR 0069](0069-the-unexamined-tail-is-the-trigger.md) — a truncated screening now withholds in enforce mode, not only declines to cache
 **Date:** 2026-08-11
 
 ## Context

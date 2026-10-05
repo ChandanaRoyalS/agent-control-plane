@@ -44,7 +44,7 @@ from acp.firewall.catalogue import (
     serve,
 )
 from acp.firewall.classifier import OllamaClassifier
-from acp.firewall.findings import Confidence, Finding
+from acp.firewall.findings import Confidence, Family, Finding
 from acp.firewall.screen import MAX_SCREENED_CHARS, Screener, Screening, ScreenPolicy
 from acp.observability import metrics
 from acp.upstream.models import CallToolResult, ContentBlock, ToolDefinition
@@ -179,14 +179,33 @@ class Inspection:
     def cacheable(self) -> bool:
         """Whether this result may be stored.
 
-        Not refused, and not truncated. The second half is ADR 0036's open
-        question answered: refusing a document for being long would be a false
-        positive with an obvious trigger, but storing one whose tail was never
-        examined turns a single unexamined document into every subsequent
-        caller's answer for the length of its TTL. Served once, examined in
-        part, never repeated.
+        Not refused, and not truncated. In enforce mode the second half is
+        implied by the first (a truncated screening is refused, ADR 0069); in
+        report mode it stands alone: a long document is served once, examined
+        in part, and never repeated from the cache, because storing one whose
+        tail was never examined turns a single unexamined document into every
+        subsequent caller's answer for the length of its TTL.
         """
         return not self.refused and not self.screening.truncated
+
+
+UNEXAMINED_TAIL: Final = "unexamined_tail"
+"""The trigger a truncated screening earns. Not a detector — nothing ran — and
+not on `ENFORCEABLE`, because it is not a claim about the text; it is the
+absence of one. It withholds for the reason ADR 0069 gives: a document whose
+tail no detector read is a document whose tail an attacker chose."""
+
+
+def truncation_trigger(screening: Screening) -> Finding:
+    return Finding(
+        detector=UNEXAMINED_TAIL,
+        family=Family.OBFUSCATION,
+        confidence=Confidence.HIGH,
+        evidence=(
+            f"document exceeds the {screening.scanned_chars}-character screening window; "
+            f"its tail was not examined"
+        ),
+    )
 
 
 def triggers_for(screening: Screening) -> tuple[Finding, ...]:
@@ -197,17 +216,27 @@ def triggers_for(screening: Screening) -> tuple[Finding, ...]:
     detector makes about itself; the list is what decides which detectors are
     trusted to make it.
 
+    And one condition on the screening itself: that it read the whole document.
+    A result longer than the window was screened in part, and "no findings in
+    the part I looked at" is not "no findings" (ADR 0069). The unexamined tail
+    is a trigger in its own right — the only place a payload can sit that no
+    detector will ever see is the one place an attacker who knows the window
+    will put it.
+
     There used to be a third condition — that a host-dependent detector could
     only withhold once the deployment had configured its allowed hosts. It went
     when `external_image` left the enforceable list, because a condition on a
     detector that can no longer withhold anything is a guard that cannot fire,
     and a guard that cannot fire is worse than none: a reader trusts it.
     """
-    return tuple(
+    found = tuple(
         finding
         for finding in screening.findings
         if finding.confidence is Confidence.HIGH and finding.detector in ENFORCEABLE
     )
+    if screening.truncated:
+        return (*found, truncation_trigger(screening))
+    return found
 
 
 def refusal(tool: str, triggers: tuple[Finding, ...], incident: str) -> CallToolResult:

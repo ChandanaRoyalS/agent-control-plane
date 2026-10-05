@@ -23,6 +23,10 @@ to the deny default, testing one branch very thoroughly and nothing else.
 
 from __future__ import annotations
 
+import json
+import unicodedata
+from collections.abc import Callable
+
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -95,8 +99,28 @@ def requests(draw: st.DrawFn) -> tuple[Principal, str, dict[str, object]]:
     )
     arguments: dict[str, object] = {}
     if draw(st.booleans()):
-        arguments["doc_id"] = draw(st.sampled_from(ARG_VALUES))
+        arguments["doc_id"] = draw(argument_values)
     return principal, draw(tools), arguments
+
+
+# The spellings of an argument an attacker controls: the values the policy
+# names, their re-spellings (case, whitespace, compatibility characters), the
+# JSON types a client might send instead of a string, and the shapes that are
+# not scalars at all.
+SPELLINGS = tuple(
+    variant
+    for value in ARG_VALUES
+    for variant in (value, value.upper(), value.title(), f" {value}", f"{value}\t", f"{value}s")
+)
+argument_values: st.SearchStrategy[object] = st.one_of(
+    st.sampled_from(SPELLINGS),
+    st.sampled_from(["\uff50ublic", "\uff53ecret"]),  # full-width first letters
+    st.integers(min_value=0, max_value=3),
+    st.booleans(),
+    st.none(),
+    st.lists(st.sampled_from(ARG_VALUES), max_size=2),
+    st.fixed_dictionaries({"value": st.sampled_from(ARG_VALUES)}),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +338,94 @@ def _matches(rule: Rule, principal: Principal, tool: str, arguments: dict[str, o
         return False
     if rule.tools and tool not in rule.tools:
         return False
-    return all(
-        name in arguments and str(arguments[name]) in allowed for name, allowed in rule.args.items()
+    # ADR 0068, from its prose: a grant is earned by a scalar exactly in the
+    # set; a restriction is cleared only by a scalar whose folded form is
+    # outside it. Anything else - absent, a list, an object - matches the
+    # restriction and not the grant.
+    for name, allowed in rule.args.items():
+        value = arguments.get(name)
+        if isinstance(value, bool):
+            scalar: str | None = "true" if value else "false"
+        elif isinstance(value, str):
+            scalar = value
+        elif isinstance(value, int | float):
+            scalar = json.dumps(value)
+        else:
+            scalar = None
+        if rule.effect is Effect.ALLOW:
+            if scalar is None or scalar not in allowed:
+                return False
+        elif scalar is not None and _fold(scalar) not in {_fold(a) for a in allowed}:
+            return False
+    return True
+
+
+def _fold(text: str) -> str:
+    return unicodedata.normalize("NFKC", text).casefold().strip()
+
+
+# ---------------------------------------------------------------------------
+# The invariant ADR 0068 adds: a restriction cannot be re-spelled away
+# ---------------------------------------------------------------------------
+
+
+def _restriction_and_grant(value: str, effect: Effect) -> Policy:
+    """The natural shape: a narrow restriction on one argument value in front
+    of a broad grant for the tool. The shape W1 of the external review bypassed."""
+    return Policy(
+        rules=(
+            Rule(name="narrow", effect=effect, tools=TOOLS, args={"doc_id": (value,)}),
+            Rule(name="broad", effect=Effect.ALLOW, tools=TOOLS),
+        )
     )
+
+
+@given(
+    value=st.sampled_from(ARG_VALUES),
+    effect=st.sampled_from([Effect.DENY, Effect.REQUIRE_APPROVAL]),
+    mutation=st.sampled_from(
+        [
+            lambda v: v.upper(),
+            lambda v: v.title(),
+            lambda v: f" {v}",
+            lambda v: f"{v} ",
+            lambda v: f"{v}\n",
+            lambda v: [v],
+            lambda v: {"value": v},
+            lambda v: "\uff50" + v[1:] if v.startswith("p") else "\uff53" + v[1:],
+            lambda v: None,
+        ]
+    ),
+    tool=tools,
+)
+def test_no_respelling_of_a_restricted_argument_reaches_the_grant(
+    value: str, effect: Effect, mutation: object, tool: str
+) -> None:
+    """For a restriction on `doc_id = value`, no mutation of the value that a
+    human would read as the same value - and no non-scalar, and no omission -
+    may fall through to the broad allow behind it. The restriction's own
+    decision (deny, or hold for approval) is the only outcome."""
+    policy = _restriction_and_grant(value, effect)
+    principal = Principal(subject="alice", issuer=ISSUER)
+    mutate: Callable[[str], object] = mutation  # type: ignore[assignment]
+    mutated = mutate(value)
+    arguments: dict[str, object] = {} if mutated is None else {"doc_id": mutated}
+
+    decision = evaluate(policy, principal, tool, arguments)
+
+    assert decision.rule == "narrow", (mutated, decision)
+    assert decision.allowed is False
+
+
+@given(value=st.sampled_from(ARG_VALUES), tool=tools)
+def test_a_readable_different_value_does_clear_a_restriction(value: str, tool: str) -> None:
+    """The restriction is narrow, not total: a scalar the upstream will read
+    as a different value is not restricted by it."""
+    other = next(v for v in ARG_VALUES if v != value)
+    policy = _restriction_and_grant(value, Effect.DENY)
+    principal = Principal(subject="alice", issuer=ISSUER)
+
+    decision = evaluate(policy, principal, tool, {"doc_id": other})
+
+    assert decision.rule == "broad"
+    assert decision.allowed is True

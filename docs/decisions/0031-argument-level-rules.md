@@ -1,6 +1,6 @@
 # ADR 0031 — Argument-level rules: constrain the call, not just the tool
 
-**Status:** accepted
+**Status:** amended by [ADR 0068](0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md) — the missing-argument and string-form clauses below are superseded for `deny` and `require_approval`
 **Date:** 2026-08-10
 
 ## Context

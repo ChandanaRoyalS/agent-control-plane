@@ -17,6 +17,7 @@ diff.
 
 from __future__ import annotations
 
+import json
 import re
 from enum import StrEnum
 
@@ -31,6 +32,36 @@ _RULE_NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 MAX_RULE_NAME_LENGTH = 48
 """Long enough to be descriptive (`allow-search-for-support-agents`), short
 enough to stay readable in a log line or a metric label."""
+
+
+def canonical(value: object) -> str | None:
+    """The one string form a JSON scalar compares as; ``None`` for a non-scalar.
+
+    A policy file holds YAML scalars, a tool argument arrives as whatever JSON
+    the client sent, and "exact match" has to mean the same thing on both
+    sides. Booleans are ``true``/``false`` as JSON spells them, not ``True`` as
+    Python prints them; numbers are JSON's rendering; a string is itself.
+    Lists, objects and ``null`` have no scalar form: a constraint on an
+    argument that is one of those cannot be satisfied — nor, for a
+    restriction, escaped (ADR 0068).
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, int | float):
+        return json.dumps(value)
+    return None
+
+
+def _canonical_value(value: object, name: str) -> str:
+    form = canonical(value)
+    if form is None:
+        msg = (
+            f"args.{name}: values must be strings, numbers or booleans, not {type(value).__name__}"
+        )
+        raise ValueError(msg)
+    return form
 
 
 class Effect(StrEnum):
@@ -62,6 +93,12 @@ class Effect(StrEnum):
     ALLOW = "allow"
     DENY = "deny"
     REQUIRE_APPROVAL = "require_approval"
+
+
+RESTRICTIVE = frozenset({Effect.DENY, Effect.REQUIRE_APPROVAL})
+"""The effects a caller wants to get past rather than to earn. Argument
+constraints on these read fail-closed the other way round from ``allow`` (ADR
+0068): the call must prove its value is outside the set, not inside it."""
 
 
 class Rule(BaseModel):
@@ -116,19 +153,41 @@ class Rule(BaseModel):
     matches. Empty means any tool."""
 
     args: dict[str, tuple[str, ...]] = Field(default_factory=dict)
-    """Argument constraints, by argument name. Each entry maps an argument to the
-    values it may take: the rule matches only when the call supplies that
-    argument and its value is one of the listed ones. An unset ``args`` (the
-    empty default) constrains nothing, so a rule keeps matching every call the
-    way it did before this field existed — the same "unset means anything"
-    semantics as `subjects` and `tools`, one level deeper.
+    """Argument constraints, by argument name. Each entry maps an argument to a
+    set of values. An unset ``args`` (the empty default) constrains nothing, so
+    a rule keeps matching every call the way it did before this field existed —
+    the same "unset means anything" semantics as `subjects` and `tools`, one
+    level deeper.
 
-    This is exact-value matching only, deliberately: it extends the membership
-    model already in use rather than introducing operators, globs, or ranges,
-    which would be a richer matcher and a later task. It is checked at *call*
-    time, where the arguments exist; `tools/list` has no arguments, so a rule
-    with `args` still makes its tool *visible*, and the argument check happens
-    when the call is actually made (see `visible_tools` and `enforce_call`)."""
+    What a constraint means depends on the effect (ADR 0068). On an ``allow``
+    it is the values that *earn* the grant: the call must supply the argument
+    as a scalar exactly in the set. On a ``deny`` or ``require_approval`` it is
+    the values that *keep* the restriction: the call is cleared of it only by
+    supplying the argument as a scalar whose folded form (case, whitespace,
+    Unicode compatibility) is outside the set. A missing argument matches a
+    restriction and not a grant, so that the doubtful case always costs the
+    caller.
+
+    Values may be written as YAML strings, numbers or booleans; each is kept in
+    the canonical form a JSON argument compares as (``10``, ``true``), so
+    ``limit: [10]`` matches the integer ten a client sends. This is membership,
+    not a condition language — no operators, globs or ranges — and it is
+    checked at *call* time, where the arguments exist; `tools/list` has no
+    arguments, so a rule with `args` still makes its tool *visible* (see
+    `visible_tools` and `enforce_call`)."""
+
+    @field_validator("args", mode="before")
+    @classmethod
+    def _canonical_arg_values(cls, value: object) -> object:
+        """Accept scalars and keep their canonical string form."""
+        if not isinstance(value, dict):
+            return value
+        return {
+            name: tuple(_canonical_value(v, name) for v in values)
+            if isinstance(values, list | tuple)
+            else values
+            for name, values in value.items()
+        }
 
     @field_validator("name")
     @classmethod

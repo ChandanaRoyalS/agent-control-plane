@@ -338,21 +338,35 @@ def test_a_clean_result_is_still_cached(keypair: Keypair) -> None:
 def test_a_result_the_screener_could_not_finish_reading_is_not_cached(
     keypair: Keypair,
 ) -> None:
-    """ADR 0036's open question, answered on the real path.
-
-    The document is not refused — refusing something for being long would be a
-    false positive with an obvious trigger. It is simply not stored, because
-    caching a document whose tail was never examined turns one unexamined
-    document into every later caller's answer for the length of its ttl.
+    """ADR 0036's open question, answered on the real path for report mode:
+    the document is served, because report mode changes nothing the caller
+    receives, and it is not stored, because caching a document whose tail was
+    never examined turns one unexamined document into every later caller's
+    answer for the length of its ttl.
     """
     upstream = PoisonUpstream("a" * 500)
 
     exchanges = conversation(
-        upstream, keypair, firewall=Firewall(enforce=True, max_chars=64), calls=2
+        upstream, keypair, firewall=Firewall(enforce=False, max_chars=64), calls=2
     )
 
     assert not any(exchange.is_error for exchange in exchanges)
     assert upstream.calls == 2, "an unexamined tail was stored and replayed"
+
+
+def test_a_payload_past_the_screening_window_never_reaches_the_caller(keypair: Keypair) -> None:
+    """W3 of the external review, on the real path. Padding to the window,
+    then the payload the two enforceable detectors would have withheld had
+    they seen it. In enforce mode the unexamined tail is itself the trigger
+    (ADR 0069), and the bytes do not reach the caller."""
+    upstream = PoisonUpstream("a" * 64 + POISON)
+
+    [exchange] = conversation(upstream, keypair, firewall=Firewall(enforce=True, max_chars=64))
+
+    assert HIDDEN not in exchange.raw
+    assert MARKER not in exchange.raw
+    assert exchange.is_error
+    assert "CONTENT WITHHELD" in exchange.text
 
 
 # ---------------------------------------------------------------------------

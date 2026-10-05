@@ -8,6 +8,8 @@ a request that has no actor.
 
 from __future__ import annotations
 
+import pytest
+
 from acp.identity.principal import Actor, Principal
 from acp.policy import Decision, Effect, Policy, Rule, evaluate
 
@@ -176,11 +178,133 @@ def test_an_argument_value_outside_the_set_denies() -> None:
     assert decision.rule is None
 
 
-def test_a_missing_constrained_argument_denies() -> None:
-    """A rule that constrains an argument cannot match a call that omits it —
+def test_a_missing_constrained_argument_does_not_earn_an_allow() -> None:
+    """An allow that constrains an argument cannot match a call that omits it —
     'set means one of these' the same way a named actor cannot match None."""
     decision = evaluate(_arg_policy(), _principal(), "mock-a__read_document", {})
     assert decision.allowed is False
+
+
+# ---------------------------------------------------------------------------
+# ADR 0068: a restriction reads its constraint fail-closed
+# ---------------------------------------------------------------------------
+
+DELETE = "crm__delete_record"
+
+
+def _restriction(effect: Effect = Effect.DENY) -> Policy:
+    """The natural shape, and the one an outside review bypassed: a narrow
+    restriction on one argument value, a broad allow for the tool behind it."""
+    return Policy(
+        rules=(
+            Rule(
+                name="not-production",
+                effect=effect,
+                tools=(DELETE,),
+                args={"dataset": ("production",)},
+            ),
+            Rule(name="deletes", effect=Effect.ALLOW, tools=(DELETE,)),
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "dataset",
+    [
+        "Production",
+        "PRODUCTION",
+        " production",
+        "production ",
+        "production\t",
+        "\uff50roduction",  # full-width p: NFKC-equivalent, visually identical
+        ["production"],
+        {"name": "production"},
+        None,
+    ],
+    ids=[
+        "title",
+        "upper",
+        "lead-space",
+        "trail-space",
+        "tab",
+        "fullwidth",
+        "list",
+        "object",
+        "null",
+    ],
+)
+def test_a_deny_is_not_cleared_by_respelling_its_argument(dataset: object) -> None:
+    """Every variant a client could send that the upstream would read as
+    'production' - or could not read at all - stays denied. Before ADR 0068
+    each of these fell through to the allow."""
+    decision = evaluate(_restriction(), _principal(), DELETE, {"dataset": dataset})
+
+    assert decision.allowed is False
+    assert decision.rule == "not-production"
+
+
+def test_a_deny_is_not_cleared_by_omitting_its_argument() -> None:
+    """The cheapest bypass of all: send nothing and let the upstream default
+    decide. A restriction on a value the call did not name still holds."""
+    decision = evaluate(_restriction(), _principal(), DELETE, {})
+
+    assert decision.allowed is False
+    assert decision.rule == "not-production"
+
+
+def test_a_deny_is_cleared_by_a_readable_different_value() -> None:
+    decision = evaluate(_restriction(), _principal(), DELETE, {"dataset": "staging"})
+
+    assert decision.allowed is True
+    assert decision.rule == "deletes"
+
+
+def test_a_hold_for_approval_reads_its_argument_the_same_way() -> None:
+    """`require_approval` is the other restriction: a variant that slipped past
+    it would skip the human, which is the whole control (ADR 0048)."""
+    policy = _restriction(Effect.REQUIRE_APPROVAL)
+
+    held = evaluate(policy, _principal(), DELETE, {"dataset": "PRODUCTION"})
+    omitted = evaluate(policy, _principal(), DELETE, {})
+    cleared = evaluate(policy, _principal(), DELETE, {"dataset": "staging"})
+
+    assert held.requires_approval
+    assert held.rule == "not-production"
+    assert omitted.requires_approval
+    assert omitted.rule == "not-production"
+    assert cleared.allowed
+    assert cleared.rule == "deletes"
+
+
+def test_an_allow_still_requires_the_exact_value() -> None:
+    """The asymmetry is the point. A grant is earned precisely: `Public` is not
+    `public` to an allow, because widening a grant by case folding would be the
+    fail-open reading of the same rule."""
+    policy = _arg_policy()
+
+    assert not evaluate(policy, _principal(), "mock-a__read_document", {"doc_id": "Public"}).allowed
+    assert not evaluate(
+        policy, _principal(), "mock-a__read_document", {"doc_id": "public "}
+    ).allowed
+    assert not evaluate(
+        policy, _principal(), "mock-a__read_document", {"doc_id": ["public"]}
+    ).allowed
+
+
+def test_a_boolean_argument_compares_as_json_spells_it() -> None:
+    """`true` in the policy must match the JSON `true` a client sends. Python's
+    `str(True)` is `True`, and the old comparison never matched."""
+    policy = Policy(
+        rules=(
+            Rule(
+                name="dry-runs", effect=Effect.ALLOW, tools=(DELETE,), args={"dry_run": ("true",)}
+            ),
+        )
+    )
+
+    assert evaluate(policy, _principal(), DELETE, {"dry_run": True}).allowed
+    assert not evaluate(policy, _principal(), DELETE, {"dry_run": False}).allowed
+    assert not evaluate(policy, _principal(), DELETE, {"dry_run": "True"}).allowed
 
 
 def test_unset_args_matches_any_call() -> None:

@@ -412,18 +412,24 @@ async def _await_approval(
         )
         raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
 
-    outcome = await gate(
-        store,
-        token=params.request_state,
-        tenant=principal.tenant,
-        subject=principal.subject,
-        actor=principal.actor.subject if principal.actor else None,
-        tool=params.name,
-        arguments=params.arguments or {},
-        rule=rule,
-        now=time.time(),
-        ttl=ttl,
-    )
+    try:
+        outcome = await gate(
+            store,
+            token=params.request_state,
+            tenant=principal.tenant,
+            subject=principal.subject,
+            actor=principal.actor.subject if principal.actor else None,
+            tool=params.name,
+            arguments=params.arguments or {},
+            rule=rule,
+            now=time.time(),
+            ttl=ttl,
+        )
+    except ACPError as exc:
+        # A shared store that cannot be reached (ADR 0070): the call is held
+        # for a person and nothing can hold it, so it is refused, legibly,
+        # rather than served or left on a socket.
+        raise to_mcp_error(exc) from exc
     logger.info(
         APPROVAL_EVENT,
         extra={

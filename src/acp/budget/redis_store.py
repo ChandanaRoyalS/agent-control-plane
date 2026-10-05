@@ -51,6 +51,7 @@ from typing import Any, Final
 from redis.asyncio import Redis
 
 from acp.exceptions import ConfigurationError, QuotaExceededError, RateLimitExceededError
+from acp.redis_url import client_for, unavailable
 
 RATE_PREFIX: Final = "acp:budget:rate:"
 QUOTA_PREFIX: Final = "acp:budget:quota:"
@@ -162,7 +163,8 @@ class RedisBudgets:
 
     @classmethod
     def from_url(cls, url: str, **kwargs: Any) -> RedisBudgets:
-        return cls(Redis.from_url(url), **kwargs)
+        """With the timeouts and pool every store here has (`acp.redis_url`)."""
+        return cls(client_for(url), **kwargs)
 
     @property
     def capacity(self) -> float | None:
@@ -197,17 +199,18 @@ class RedisBudgets:
         docstring).
         """
         del mono
-        answer: list[bytes] = await self._charge(
-            keys=[rate_key(payer), quota_key(payer, wall, self._window)],
-            args=[
-                cost,
-                self._capacity if self._capacity is not None else 0,
-                self._refill,
-                self._limit if self._limit is not None else 0,
-                self._window,
-                wall,
-            ],
-        )
+        async with unavailable("budget"):
+            answer: list[bytes] = await self._charge(
+                keys=[rate_key(payer), quota_key(payer, wall, self._window)],
+                args=[
+                    cost,
+                    self._capacity if self._capacity is not None else 0,
+                    self._refill,
+                    self._limit if self._limit is not None else 0,
+                    self._window,
+                    wall,
+                ],
+            )
         kind = answer[0]
         if kind == OK:
             return

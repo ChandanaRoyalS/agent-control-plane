@@ -370,7 +370,17 @@ of findings, not of screenings.
   itself, which is now part of the trust base: whoever can write to it can
   write an `APPROVED` record.
 - **The audit chain is one file per process.** A replicated fleet writes
-  several independent chains with no global ordering between them.
+  several independent chains with no global ordering between them. Two
+  processes on one file are refused at startup (an exclusive advisory lock,
+  ADR 0070) rather than allowed to interleave two chains that nothing could
+  repair; the chain is SHA-256 over canonical JSON with no key, so whoever
+  can write the file can rewrite it consistently, and the checkpoint
+  (ADR 0050) is the only thing outside the file that says what it held.
+- **The shared stores are in the trust base and on the request path.** A
+  Redis that is slow or down refuses every budgeted or held call (bounded
+  by a one-second command timeout, two to connect, ADR 0070) — fail closed,
+  as a typed refusal the agent can retry — and a Redis an attacker can write
+  to can refill a bucket or write an `APPROVED` record.
 
 ### 6.6 Budget gaps
 

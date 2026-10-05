@@ -13,6 +13,7 @@ the specific way that would catch the natural implementation.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import anyio
@@ -49,6 +50,9 @@ def registration(
             f"{issuer}/keys",
             client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
         ),
+        # Each issuer its own tenant: two unlabelled issuers are refused at
+        # construction (ADR 0070), and these tests are about keys, not tenancy.
+        tenant=re.sub(r"[^a-z0-9_-]", "-", issuer.removeprefix("https://").lower())[:64],
     )
 
 
@@ -187,6 +191,69 @@ def test_an_issuer_registered_twice_is_refused(keypair: Keypair) -> None:
     carry", ambiguity is not a tie to be broken."""
     with pytest.raises(ConfigurationError, match="more than once"):
         IssuerRegistry([registration(CORP, keypair), registration(CORP, keypair, "other")])
+
+
+def test_two_issuers_without_a_tenant_label_are_refused(
+    keypair: Keypair, other_keypair: Keypair
+) -> None:
+    """W5 of the external review (ADR 0070). Both would stamp `tenant=None`,
+    and the cache, the budgets and the approval binding key on (tenant,
+    subject): the partner's alice would be served the corporate alice's cached
+    results. The registry refuses the configuration instead of every key
+    learning about issuers."""
+    from dataclasses import replace  # noqa: PLC0415
+
+    unlabelled = [
+        replace(registration(CORP, keypair), tenant=None),
+        replace(registration(PARTNER, other_keypair, PARTNER_AUDIENCE), tenant=None),
+    ]
+
+    with pytest.raises(ConfigurationError, match="no `tenant` label"):
+        IssuerRegistry(unlabelled)
+
+
+def test_one_unlabelled_issuer_beside_labelled_ones_is_fine(
+    keypair: Keypair, other_keypair: Keypair
+) -> None:
+    """`None` and a label are different accounts by construction (ADR 0051),
+    so a single untenanted issuer shares a namespace with nobody."""
+    from dataclasses import replace  # noqa: PLC0415
+
+    registry = IssuerRegistry(
+        [
+            replace(registration(CORP, keypair), tenant=None),
+            registration(PARTNER, other_keypair, PARTNER_AUDIENCE),
+        ]
+    )
+
+    assert len(registry) == 2
+
+
+def test_an_operator_audience_an_issuer_already_mints_is_refused(
+    keypair: Keypair, other_keypair: Keypair
+) -> None:
+    """W4 of the external review (ADR 0070). The settings model refuses
+    `ACP_APPROVAL_OPERATOR_AUDIENCE == ACP_AUTH_AUDIENCE`; a registry loaded
+    from a file has one audience per issuer, and the same collision through
+    any of them lets an agent's token open the approval channel."""
+    registry = IssuerRegistry(
+        [registration(CORP, keypair), registration(PARTNER, other_keypair, PARTNER_AUDIENCE)]
+    )
+
+    with pytest.raises(ConfigurationError, match="approve its own call"):
+        registry.for_audience(PARTNER_AUDIENCE)
+
+
+def test_a_distinct_operator_audience_derives_a_registry(
+    keypair: Keypair, other_keypair: Keypair
+) -> None:
+    registry = IssuerRegistry(
+        [registration(CORP, keypair), registration(PARTNER, other_keypair, PARTNER_AUDIENCE)]
+    )
+
+    operators = registry.for_audience("agent-control-plane-operators")
+
+    assert all(r.policy.audience == "agent-control-plane-operators" for r in operators)
 
 
 def test_an_empty_registry_is_refused() -> None:

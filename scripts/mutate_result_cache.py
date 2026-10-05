@@ -40,6 +40,7 @@ from pathlib import Path
 from mutate_no_passthrough import Mutation, apply, failing_tests, working_tree_is_clean
 
 CACHE = "src/acp/results/cache.py"
+ISSUERS = "src/acp/identity/issuers.py"
 SUITE = "tests/integration/test_result_caching.py"
 
 ISOLATION = "test_a_second_caller_never_receives_the_first_ones_result"
@@ -117,6 +118,19 @@ MUTATIONS: tuple[Mutation, ...] = (
             {"test_the_same_caller_asking_a_different_question_gets_a_different_answer"}
         ),
         suite=SUITE,
+    ),
+    Mutation(
+        name="let two untenanted issuers share one principal namespace",
+        path=ISSUERS,
+        anchor="        if len(unlabelled) > 1:",
+        replacement="        if len(unlabelled) > 1 and False:  # noqa: SIM223",
+        # W5 of the external review (ADR 0070). The key is (tenant, subject),
+        # which is right; what made it a leak was a configuration the loader
+        # accepted — two issuers both stamping `tenant=None`, so issuer A's
+        # alice read issuer B's alice's cache. The isolation lives in the
+        # refusal, so the refusal is what this harness breaks.
+        caught_by=frozenset({"test_two_issuers_without_a_tenant_label_are_refused"}),
+        suite="tests/unit/identity/test_issuers.py",
     ),
 )
 

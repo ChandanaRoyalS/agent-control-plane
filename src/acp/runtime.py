@@ -20,7 +20,7 @@ import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from starlette.applications import Starlette
 
@@ -292,6 +292,63 @@ async def gateway_from_configs(
         logger.info("gateway.stopped", extra={"upstream_count": len(clients)})
 
 
+SAFETY_CONTROLS: Final = ("authentication", "audit", "firewall")
+"""The controls whose absence the startup banner names at WARNING. The others
+are configuration choices; these three are the difference between a gateway
+and a proxy (ADR 0071)."""
+
+
+def control_states(settings: GatewaySettings) -> dict[str, str]:
+    """Every control the gateway has, and whether these settings turn it on.
+
+    One place that answers "what is this deployment actually running", read
+    from the settings alone so it can be printed before anything is built.
+    """
+    operator = (
+        "jwt"
+        if settings.approval_operator_audience
+        else "shared-token"
+        if settings.approval_operator_token
+        else "off"
+    )
+    return {
+        "authentication": "on" if settings.authentication_configured else "off",
+        "audit": "on" if settings.audit_file is not None else "off",
+        "firewall": settings.firewall_mode.value,
+        "provenance_framing": "on" if settings.provenance_framing_enabled else "off",
+        "rate_limit": "on" if settings.rate_limit_enabled else "off",
+        "quota": "on" if settings.quota_enabled else "off",
+        "cost_table": "on" if settings.cost_file is not None else "off",
+        "result_cache": "on" if settings.cache_file is not None else "off",
+        "approval_operator": operator,
+        "approval_store": "redis" if settings.approval_store_shared else "memory",
+        "budget_store": "redis" if settings.budget_store_shared else "memory",
+    }
+
+
+def report_controls(settings: GatewaySettings) -> dict[str, str]:
+    """Log what is on and what is off, every start (ADR 0071).
+
+    One INFO line with the whole table, so an operator can grep a single
+    event for the deployment's shape. And one WARNING line naming any of
+    the three safety controls that is off — a reviewer's finding was that a
+    bare `acp serve` ran with no audit and no firewall and said so nowhere a
+    person would look.
+    """
+    states = control_states(settings)
+    logger.info("gateway.controls", extra={"controls": states})
+    off = [name for name in SAFETY_CONTROLS if states[name] == "off"]
+    if off:
+        logger.warning(
+            "gateway.safety_controls_off",
+            extra={
+                "off": off,
+                "consequence": "this gateway is running without " + ", ".join(off),
+            },
+        )
+    return states
+
+
 def build_audit_log(settings: GatewaySettings, console: TraceHub | None = None) -> AuditLog | None:
     """Open the audit chain, or return ``None`` when none is configured.
 
@@ -314,11 +371,23 @@ def build_audit_log(settings: GatewaySettings, console: TraceHub | None = None) 
     serves without the record it was configured to keep.
     """
     if settings.audit_file is None:
-        logger.info(
+        if settings.audit_required:
+            # Fatal, before a port is bound — the treatment an unconfigured
+            # identity provider gets under ACP_AUTH_REQUIRED, and for the same
+            # reason (ADR 0071): the gateway would otherwise serve every call
+            # it is required not to serve unrecorded.
+            msg = (
+                "ACP_AUDIT_REQUIRED is set and ACP_AUDIT_FILE is not, so this "
+                "gateway would serve every call without recording it. Set "
+                "ACP_AUDIT_FILE to a path on a persistent volume. To run without "
+                "an audit record on purpose, set ACP_AUDIT_REQUIRED=false."
+            )
+            raise ConfigurationError(msg)
+        logger.warning(
             "audit.disabled",
             extra={
-                "reason": "ACP_AUDIT_FILE is not set",
-                "consequence": "no tamper-evident record of authorization decisions is kept",
+                "reason": "ACP_AUDIT_FILE is not set and ACP_AUDIT_REQUIRED is false",
+                "consequence": "no record of authorization decisions is kept",
             },
         )
         return None
@@ -974,6 +1043,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     Upstreams are read and validated *before* any connection is opened, so a
     malformed config fails without side effects.
     """
+    report_controls(settings)
     upstreams = load_upstreams(settings.upstreams_file)
     # The whole set, not one file: the default policy plus one per declared
     # tenant, each validated at startup so a malformed or missing tenant policy

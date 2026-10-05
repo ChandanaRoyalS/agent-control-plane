@@ -99,12 +99,15 @@ class GatewaySettings(BaseSettings):
     admin_enabled: bool = True
 
     audit_file: Path | None = None
-    """Where the tamper-evident audit chain is written.
+    """Where the hash-chained audit log is written.
 
-    Unset means **no chain is written at all**. Presence-based like the secret
-    store and token exchange, and for the same reason: a boolean would let a
-    deployment believe it had an audit log because a flag said `true`, while the
-    path it needed was never configured.
+    Unset **refuses to start** while `audit_required` is true, which is the
+    default (ADR 0071) — the same treatment an unconfigured identity provider
+    gets under `auth_required`. A gateway whose job is to record who called
+    what does not start silently without the record. Presence-based like the
+    secret store and token exchange, and for the same reason: a boolean would
+    let a deployment believe it had an audit log because a flag said `true`,
+    while the path it needed was never configured.
 
     Deliberately *not* defaulted to a path. An audit log that appears in a
     developer's working directory the first time they run the gateway is one that
@@ -125,9 +128,11 @@ class GatewaySettings(BaseSettings):
     and it is logged at startup every time, the same treatment
     `ACP_AUTH_REQUIRED=false` gets.
 
-    Inert when `audit_file` is unset: there is no chain to fail to write to, and
-    refusing every call because an unconfigured feature is unavailable would be
-    absurd. Startup says which of the two situations a deployment is in.
+    It also governs the case where no chain is configured at all (ADR 0071):
+    a gateway that cannot record *any* call refuses to start while this is
+    true, because it would otherwise serve every call it is required not to.
+    `ACP_AUDIT_REQUIRED=false` with no `ACP_AUDIT_FILE` runs without a record,
+    and says so at every start.
     """
 
     audit_fsync: bool = True
@@ -304,7 +309,7 @@ class GatewaySettings(BaseSettings):
     paragraph no longer arrives looking like something the user said.
     """
 
-    firewall_mode: FirewallMode = FirewallMode.OFF
+    firewall_mode: FirewallMode = FirewallMode.REPORT
     """How much the injection firewall is allowed to do (ADR 0038).
 
     ``off`` screens nothing. ``report`` screens every tool result, logs every
@@ -317,8 +322,14 @@ class GatewaySettings(BaseSettings):
     enforcement would cost its own traffic before paying it. A firewall that
     refuses honest documents does not get tuned, it gets set back to ``off``.
 
-    ``off`` is the default because screening is linear in the size of every
-    result and a control that turns itself on is a control nobody chose.
+    ``report`` is the default (ADR 0071). It was ``off``, on the argument that
+    screening is linear in the size of every result and a control that turns
+    itself on is a control nobody chose. That argument was right about cost and
+    wrong about consequence: a gateway whose own decision records say "a
+    control nobody runs does not exist" (ADR 0055) shipped with this one not
+    running. Report mode changes nothing a caller receives, so turning it on
+    by default costs time and buys the measurement; ``off`` is still a real
+    mode, and saying so at startup is the banner's job.
     """
 
     firewall_allowed_hosts: list[str] = Field(default_factory=list)

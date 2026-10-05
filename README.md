@@ -8,7 +8,7 @@ calls for a human, and records every decision in a hash-chained log.
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
 **~2,200 tests (about 1,700 on the gateway itself) · 95% branch coverage ·
-70 decision records · 20 hand-picked breakages, each caught by the test meant to
+71 decision records · 20 hand-picked breakages, each caught by the test meant to
 catch it**
 
 ## Why
@@ -218,9 +218,12 @@ somebody looking for gaps.
 - **Not production-ready.** One outside review found two authorization bypasses
   in a released version; both are fixed, and there are more. Do not put it in
   front of anything real.
-- **The safety controls are off by default.** A bare `acp serve` requires
-  authentication and nothing else: no audit chain, no firewall, no cost table,
-  no cache. The compose stack turns them on; a deployment has to as well.
+- **Budgets and caching are opt-in.** A bare `acp serve` refuses to start
+  without an identity provider and an audit file, screens every result in
+  report mode, and logs at startup which controls are on and which are off
+  ([ADR 0071](docs/decisions/0071-the-safe-defaults.md)). Rate limits, quotas,
+  the cost table, the result cache and enforce mode are each a deliberate
+  setting.
 - **Polite injections pass the firewall** (0 of 595 held-out); only the policy
   stops their actions, and only if it is scoped tightly and the human says no.
   An attack that only needs reads would pass the broad policy.

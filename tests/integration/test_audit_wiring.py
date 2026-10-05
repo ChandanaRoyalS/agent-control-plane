@@ -22,7 +22,7 @@ import pytest
 
 from acp.audit import AuditLog, FileAuditSink, verify
 from acp.config import GatewaySettings
-from acp.exceptions import AuditUnavailableError
+from acp.exceptions import AuditUnavailableError, ConfigurationError
 from acp.policy import Effect, Policy, Rule
 from acp.runtime import build_audit_log
 
@@ -84,13 +84,24 @@ def records(path: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def test_no_path_means_no_chain(caplog: pytest.LogCaptureFixture) -> None:
-    """Presence-based, and it says so — a deployment should be able to tell from
-    the startup log which of the three audit states it is in."""
-    with caplog.at_level(logging.INFO, logger="acp.runtime"):
-        assert build_audit_log(settings_for()) is None
+def test_no_path_refuses_to_start_by_default() -> None:
+    """ADR 0071: the treatment an unconfigured identity provider already gets.
+    A gateway whose job is to record who called what does not start silently
+    without the record."""
+    with pytest.raises(ConfigurationError, match="ACP_AUDIT_FILE"):
+        build_audit_log(settings_for())
 
-    assert [r for r in caplog.records if r.message == "audit.disabled"]
+
+def test_no_path_with_audit_not_required_runs_and_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The escape hatch exists and is loud: WARNING, every start, saying what
+    the deployment has traded away."""
+    with caplog.at_level(logging.WARNING, logger="acp.runtime"):
+        assert build_audit_log(settings_for(audit_required=False)) is None
+
+    [disabled] = [r for r in caplog.records if r.message == "audit.disabled"]
+    assert disabled.levelno == logging.WARNING
 
 
 def test_a_configured_path_opens_a_chain(tmp_path: Path) -> None:

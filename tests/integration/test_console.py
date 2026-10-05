@@ -82,6 +82,20 @@ def test_the_stream_refuses_the_wrong_credential() -> None:
     assert client.get(STREAM_PATH, headers=headers).status_code == 401
 
 
+def test_a_non_ascii_bearer_is_a_401_not_a_500() -> None:
+    """W11 of the external review. The operator channel had already fixed this
+    (`compare_digest` over a non-ASCII `str` raises `TypeError`); the console
+    checked the same credential with its own copy of the comparison and kept
+    the bug. It now uses the operator's."""
+    client = TestClient(
+        build_admin_app(console=TraceHub(), operator_credential=CREDENTIAL),
+        raise_server_exceptions=False,
+    )
+    headers = {b"authorization": "Bearer pässwörd".encode("latin-1")}
+
+    assert client.get(STREAM_PATH, headers=headers).status_code == 401
+
+
 def test_the_stream_refuses_a_credential_in_the_query_string() -> None:
     """`EventSource` cannot set headers, and the usual workaround is a token in
     the URL — which lands in browser history, referrers and access logs. It is

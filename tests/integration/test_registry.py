@@ -205,12 +205,19 @@ def test_unknown_upstream_is_rejected_without_calling_anything() -> None:
     assert exc_info.value.recoverable is False
 
 
-def test_unqualified_tool_name_is_rejected() -> None:
+def test_unqualified_tool_name_is_rejected_as_an_unknown_tool() -> None:
+    """Caller input, so a gateway error with a code and an audit row — not a
+    `ValueError` that surfaced as an internal error with no record of the call
+    (W11 of the external review)."""
+
     async def _run() -> None:
         await registry().call_tool("search", {"query": "x"})
 
-    with pytest.raises(naming.MalformedToolNameError):
+    with pytest.raises(UnknownToolError) as exc_info:
         run(_run)
+
+    assert exc_info.value.recoverable is False
+    assert isinstance(exc_info.value.__cause__, naming.MalformedToolNameError)
 
 
 def test_execution_failure_still_returns_as_a_result() -> None:

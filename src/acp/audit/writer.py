@@ -76,7 +76,7 @@ from typing import Any
 from anyio import CapacityLimiter, to_thread
 
 from acp.audit.chain import Entry
-from acp.audit.record import AuditRecord, Category, Outcome
+from acp.audit.record import AuditRecord, Category, Outcome, recordable_tool
 from acp.audit.sink import AuditSink
 from acp.exceptions import AuditUnavailableError
 from acp.observability import metrics
@@ -293,7 +293,7 @@ class AuditLog:
             subject=subject,
             actor=actor,
             tenant=tenant,
-            tool=tool,
+            tool=recordable_tool(tool),
             upstream=upstream,
             rule=rule,
             outcome=outcome,

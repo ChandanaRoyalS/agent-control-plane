@@ -189,6 +189,12 @@ class CircuitBreaker:
         self._consecutive_failures = 0
         self._opened_at: float | None = None
         self._probes_in_flight = 0
+        self._epoch = 0
+        """Bumped on every transition. A call carries the epoch it was admitted
+        in, and only a call from the current epoch is information about the
+        current state (W11 of the external review): a call admitted while
+        closed that returns during half-open is not a probe, must not release
+        a probe slot, and must not decide recovery."""
 
     # -- observation -------------------------------------------------------
 
@@ -226,7 +232,7 @@ class CircuitBreaker:
         counted as in flight. A cancelled call is recorded as neutral: it says
         nothing about the upstream.
         """
-        self._enter()
+        ticket = self._enter()
         outcome: BaseException | None = None
         try:
             yield
@@ -234,15 +240,21 @@ class CircuitBreaker:
             outcome = exc
             raise
         finally:
-            self._leave(outcome)
+            self._leave(ticket, outcome)
 
-    def _enter(self) -> None:
+    def _transition(self, state: BreakerState) -> None:
+        self._state = state
+        self._epoch += 1
+
+    def _enter(self) -> tuple[int, bool]:
+        """Admit a call, or raise. Returns the call's ticket: the epoch it was
+        admitted in, and whether it holds a half-open probe slot."""
         if self._state is BreakerState.OPEN:
             remaining = self._seconds_until_reset() or 0.0
             if remaining > 0:
                 raise self._rejected(remaining)
             # The timeout has elapsed: this caller becomes the probe.
-            self._state = BreakerState.HALF_OPEN
+            self._transition(BreakerState.HALF_OPEN)
             self._probes_in_flight = 0
             self._log("breaker.half_open")
 
@@ -254,25 +266,31 @@ class CircuitBreaker:
             # keeps failing fast until that probe reports back.
             raise self._rejected(self._policy.reset_timeout)
 
-        if self._state is BreakerState.HALF_OPEN:
+        probe = self._state is BreakerState.HALF_OPEN
+        if probe:
             self._probes_in_flight += 1
+        return self._epoch, probe
 
-    def _leave(self, exc: BaseException | None) -> None:
-        if self._state is BreakerState.HALF_OPEN:
+    def _leave(self, ticket: tuple[int, bool], exc: BaseException | None) -> None:
+        epoch, probe = ticket
+        if probe and epoch == self._epoch:
             self._probes_in_flight = max(0, self._probes_in_flight - 1)
 
+        if epoch != self._epoch:
+            # A straggler: admitted under an earlier state and returning under
+            # this one. Its outcome describes the upstream as it was when the
+            # call started, which is exactly what the transition since has
+            # already accounted for. A success must not close a half-open
+            # breaker without a probe; a failure must not re-open one, or
+            # restart an open breaker's timer; and neither may touch the probe
+            # count, which it never incremented.
+            return
+
         if exc is None:
-            if self._state is BreakerState.OPEN:
-                # A straggler: this call was admitted while the breaker was
-                # closed and happened to succeed after it tripped. It is not a
-                # probe — nobody admitted it to measure recovery — and closing
-                # on it would skip the measurement the half-open state exists
-                # to make. The same reasoning as the straggler *failure* below:
-                # a call that predates the trip is not new information.
-                return
             recovered = self._state is not BreakerState.CLOSED
             self._consecutive_failures = 0
-            self._state = BreakerState.CLOSED
+            if recovered:
+                self._transition(BreakerState.CLOSED)
             self._opened_at = None
             if recovered:
                 # Logged *after* the reset, so the line announcing recovery
@@ -299,15 +317,6 @@ class CircuitBreaker:
 
         self._consecutive_failures += 1
 
-        if self._state is BreakerState.OPEN:
-            # Already open, and this is a call that was in flight when it
-            # tripped. Its failure is not new information, and re-opening
-            # here would restart the reset timer. With a read timeout close
-            # to the reset timeout, a trickle of stragglers landing one
-            # after another would push recovery back indefinitely and the
-            # breaker would never get as far as a probe.
-            return
-
         if (
             self._state is BreakerState.HALF_OPEN
             or self._consecutive_failures >= self._policy.failure_threshold
@@ -316,7 +325,7 @@ class CircuitBreaker:
             # accumulate another full threshold. The threshold's job is to
             # decide whether a *healthy* upstream has gone bad; a half-open
             # breaker has already made that call.
-            self._state = BreakerState.OPEN
+            self._transition(BreakerState.OPEN)
             self._opened_at = self._clock()
             self._log("breaker.opened", level=logging.ERROR, error=type(exc).__name__)
 

@@ -1,0 +1,4 @@
+# One person, two commit identities (the local git config changed partway
+# through). Maps both to one name so `git shortlog` and the contributor graph
+# count one author.
+Chandana Sorakundla <chandanaroyal719@gmail.com> chandana <chandanaroyal719@gmail.com>

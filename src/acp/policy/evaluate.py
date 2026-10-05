@@ -136,7 +136,14 @@ def matches_without_arguments(rule: Rule, subject: str, actor: str | None, tool:
         return False
     if rule.actors and (actor is None or actor not in rule.actors):
         return False
-    return not (rule.tools and tool not in rule.tools)
+    if not rule.tools or tool in rule.tools:
+        return True
+    # The tool name is caller input too. A restriction on `crm__delete_record`
+    # must not be stepped around by `crm__Delete_Record` or a trailing space
+    # that an upstream reads as the same tool — the same fail-closed reading
+    # ADR 0068 gives an argument, applied to the name. A grant still needs the
+    # exact name (W11 of the external review).
+    return rule.effect in RESTRICTIVE and folded(tool) in {folded(t) for t in rule.tools}
 
 
 def _rule_matches(

@@ -336,7 +336,9 @@ def _matches(rule: Rule, principal: Principal, tool: str, arguments: dict[str, o
         return False
     if rule.actors and (actor is None or actor not in rule.actors):
         return False
-    if rule.tools and tool not in rule.tools:
+    # ADR 0068 applied to the name: a restriction also matches a re-spelling.
+    respelled = rule.effect is not Effect.ALLOW and _fold(tool) in {_fold(t) for t in rule.tools}
+    if rule.tools and tool not in rule.tools and not respelled:
         return False
     # ADR 0068, from its prose: a grant is earned by a scalar exactly in the
     # set; a restriction is cleared only by a scalar whose folded form is

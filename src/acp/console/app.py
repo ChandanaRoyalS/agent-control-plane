@@ -24,7 +24,6 @@ the framing is genuinely good — it is only the client that is hand-rolled.
 
 from __future__ import annotations
 
-import secrets
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
@@ -33,6 +32,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from acp.approvals.operator import matches_credential
 from acp.console.hub import TraceHub
 from acp.console.page import PAGE
 
@@ -62,7 +62,7 @@ def _authorized(request: Request, credential: str) -> bool:
     scheme, _, presented = header.partition(" ")
     if scheme.lower() != "bearer":
         return False
-    return secrets.compare_digest(presented, credential)
+    return matches_credential(presented, credential)
 
 
 def _unauthorized() -> Response:

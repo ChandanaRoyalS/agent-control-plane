@@ -120,7 +120,6 @@ def principal(subject: str = "alice@example.test") -> Principal:
         actor=None,
         client_id="acp-agent",
         scopes=frozenset(),
-        expires_at=None,
         delegation_chain=(),
     )
 

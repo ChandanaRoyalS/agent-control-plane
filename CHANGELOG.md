@@ -15,6 +15,40 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+### Security
+
+- **Tool-level `deny` and `require_approval` rules match re-spelled tool
+  names** (ADR 0068, amended): `crm__Delete_Record` and `crm__delete_record `
+  no longer fall through to an allow behind a deny on `crm__delete_record`.
+  Grants still need the exact name.
+- **Caller-supplied tool names are bounded in the audit chain.** A refused
+  call's tool name is recorded verbatim only if it is at most 64 printable
+  characters, as every real qualified name is; otherwise as its length and a
+  hash prefix. Previously any authenticated caller could write arbitrary text
+  of any length into the chain through a refused call.
+
+### Fixed
+
+- The trace console returned 500 for a non-ASCII bearer; it now uses the
+  operator channel's bytes-safe comparison and returns 401.
+- An unqualified tool name under an allow-anything rule raised a bare
+  `ValueError` (an internal error with no audit row); it is now an
+  `UnknownToolError` (`-32016`), audited as a failed call.
+- A call admitted while the circuit breaker was closed and returning while it
+  was half-open could release a probe slot it never held and decide recovery
+  on stale evidence. Each call now carries the breaker epoch it was admitted
+  in, and only the current epoch's calls count.
+- The test that an allowed call reaches the upstream passed on any error
+  other than a policy denial; it now asserts the upstream's result.
+- `compose_smoke.py --help` prints usage instead of starting a run.
+
+### Removed
+
+- `Principal.expires_at`, `Principal.is_delegated` and `Principal.has_scope`,
+  which nothing read. `scopes` and `delegation_chain` now reach the request
+  log (`as_log_fields`); policy still does not consult scopes, and the field's
+  docstring says so.
+
 ### Changed — breaking
 
 - **The gateway refuses to start without an audit file** while

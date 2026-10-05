@@ -350,3 +350,29 @@ def test_multiple_constrained_arguments_are_anded() -> None:
     assert not evaluate(
         policy, _principal(), "mock-a__read_document", {"doc_id": "public", "format": "docx"}
     ).allowed
+
+
+@pytest.mark.parametrize(
+    "tool",
+    ["crm__Delete_Record", "CRM__DELETE_RECORD", "crm__delete_record ", " crm__delete_record"],
+)
+def test_a_tool_level_deny_is_not_cleared_by_respelling_the_tool(tool: str) -> None:
+    """W11 of the external review. Whether an upstream honours the variant is
+    its business; whether the gateway's restriction does is this one's."""
+    policy = Policy(
+        rules=(
+            Rule(name="no-deletes", effect=Effect.DENY, tools=(DELETE,)),
+            Rule(name="everything", effect=Effect.ALLOW),
+        )
+    )
+
+    decision = evaluate(policy, _principal(), tool)
+
+    assert decision.allowed is False
+    assert decision.rule == "no-deletes"
+
+
+def test_a_tool_level_allow_still_needs_the_exact_name() -> None:
+    policy = Policy(rules=(Rule(name="deletes", effect=Effect.ALLOW, tools=(DELETE,)),))
+
+    assert not evaluate(policy, _principal(), "crm__Delete_Record").allowed

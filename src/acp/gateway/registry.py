@@ -29,6 +29,7 @@ import anyio
 
 from acp.exceptions import ACPError, UnknownToolError, UnknownUpstreamError
 from acp.gateway.naming import (
+    MalformedToolNameError,
     may_be_truncated,
     qualify,
     suffix_of,
@@ -195,8 +196,23 @@ class UpstreamRegistry:
     async def call_tool(
         self, qualified: str, arguments: Mapping[str, Any] | None = None
     ) -> CallToolResult:
-        """Route a qualified tool call to the upstream that owns it."""
-        upstream = upstream_of(qualified)
+        """Route a qualified tool call to the upstream that owns it.
+
+        A name with no separator is an unknown tool, not a programming error:
+        it is caller input, and under an allow-any rule it reaches here having
+        passed policy. Raised as `UnknownToolError` so the server's `ACPError`
+        path audits it and answers with a code, rather than a bare
+        `ValueError` becoming an internal error with no audit row (W11 of the
+        external review).
+        """
+        try:
+            upstream = upstream_of(qualified)
+        except MalformedToolNameError as exc:
+            raise UnknownToolError(
+                f"tool name {qualified!r} is not qualified with an upstream",
+                upstream="",
+                details={"tool": qualified},
+            ) from exc
         client = self._clients.get(upstream)
         if client is None:
             raise UnknownUpstreamError(

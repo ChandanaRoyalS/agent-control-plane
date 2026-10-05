@@ -86,6 +86,16 @@ the human, which is the whole control (ADR 0048).
   value in front of a broad allow, no re-spelling, re-typing or omission of that
   value reaches the allow.
 
+## Amendment — the tool name too (2026-10-05)
+
+The review's low-severity list (W11) noted the same shape one field up: a
+tool-level `deny crm__delete_record` in front of an allow-anything rule was
+stepped around by `crm__Delete_Record` or a trailing space, if the upstream
+reads those as the same tool. The tool name is caller input exactly as an
+argument is, so restrictions now match it folded too, and grants still need
+the exact name. `matches_without_arguments` carries it, so the evaluator, the
+pre-dispatch check and the simulator agree by construction.
+
 ## Alternatives considered
 
 - **Forbid `args` on deny rules.** Honest and simple; it also removes the one

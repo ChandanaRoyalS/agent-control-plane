@@ -15,6 +15,20 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-05
+
+Security fixes from an independent review of v1.3.0: two authorization
+bypasses (ADRs 0068, 0069) and four configuration holes a replicated
+deployment would meet (ADR 0070). **Upgrade from 1.3.0.** Nothing in the
+public surface changed, so this is a patch under ADR 0058, but several
+behaviours become stricter: argument-scoped `deny` and `require_approval`
+rules now catch re-spelled and omitted arguments; tool results over 256 KB of
+text are withheld in enforce mode; and three misconfigurations 1.3.0 accepted
+now refuse to start (two unlabelled issuers, an operator audience an issuer
+already mints, two gateways on one audit file). Run `acp policy simulate`
+against a recorded log before upgrading a deployment with argument-scoped
+restrictions.
+
 ### Changed
 
 - The README's results are stated at the size they are (the second item of
@@ -435,7 +449,8 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.3.1
 [1.3.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.3.0
 [1.2.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.2.0
 [1.1.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.1.1

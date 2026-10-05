@@ -58,9 +58,9 @@ docker compose down
 The released image, verified by the release workflow, runs as uid 10001:
 
 ```bash
-docker pull ghcr.io/chandanaroyals/agent-control-plane:1.3.0
+docker pull ghcr.io/chandanaroyals/agent-control-plane:1.3.1
 docker run --rm --entrypoint python \
-  ghcr.io/chandanaroyals/agent-control-plane:1.3.0 \
+  ghcr.io/chandanaroyals/agent-control-plane:1.3.1 \
   -c "import acp; print(acp.__version__)"
 ```
 
@@ -279,7 +279,7 @@ In this order, because the first one changes what the project is evidence of:
 | 1–4 · Foundation, identity, policy, budgets | **complete** | Resilient passthrough, delegated auth with scoped token exchange, deny-by-default argument-level policy, quotas and per-principal caching |
 | 5–7 · Firewall, approvals, audit | **complete** | Detectors and corpora, human-in-the-loop on a separate listener, hash-chained audit log, multi-tenancy, threat model |
 | 8–9 · Performance, demo | **complete** | Load harness and published overhead, live console, scripted attack demo |
-| 10 · Release | **v1.3.0 released** | Published to ghcr; machine-checked release surface |
+| 10 · Release | **v1.3.1 released** | Published to ghcr; machine-checked release surface |
 | 11 · External evaluation | **complete** | InjecAgent, two held-out splits scored once, text detectors vs policy measured |
 
 ## License

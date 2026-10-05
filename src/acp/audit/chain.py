@@ -102,9 +102,7 @@ class Chain:
     def append(self, record: AuditRecord | Mapping[str, Any]) -> Entry:
         """Extend the chain by one, advancing the head."""
         payload = record.as_dict() if isinstance(record, AuditRecord) else dict(record)
-        entry = next_entry(
-            head=self._head, seq=self._seq + 1, payload=payload, signer=self._signer
-        )
+        entry = next_entry(head=self._head, seq=self._seq + 1, payload=payload, signer=self._signer)
         self._head = entry.hash
         self._seq = entry.seq
         return entry
@@ -185,11 +183,18 @@ def _entry_from(payload: object) -> Entry | None:
     if not isinstance(record, dict):
         return None
     sig, kid = payload.get("sig"), payload.get("kid")
-    if (sig is None) != (kid is None):
-        return None
-    if sig is not None and not (isinstance(sig, str) and isinstance(kid, str)):
+    unsigned = sig is None and kid is None
+    if not (unsigned or (isinstance(sig, str) and isinstance(kid, str))):
         return None
     return Entry(seq=seq, prev=prev, hash=digest, record=record, sig=sig, kid=kid)
+
+
+def _signature_problem(entry: Entry, verifier: Verifier, file_kid: str | None) -> str | None:
+    """Why this entry's signature is not acceptable, or ``None``: valid, and by the file's key."""
+    problem = verifier.problem(entry.hash, entry.sig, entry.kid)
+    if problem is None and file_kid is not None and entry.kid != file_kid:
+        problem = f"signed by key {entry.kid}, but this file's entries use {file_kid}"
+    return problem
 
 
 def verify(
@@ -243,9 +248,7 @@ def verify(
         if entry.sig is not None:
             signed += 1
         if verifier is not None:
-            problem = verifier.problem(entry.hash, entry.sig, entry.kid)
-            if problem is None and file_kid is not None and entry.kid != file_kid:
-                problem = f"signed by key {entry.kid}, but this file's entries use {file_kid}"
+            problem = _signature_problem(entry, verifier, file_kid)
             if problem is not None:
                 breaks.append(Break(entry.seq, number, problem))
             elif file_kid is None:

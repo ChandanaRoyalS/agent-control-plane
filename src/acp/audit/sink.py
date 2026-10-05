@@ -8,6 +8,7 @@ evidence. Each entry is `fsync`ed by default, bounding throughput to the disk's 
 
 from __future__ import annotations
 
+import fcntl  # POSIX only, like the deployment target (a Linux container)
 import json
 import logging
 import os
@@ -15,8 +16,6 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Protocol
-
-import fcntl  # POSIX only, like the deployment target (a Linux container)
 
 from acp.audit.chain import GENESIS, SEQ_START, Chain, Entry
 from acp.audit.record import AuditRecord

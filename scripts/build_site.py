@@ -55,7 +55,7 @@ OUTPUT = ROOT / "docs" / "index.html"
 DECISIONS = ROOT / "docs" / "decisions"
 
 REPO: Final = "https://github.com/ChandanaRoyalS/agent-control-plane"
-IMAGE: Final = "ghcr.io/chandanaroyals/agent-control-plane:1.2.0"
+IMAGE: Final = "ghcr.io/chandanaroyals/agent-control-plane:1.3.0"
 
 RECORD_KEYS: Final = frozenset({"seq", "prev", "hash", "record"})
 
@@ -464,8 +464,8 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
 <section class="lede">
   <div>
     <span class="pill">MCP gateway</span>
-    <span class="pill">v1.2.0</span>
-    <span class="pill">~2,000 tests</span>
+    <span class="pill">v1.3.0</span>
+    <span class="pill">~2,100 tests</span>
   </div>
   <h1>An AI agent reads a document. The document tells it to do something else.</h1>
   <p class="deck">This is the security boundary that sits in between &mdash; it decides what an
@@ -565,7 +565,7 @@ make audit-verify       # walk the chain it just wrote</pre>
   <a href="%%REPO%%">Repository</a> &middot;
   <a href="%%REPO%%/blob/main/docs/decisions/README.md">%%ADRS%% architecture decisions</a> &middot;
   <a href="%%REPO%%/blob/main/docs/THREAT_MODEL.md">Threat model</a> &middot;
-  <a href="%%REPO%%/releases/tag/v1.2.0">v1.2.0</a>
+  <a href="%%REPO%%/releases/tag/v1.3.0">v1.3.0</a>
   <p style="margin-top:10px;color:var(--faint)">This page is generated from files in the
   repository. Nothing on it is a mock-up.</p>
 </footer>

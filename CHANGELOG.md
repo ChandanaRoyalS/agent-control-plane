@@ -15,6 +15,15 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-05
+
+Durable state. Both stores the threat model listed as per-process — the
+approval store (a correctness bug under replication) and the budgets (a
+permissive limit under replication) — can now live in a Redis every replica
+shares, each behind one presence-based setting, with the in-memory versions
+staying the default. Tool descriptions are screened. Two new settings, so a
+minor version under ADR 0058; nothing is removed or renamed.
+
 ### Added
 
 - `ACP_BUDGET_STORE_URL` (ADR 0067). Set it to a Redis URL and rate-limit
@@ -351,7 +360,8 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.3.0
 [1.2.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.2.0
 [1.1.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.1.1
 [1.1.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v1.1.0

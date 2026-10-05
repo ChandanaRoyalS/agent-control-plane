@@ -8,6 +8,10 @@
   never trained on, so the false-positive yardstick stays independent.
 - **sealed**: BIPIA's test split and the evasion corpus built from it, scored once.
 
+Data version 2 (ADR 0079) adds AgentDojo: its train goals to the pool, its held-out
+goals as a sealed set. Version 1 is what the committed model was trained on, and stays
+the default until a model trained on version 2 replaces it.
+
 Splits are by group (one attacker instruction, or one context), so the same
 sentence never sits on both sides; `check_disjoint` enforces it.
 """
@@ -28,6 +32,7 @@ from acp.corpus.heldout import load_development_attacks
 from acp.corpus.loader import default_root, load_benign
 from acp.firewall.learned import normalise, windows
 
+DATA_VERSIONS: Final = (1, 2)
 VALIDATION_SALT: Final = "acp-classifier-validation-v1"
 VALIDATION_SHARE: Final = 5
 """One group in five goes to validation."""
@@ -112,7 +117,7 @@ def control_text(text: str, planted: str, pool: Sequence[str]) -> str:
     return text.replace(planted, pool[choice], 1)
 
 
-def development_pool(root: Path | None = None) -> list[Example]:
+def development_pool(root: Path | None = None, *, data_version: int = 1) -> list[Example]:
     """Everything the classifier may learn from, before the validation cut."""
     root = root or default_root()
     injecagent = load_external_split(root / "external" / "injecagent").development
@@ -136,6 +141,9 @@ def development_pool(root: Path | None = None) -> list[Example]:
         Example(row["id"], row["text"], 0, row["group"], "stdlib")
         for row in _jsonl(root / "external" / "stdlib" / "documents.jsonl")
     ]
+    if data_version >= 2:  # noqa: PLR2004 — the version that added AgentDojo
+        agentdojo = load_bipia(root / "external" / "agentdojo")
+        pool += _bipia((d for d in agentdojo if d.split == "train"), "agentdojo")
     return _dedupe(pool)
 
 
@@ -143,10 +151,13 @@ def _jsonl(path: Path) -> list[dict[str, str]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
-def assemble(root: Path | None = None, *, unseal: bool = False) -> Datasets:
+def assemble(root: Path | None = None, *, unseal: bool = False, data_version: int = 1) -> Datasets:
     """The splits; the sealed sets are empty unless ``unseal`` is set."""
+    if data_version not in DATA_VERSIONS:
+        msg = f"data version {data_version} is not one of {DATA_VERSIONS}"
+        raise ValueError(msg)
     root = root or default_root()
-    pool = development_pool(root)
+    pool = development_pool(root, data_version=data_version)
     benign = load_benign(root)
     attacks = load_development_attacks(root)
     report = {
@@ -164,6 +175,11 @@ def assemble(root: Path | None = None, *, unseal: bool = False) -> Datasets:
         bipia = load_bipia(default_bipia_dir(root))
         sealed["bipia_test"] = tuple(_bipia((d for d in bipia if d.split == "test"), "bipia"))
         sealed["evasion_v1"] = tuple(_bipia(load_bipia(root / "external" / "evasion"), "evasion"))
+        if data_version >= 2:  # noqa: PLR2004
+            agentdojo = load_bipia(root / "external" / "agentdojo")
+            sealed["agentdojo_test"] = tuple(
+                _bipia((d for d in agentdojo if d.split == "test"), "agentdojo")
+            )
     return Datasets(
         train=tuple(e for e in pool if not in_validation(e.group)),
         validation=tuple(e for e in pool if in_validation(e.group)),

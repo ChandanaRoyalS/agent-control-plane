@@ -17,6 +17,14 @@ without somebody accepting the change.
 
 ### Added
 
+- AgentDojo as a second source of attacks (ADR 0079): 1,698 tool-result
+  documents from its four environments, with 35 attacker goals planted in 38
+  injection vectors under its five templates. One goal in three is sealed, and
+  AgentDojo's own `important_instructions` template appears only there.
+  `assemble(data_version=2)` adds it; version 1, what the committed model was
+  trained on, stays the default. ADR 0079 also fixes, before training, the rule a
+  model trained on it must meet to replace the gateway's.
+
 - Signed audit entries (ADR 0078). `ACP_AUDIT_SIGNING_KEY_FILE` names an
   Ed25519 private key; each entry then carries `sig` and `kid`, and
   `acp audit verify --public-key` (default `config/audit-signing.pub`, when it

@@ -15,6 +15,21 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+### Changed
+
+- The README's results are stated at the size they are (the second item of
+  the 2026-10-05 external review's improvement list). The InjecAgent table
+  now says what each row shows: 595/595 is one regex on one shared prefix,
+  35/35 under least privilege is close to the benchmark's construction, and
+  under the reads-allowed policy the read steps of a data-stealing chain
+  execute. The internal numbers carry their caveats (0 of 106 benign
+  withheld confirms a selection; the held-out split is seven documents).
+  "Sealed" and "pre-registered" became "held out by convention", with the
+  dates the git history does show. New: what the safety defaults are, that
+  no model is in the loop, that the detectors match fixed phrasings, and
+  what the next month of work would be. The decision-record and breakage
+  counts are checked against the directory and the harnesses by a test.
+
 ### Security
 
 - **An operator audience that an issuer in `ACP_AUTH_ISSUERS_FILE` already

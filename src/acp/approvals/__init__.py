@@ -1,22 +1,9 @@
 """Human-in-the-loop approvals: a call that stops and waits for a person.
 
-Everything else in the request path decides automatically — policy allows or denies,
-budgets charge, the firewall screens. This is the case where the right answer is
-that no rule should decide: a destructive call, a production dataset, a refund
-above a threshold. The policy says `require_approval` (ADR 0048) and the call
-stops mid-flight.
-
-The 2026-07-28 revision gives that a shape with no session machinery at all
-(ADR 0001): the gateway answers `resultType: "input_required"` with an opaque
-`request_state`, and the client retries with it once the approval lands. Nothing
-is held open, no connection is pinned, and any instance can take the retry — as
-long as the store is shared, which is the honest cut in `store.py`.
-
-**The idea the whole package turns on: an approval is granted to a *call*, not
-to a token.** A human reads "delete the test dataset" and says yes; the retry
-must not be "delete production" carrying the same token. Every request records a
-fingerprint of exactly what was asked, and the retry is re-fingerprinted and
-compared. See `record.py`.
+When policy says `require_approval` (ADR 0048), the gateway answers
+`input_required` with an opaque `request_state` and the client retries with it
+once a human decides; nothing is held open (ADR 0001). An approval is bound to the
+exact call: the retry is re-fingerprinted and compared (`record.py`).
 """
 
 from acp.approvals.flow import Gate, Outcome, Resolution, gate, resolve

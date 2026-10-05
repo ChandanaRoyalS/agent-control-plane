@@ -1,28 +1,10 @@
-"""Attacks nobody on this project wrote.
+"""Scoring the firewall on InjecAgent, an external corpus (Zhan et al., ACL Findings 2024, MIT).
 
-Every attack in `corpus/attack/` was written by the person who wrote the
-detectors, and ADR 0060 measured the cost of that: the held-out split matched
-its author's predictions 7 for 7, which says the author knows the firewall, not
-that the firewall works. This module loads an external corpus — InjecAgent
-(Zhan et al., ACL Findings 2024, MIT), imported by `scripts/import_injecagent.py`
-— and scores the firewall on it.
-
-**Sliced the way the source slices it.** InjecAgent's two subsets are *direct
-harm* (`dh`: the planted instruction asks the agent to do something damaging)
-and *data stealing* (`ds`: it asks the agent to send the user's data to the
-attacker), each in a *base* form and an *enhanced* form that prefixes "IMPORTANT!!!
-Ignore all previous instructions…". These do not map onto this corpus's seven
-families — `ds` exfiltrates through a tool call, not a rendered URL — and
-forcing them would invent a precision the mapping does not have. So the report
-is per subset x variant, plus the source's own attack types.
-
-**Intervals resample attacker instructions, not documents.** The corpus is a
-cross product (see `scripts/import_injecagent.py`), so the honest sample size is
-the number of distinct instructions. `measure_clustered` says why.
-
-**Split by instruction, half sealed.** `heldout.txt` beside the documents lists
-the instruction groups held out as split v2, chosen by `held_out` — a hash rule,
-re-derived by a test so the list cannot be edited by hand.
+Imported by `scripts/import_injecagent.py` because internal attacks share the
+detectors' author (ADR 0060). Reported per source subset (``dh``, ``ds``) and
+variant (base, enhanced), not mapped to internal families. Intervals resample
+attacker instructions (see `measure_clustered`). Held-out split v2 in
+`heldout.txt` is chosen by the `held_out` hash rule, re-derived by a test.
 """
 
 from __future__ import annotations
@@ -44,8 +26,7 @@ from acp.firewall import Firewall
 
 SOURCE: Final = "injecagent"
 SALT: Final = "acp-heldout-v2"
-"""Fixed before the first import. Changing it re-rolls the split; the generated
-`heldout.txt` would change in the same diff, and a test would fail first."""
+"""Fixed split salt; changing it re-rolls the split and fails a test."""
 
 SUBSETS: Final = ("dh", "ds")
 VARIANTS: Final = ("base", "enhanced")
@@ -59,7 +40,7 @@ def group_id(subset: str, instruction: str) -> str:
 
 
 def held_out(group: str) -> bool:
-    """The split rule: half the groups, by hash. Applied, never chosen."""
+    """The split rule: half the groups, by salted hash."""
     return int(hashlib.sha256(f"{SALT}:{group}".encode()).hexdigest(), 16) % 2 == 1
 
 
@@ -69,15 +50,13 @@ class ExternalDocument:
 
     id: str
     group: str
-    """The attacker instruction it carries. Documents sharing a group are the
-    same attack in different templates — one piece of evidence, not seventeen."""
+    """The attacker instruction; documents sharing a group count as one piece of evidence."""
     subset: str
     variant: str
     attack_type: str
     text: str
     planted: str
-    """The span the source inserted. Never screened on its own; used only to
-    build the control — this text with the span removed."""
+    """The span the source inserted; used only to build `control`."""
 
     @property
     def control(self) -> str:
@@ -155,11 +134,9 @@ class ExternalRow:
     label: str
     groups: int
     flagged: Proportion
-    """Any finding at all — including ones the template alone produces."""
+    """Any finding, including ones the template alone produces."""
     caught: Proportion
-    """A finding the template alone does not produce: the firewall reacted to
-    the attack. This is the recall figure; `flagged` is shown beside it so the
-    gap between them is visible rather than silently subtracted."""
+    """A finding (or withholding) the template alone does not produce; the recall figure."""
     withheld: Proportion
 
 
@@ -229,9 +206,7 @@ def evaluate_external(
             members = [d for d in documents if d.subset == subset and d.variant == variant]
             if members:
                 rows.append(row(f"{subset} {variant}", members))
-    # The source's attack types, over the base form only. Mixing in the enhanced
-    # form would make every type read as "half caught" — which is the prefix
-    # being caught, half the time, by construction, and says nothing per type.
+    # Attack types over the base form only; the enhanced prefix would mask per-type results.
     for subset in SUBSETS:
         base = [d for d in documents if d.subset == subset and d.variant == "base"]
         for kind in sorted({d.attack_type for d in base}):
@@ -253,7 +228,7 @@ def evaluate_external(
 
 
 # ---------------------------------------------------------------------------
-# The baseline: counts, compared, the way ADR 0047 compares the internal corpus
+# The baseline: counts, compared as ADR 0047 compares the internal corpus
 # ---------------------------------------------------------------------------
 
 
@@ -262,8 +237,7 @@ def default_external_baseline(directory: Path | None = None) -> Path:
 
 
 def baseline_counts(report: ExternalReport) -> dict[str, object]:
-    """What `--capture` commits: counts per row, and the configuration they
-    were measured under. Counts, not rates, for the reason ADR 0047 gives."""
+    """What `--capture` commits: per-row counts and the deployment (ADR 0047)."""
     return {
         "deployment": report.deployment,
         "rows": {

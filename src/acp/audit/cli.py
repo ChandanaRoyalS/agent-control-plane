@@ -1,24 +1,8 @@
 """`acp audit verify` and `acp audit checkpoint`.
 
-**An audit log nobody can verify is just an expensive log**, which is the whole
-justification for these commands existing at all. The chain is
-worth exactly as much as the ease of checking it: a verification that requires
-writing a script is one that happens after an incident, and the point of
-tamper-evidence is to notice *before* anybody is looking for a reason to.
-
-The decisions live here rather than in `acp.cli`, following `acp.secrets.cli`.
-That module says why, and it is worth repeating: `acp.cli` imports the MCP SDK,
-so anything written there cannot be tested or type-checked in the environment it
-is authored in — which is how three bugs shipped. This file has no SDK import,
-no gateway import, and no network. It reads a file and compares hashes.
-
-**Two verbs, and the second one is the interesting one.**
-
-`verify` walks the chain and reports every break. `checkpoint` writes the anchor
-that makes `verify` able to detect truncation and wholesale rewrite — the two
-attacks a self-contained chain provably cannot see (`acp.audit.chain` sets out
-which is which). Committing that anchor is the act that turns "these entries are
-consistent with each other" into "these entries are the ones that were written".
+`verify` reports every break; `checkpoint` writes the anchor that lets `verify` detect
+truncation and rewrite. Kept out of `acp.cli` (as `acp.secrets.cli` is) so it imports no
+MCP SDK and stays testable.
 """
 
 from __future__ import annotations
@@ -35,18 +19,15 @@ from acp.audit.checkpoint import load as load_checkpoint
 
 OK: Final = 0
 BROKEN: Final = 1
-"""Non-zero on a broken chain, so `acp audit verify` composes with CI and cron
-without anybody parsing its output. The same shape as `acp schemas check`."""
+"""Exit code for a broken chain or failed anchor check, for CI (like `acp schemas check`)."""
 
 MISSING: Final = 2
-"""The log is not there at all. Distinct from `BROKEN` on purpose: a chain that
-fails to verify and a chain that does not exist are different incidents, and
-folding them together means a misconfigured path reads as tampering."""
+"""Exit code when the log is missing or empty, so a bad path does not read as tampering."""
 
 
 @contextmanager
 def _lines(path: Path) -> Iterator[Iterator[str]]:
-    """Stream a chain, so verifying one larger than memory costs nothing extra."""
+    """Stream a chain's lines."""
     with path.open("r", encoding="utf-8") as handle:
         yield handle
 
@@ -57,14 +38,7 @@ def verify_command(
     checkpoint_path: Path | None = None,
     out: Callable[[str], None] = print,
 ) -> int:
-    """Walk the chain, compare it against its anchor, and report.
-
-    Both halves always run and both are always printed, including when there is
-    no anchor to check. "Verified against a committed checkpoint" and "verified
-    against nothing" must never read the same in a build log — the second is a
-    considerably weaker statement, and the difference is invisible unless it is
-    said out loud.
-    """
+    """Verify the chain and its anchor, always printing both results (even with no anchor)."""
     if not log_path.exists():
         out(f"no audit log at {log_path}")
         return MISSING
@@ -105,17 +79,10 @@ def checkpoint_command(
     out: Callable[[str], None] = print,
     now: Callable[[], float] = time.time,
 ) -> int:
-    """Record where the chain has got to, for a later verification to anchor on.
+    """Write a checkpoint at the chain's current end.
 
-    **Refuses to anchor a broken chain.** Writing a checkpoint over a chain that
-    does not verify would launder the damage: every future verification would
-    compare against a state that already contained it, and the break would have
-    been blessed by the tool built to find it. So this verifies first and exits
-    non-zero without writing.
-
-    The anchor is taken at the chain's current end. That is the strongest
-    position available — everything before it becomes fixed — and it is why the
-    command is worth running on a schedule rather than once.
+    Refuses (returns `BROKEN`, writes nothing) if the chain does not verify, so damage never
+    becomes the baseline.
     """
     if not log_path.exists():
         out(f"no audit log at {log_path}")

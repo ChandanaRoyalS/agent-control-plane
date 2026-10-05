@@ -1,33 +1,9 @@
-"""Where entries go, and what happens when they cannot go there.
+"""Audit sinks: where chained entries are stored.
 
-`acp.audit.chain` computes links; this decides where they land. Kept
-apart on purpose: the chaining rule is then testable without a filesystem, and a
-Postgres- or object-store-backed sink arrives later as a class rather than a
-redesign.
-
-**Three things this module gets to be opinionated about.**
-
-**1. A restart continues the chain; it does not start a second one.** On open,
-the head and sequence are recovered from the last entry already in the file. A
-sink that began at `GENESIS` every time the process restarted would write a file
-containing several valid chains end to end, and a verifier walking it would
-report a break at every restart — which trains everybody to ignore breaks, which
-is the only outcome worse than not having a verifier.
-
-**2. A tail this cannot read stops the process.** A half-written final line —
-the ordinary result of a crash mid-write — leaves a file whose tail is not an
-entry. Two options: truncate it and carry on, or refuse to start. Truncating an
-audit log to make it parse is the single thing this module must never do, and it
-would be *automatic evidence destruction* in the exact circumstances where
-somebody later asks what happened. So it refuses, loudly, naming the line — and
-an operator makes a deliberate, recorded decision about a file they can still see.
-
-**3. `fsync` on every entry.** Expensive, and correct. A record buffered in the
-kernel when the machine loses power is a record that describes a call which
-really happened, and it is precisely the crash-adjacent window an investigation
-cares about. The cost is real and is stated rather than hidden: this bounds
-write throughput to the disk's sync rate, and ``perf/`` measures it. `fsync=False`
-exists for tests and for a deployment that has consciously traded the guarantee.
+On open, the file sink resumes the chain from its last entry. An unreadable tail (e.g. a
+crash mid-write) stops startup rather than being truncated, since truncation destroys
+evidence. Each entry is `fsync`ed by default, bounding throughput to the disk's sync rate
+(measured in ``perf/``); `fsync=False` trades that durability away (ADR 0053).
 """
 
 from __future__ import annotations
@@ -49,40 +25,20 @@ logger = logging.getLogger(__name__)
 
 
 class AuditSerialisationError(OSError):
-    """A record that cannot be encoded as strict JSON.
+    """A record that is not strict JSON, raised before the chain advances.
 
-    An `OSError` on purpose: to the writer it is indistinguishable from a disk
-    that refused the write — the record did not land, the head did not move,
-    and the call is refused when the log is required. It is raised *before*
-    the chain advances, which is the whole point (see `FileAuditSink.append`).
+    An `OSError` so the writer treats it like a failed disk write.
     """
 
 
 class AuditSink(Protocol):
-    """The three operations an audit writer needs.
-
-    Deliberately not a general file interface, and deliberately with no `read`.
-    Verification is a separate program walking the artifact from the outside;
-    giving the writing path a way to read its own chain back would invite a
-    "repair" function, and a log that can repair itself is a log that can be
-    repaired by whoever broke it.
-    """
+    """What an audit writer needs; no `read`, since verification runs separately from outside."""
 
     @property
     def blocking(self) -> bool:
-        """Whether `append` waits on hardware.
+        """Whether `append` waits on hardware (e.g. `fsync`), so the writer offloads it to a thread.
 
-        The audit write runs on a worker thread so an `fsync` cannot park the
-        event loop. Measurement of that change then showed the thread hop is a
-        **fixed cost** — two context switches and a limiter acquisition — that
-        is worth paying only when the write actually waits:
-        with `fsync` off, offloading cost 29% of throughput for nothing.
-
-        So the sink declares it, because the sink is the only thing that knows.
-        The rule is not "is this write slow" (unknowable) but the sharper
-        physical one: **does it wait on hardware?** `fsync` does. A `write()`
-        into a line-buffered file copies into the kernel's page cache and
-        returns, which is not something to leave the event loop for.
+        The thread hop has a fixed cost, so non-blocking sinks run inline (ADR 0053).
         """
         ...
 
@@ -98,37 +54,24 @@ class AuditSink(Protocol):
         """How many entries this sink has written or recovered."""
 
     def close(self) -> None:
-        """Release whatever this sink holds open.
-
-        Part of the protocol rather than an implementation detail of the file
-        sink, because *every* sink owns something — a handle, a connection, a
-        batch not yet flushed. Leaving it off meant `gateway_from_settings`
-        closed the secret store, the exchanger and the key cache and silently
-        leaked the one resource whose whole purpose is durability.
-        """
+        """Release whatever this sink holds open."""
 
 
 class MemoryAuditSink:
-    """A chain in a list, for tests and for `--dry-run`.
-
-    Real chaining, no filesystem — so every property about linking, ordering and
-    verification is exercised by the fast suite rather than only by whatever
-    happens to touch a temporary directory.
-    """
+    """A real chain held in a list, for tests and `--dry-run`."""
 
     def __init__(self) -> None:
         self._chain = Chain()
         self.entries: list[Entry] = []
 
     blocking = False
-    """Nothing to wait for: a list append. Offloading it would be pure cost."""
+    """A list append never waits on hardware."""
 
     def append(self, record: AuditRecord) -> Entry:
         try:
             entry = self._chain.append(record)
         except (TypeError, ValueError) as exc:
-            # The same refusal the file sink makes, so a test against this sink
-            # sees the behaviour the real one has.
+            # Same refusal as the file sink.
             raise AuditSerialisationError(f"audit record is not JSON-encodable: {exc}") from exc
         self.entries.append(entry)
         return entry
@@ -142,9 +85,7 @@ class MemoryAuditSink:
         return self._chain.length
 
     def close(self) -> None:
-        """Nothing to release. Present because the protocol requires it, and a
-        test double that cannot be closed like the real thing is one that hides
-        the bug where somebody forgets to."""
+        """Nothing to release; required by the protocol."""
 
     def lines(self) -> list[str]:
         """The entries as they would have been written, for `verify`."""
@@ -152,17 +93,10 @@ class MemoryAuditSink:
 
 
 def recover(path: Path) -> tuple[str, int]:
-    """The head and sequence to continue from, or the reason this cannot start.
+    """The head and sequence to continue from, found by streaming the whole file (O(n)).
 
-    Streams the file rather than seeking to the end. That is O(n) at startup and
-    it is the right trade: a tail-seek has to guess where the last line begins,
-    and a careless one resumes from a *corrupted* tail — which writes a valid
-    chain on top of a broken one and hides exactly what the format exists to
-    show. The startup cost is paid once per process; the wrong answer is paid
-    once, forever, by whoever is investigating.
-
-    Raises `ConfigurationError` when the last line is not an entry. See the
-    module docstring: refusing beats truncating.
+    Raises:
+        ConfigurationError: A line is not an audit entry; refusing beats truncating.
     """
     if not path.exists():
         return GENESIS, SEQ_START - 1
@@ -204,34 +138,17 @@ def recover(path: Path) -> tuple[str, int]:
 
 
 class FileAuditSink:
-    """One JSON entry per line, appended, flushed and synced.
+    """JSON Lines chain file, appended, flushed and synced; readable with plain tools (ADR 0007).
 
-    JSON Lines rather than a database, for the reason ADR 0007 gives about
-    structured logs: the artifact should be readable by `grep`, `jq`, a log
-    shipper and a court, without this project's code being present. A format that
-    needs its own reader is a format whose evidence expires when the reader stops
-    building.
-
-    The handle is held open for the process's lifetime. Reopening per write would
-    be slower *and* weaker: it opens a window in which the path can be swapped
-    between entries, and an audit sink following a rename to somewhere else is
-    the whole attack.
-
-    **One writer, by construction** (ADR 0070). The chain is a sequence, and a
-    sequence has one author. Inside the process a lock serialises `append`, so
-    the synchronous `record` path called from two threads cannot interleave a
-    chain step with another's write. Across processes the file carries an
-    exclusive advisory lock for as long as this sink holds it, so a second
-    gateway pointed at the same path refuses to start rather than producing
-    two chains in one file — which `acp audit verify` would report as broken,
-    correctly, and nobody could repair.
+    The handle stays open for the process lifetime, so the path cannot be swapped between
+    writes. One writer only (ADR 0070): a thread lock serialises `append`, and an exclusive
+    `flock` makes a second process on the same path refuse to start.
     """
 
     def __init__(self, path: Path, *, fsync: bool = True) -> None:
         head, seq = recover(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Line buffered, so a crash loses at most the entry being written rather
-        # than everything since the last block filled.
+        # Line buffered: a crash loses at most the entry being written.
         self._handle = path.open("a", encoding="utf-8", buffering=1)
         _claim(self._handle, path)
         self._path = path
@@ -241,30 +158,16 @@ class FileAuditSink:
 
     @property
     def blocking(self) -> bool:
-        """True exactly when this sink calls `fsync`.
-
-        Without it the write is `write()` plus `flush()` into the page cache —
-        microseconds, and not worth a thread. With it the call waits for the
-        disk, and every other request in the process waits with it unless the
-        writer moves off the loop.
-        """
+        """True exactly when this sink calls `fsync`."""
         return self._fsync
 
     def append(self, record: AuditRecord) -> Entry:
-        """Chain and write, or raise.
+        """Chain and write the record, or raise `OSError` leaving the head unchanged.
 
-        The entry is chained *before* it is written and the head advances only
-        after the write succeeds — so a failed write leaves the chain where it
-        was rather than skipping a sequence number that nothing will ever fill.
-        A gap is indistinguishable from a deletion to anybody reading later.
+        Rewinding on failure avoids a sequence gap, which would look like a deletion.
         """
-        # Serialise BEFORE chaining. `Chain.append` hashes the record with the
-        # same strict encoder that produces the line below, so a value JSON
-        # cannot represent fails here, with the head exactly where it was,
-        # rather than after the head has moved and nothing has landed on disk
-        # — which left a `prev` no entry had and made an untampered file verify
-        # as tampered. Raised as `AuditSerialisationError`, an `OSError`, so
-        # the writer treats it exactly like a disk that refused the write.
+        # Unencodable values fail inside this try, before anything is written, so the head
+        # never points at an entry that is not on disk.
         with self._lock:
             try:
                 entry = self._chain.append(record)
@@ -278,9 +181,8 @@ class FileAuditSink:
                 if self._fsync:
                     os.fsync(self._handle.fileno())
             except OSError:
-                # Rewind, so the next attempt reuses this sequence number. The
-                # caller decides whether an unwritable record stops the call (it
-                # does, by default) — see `acp.audit.writer`.
+                # Rewind so the next attempt reuses this seq; `acp.audit.writer` decides
+                # whether the call is refused.
                 self._chain = Chain(head=entry.prev, seq=entry.seq - 1)
                 raise
             return entry
@@ -298,20 +200,14 @@ class FileAuditSink:
         return self._path
 
     def close(self) -> None:
-        # Closing the descriptor releases the advisory lock with it.
+        # Also releases the advisory lock.
         self._handle.close()
 
 
 def _claim(handle: IO[str], path: Path) -> None:
-    """Take the exclusive advisory lock on the open chain, or refuse to start.
+    """Take a non-blocking exclusive `flock`, or raise `ConfigurationError` naming the path.
 
-    Non-blocking: a second process waiting for the first to exit would be a
-    gateway that starts the moment its sibling crashes and then writes a
-    chain the sibling's restart cannot continue. Refusing is the honest
-    answer, and the message names the path so the operator can see which two
-    deployments were pointed at one file. Advisory, so a process that does
-    not ask is not stopped — `acp audit verify` reads without asking, as it
-    should.
+    Advisory, so readers such as `acp audit verify` are unaffected.
     """
     try:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)

@@ -1,26 +1,10 @@
 """Retrying an upstream call, when and only when that is safe.
 
-Two questions have to be answered before a retry is legitimate, and getting
-either wrong is worse than not retrying at all.
-
-**Is this failure worth retrying?** The taxonomy already answers this. Every
-``ACPError`` carries ``recoverable``, set deliberately when the class was
-defined: a timeout or an unreachable host may well succeed on a second attempt,
-while a malformed response will produce the same garbage every time. Retrying
-the latter just burns the agent's budget more slowly.
-
-**Is this operation safe to repeat?** ``tools/list`` is a read and always is.
-``tools/call`` is not: retrying ``create_ticket`` after a timeout files a second
-ticket, and the client cannot tell whether the first one succeeded — a timeout
-means *no answer*, not *no effect*. So tool calls are retried only when the
-upstream's configuration explicitly names the tool as idempotent. The default is
-an empty list, which means no tool call is ever retried unless someone said so.
-
-Backoff uses **full jitter**: the delay is drawn uniformly from ``[0, cap]``
-rather than being ``cap`` exactly. When several callers fail against the same
-upstream at the same moment — which is precisely what happens when an upstream
-restarts — an unjittered backoff synchronises them into a thundering herd that
-knocks the upstream over again on each retry round. Full jitter spreads them.
+Only failures the taxonomy marks retryable are retried. ``tools/list`` is always
+safe to repeat; ``tools/call`` is retried only for tools the upstream config names
+idempotent (default: none), since a timeout means no answer, not no effect. Backoff
+uses full jitter, uniform over ``[0, cap]``, so callers failing together do not retry
+in lockstep.
 """
 
 from __future__ import annotations
@@ -54,8 +38,7 @@ class RetryPolicy:
     """Seconds before the first retry, before jitter."""
 
     max_backoff: float = 5.0
-    """Ceiling on the backoff cap. Without it, exponential growth quickly
-    exceeds any sane request deadline and the retry never happens at all."""
+    """Ceiling on the backoff cap, in seconds."""
 
     multiplier: float = 2.0
     """Growth factor per attempt."""
@@ -67,25 +50,16 @@ class RetryPolicy:
 
 
 def is_retryable(exc: BaseException) -> bool:
-    """Whether this failure could plausibly succeed on another attempt *here*.
+    """Whether this failure could succeed on another attempt within this request.
 
-    Delegates entirely to the taxonomy rather than matching on exception types,
-    because having two places decide "is this worth retrying" is how they drift
-    apart. Two flags, not one, and both must hold.
-
-    ``recoverable`` is the advice already forwarded to the agent: this failure
-    is not permanent. ``retry_locally`` narrows it to the current request: an
-    attempt in the next few hundred milliseconds could change the outcome. They
-    differ exactly where the gateway itself refused the call — an open circuit
-    or a full bulkhead is recoverable on the agent's timescale and immovable on
-    this one, and retrying it would spend the whole attempt budget waiting for a
-    gate that has not had time to open.
+    Both taxonomy flags must hold: ``recoverable`` (not permanent) and
+    ``retry_locally``, which is false for the gateway's own refusals (open circuit,
+    full bulkhead) that will not clear within a backoff.
     """
     return isinstance(exc, ACPError) and exc.recoverable and exc.retry_locally
 
 
-# A plain TypeVar rather than PEP 695 syntax: it parses under every toolchain
-# that might read this file, which matters more than the newer spelling.
+# Plain TypeVar, not PEP 695, so every toolchain parses it.
 async def with_retry(  # noqa: UP047
     operation: Callable[[], Awaitable[T]],
     policy: RetryPolicy,
@@ -96,10 +70,7 @@ async def with_retry(  # noqa: UP047
 ) -> T:
     """Run ``operation``, retrying recoverable failures with jittered backoff.
 
-    The last failure is re-raised unchanged, so the caller still receives a
-    typed taxonomy error carrying its ``recoverable`` hint and upstream name —
-    a retry wrapper that flattens everything into a generic "retries exhausted"
-    would destroy exactly the information the agent needs.
+    The last failure is re-raised unchanged, keeping its typed taxonomy error.
     """
     sleep = sleep or anyio.sleep
     uniform = uniform or random.uniform

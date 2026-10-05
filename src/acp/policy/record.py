@@ -1,23 +1,8 @@
 """Read authorization decisions back out of the gateway's own log.
 
-`enforce_call` writes one JSON object per decision (ADR 0007's shape: an event
-name plus fields). This reads them back, and it is the input to the policy
-simulator — the recorded traffic a proposed policy is replayed against.
-
-**The log is an operational artifact, not a data file this module owns.** It is
-written by a running gateway, rotated by something else, interleaved with every
-other event the process emits, and quite possibly truncated in the middle of a
-line by whatever was copying it when the disk filled. So every line is treated
-as untrusted: a line that does not parse, or parses into something that is not a
-decision, is *skipped and counted*, never an exception. A simulator that dies on
-line 40,000 of a log has answered no question at all, and the operator's next
-move — `grep` the file by hand — is strictly worse than the answer it could have
-given about the other 39,999.
-
-The count is reported rather than swallowed, because "I read 12 of your 40,000
-lines" and "I read all 40,000" are very different answers to *is this policy
-edit safe*, and a simulator that cannot tell them apart is one that quietly
-reports "no changes" for a log it failed to parse.
+Parses the JSON lines `enforce_call` writes (ADR 0007) as input to the policy
+simulator. Lines are untrusted: a malformed or non-decision line is skipped and
+counted, never raised, and the count is reported so a partial parse is visible.
 """
 
 from __future__ import annotations
@@ -31,22 +16,15 @@ from acp.policy.enforce import ALLOWED_EVENT, APPROVAL_EVENT, DENIED_EVENT
 from acp.policy.evaluate import Verdict
 
 DECISION_EVENTS = frozenset({ALLOWED_EVENT, DENIED_EVENT, APPROVAL_EVENT})
-"""The three event names `enforce_call` emits, imported rather than spelled again.
-
-A reader with its own copy of these strings is a reader that silently stops
-finding anything the day somebody renames the event.
-"""
+"""The event names `enforce_call` emits, imported so a rename cannot desync them."""
 
 
 @dataclass(frozen=True, slots=True)
 class RecordedDecision:
     """One authorization decision the gateway actually made.
 
-    Carries what the log carries and nothing invented. In particular
-    ``argument_names`` is ``None`` when the record predates the field, which is
-    a *different* claim from ``frozenset()`` — "I do not know which arguments
-    were sent" versus "I know none were". The simulator's precision depends on
-    the difference, so it is not collapsed into an empty set for convenience.
+    ``argument_names`` is ``None`` when unknown (older records), distinct from an empty
+    set meaning none were sent; the simulator relies on the difference.
     """
 
     subject: str
@@ -57,10 +35,7 @@ class RecordedDecision:
     argument_names: frozenset[str] | None
 
     requires_approval: bool = False
-    """The call was held for a human (ADR 0048). Mirrors ``Decision``, including
-    the invariant that it is never true alongside ``allowed`` — so a reader that
-    predates approvals sees a call that was not permitted, which is what
-    happened."""
+    """Held for a human (ADR 0048); as in ``Decision``, never true alongside ``allowed``."""
 
     @property
     def verdict(self) -> Verdict:
@@ -83,11 +58,7 @@ class Traffic:
 
     decisions: tuple[RecordedDecision, ...]
     unreadable: int
-    """Lines that were not JSON, or were JSON of the wrong shape.
-
-    Not lines that were simply other events — those are not errors, they are
-    the rest of the gateway doing its job in the same file.
-    """
+    """Lines that were not JSON or not a valid decision; other events are not counted here."""
 
     other_events: int
 
@@ -97,13 +68,7 @@ class Traffic:
 
 
 def _decision_from(payload: dict[str, Any]) -> RecordedDecision | None:
-    """A decision record, or ``None`` if this object is not one.
-
-    Every field is checked for the type it must have rather than coerced. A
-    record whose ``tool`` arrived as a number is not a tool call this simulator
-    can reason about, and turning it into the string ``"7"`` would produce a
-    confident answer about a call that never happened.
-    """
+    """Return a decision record, or ``None``; fields are type-checked, never coerced."""
     subject = payload.get("subject")
     tool = payload.get("tool")
     verdict = payload.get("decision")
@@ -138,10 +103,7 @@ def _decision_from(payload: dict[str, Any]) -> RecordedDecision | None:
 def parse_traffic(lines: Iterable[str]) -> Traffic:
     """Read every decision in ``lines``, counting what could not be read.
 
-    Takes an iterable of lines rather than a path so the caller decides where
-    the log comes from — a file, a pipe, a test's list of strings — and so a
-    log larger than memory streams rather than loads. The gateway's own log is
-    the expected source; nothing here assumes it.
+    Takes lines rather than a path, so any source works and large logs stream.
     """
     decisions: list[RecordedDecision] = []
     unreadable = 0
@@ -154,8 +116,6 @@ def parse_traffic(lines: Iterable[str]) -> Traffic:
         try:
             payload = json.loads(stripped)
         except json.JSONDecodeError:
-            # A half-written line from a rotation, a console-formatted line, or
-            # something else entirely. One bad line is not a reason to stop.
             unreadable += 1
             continue
         if not isinstance(payload, dict):

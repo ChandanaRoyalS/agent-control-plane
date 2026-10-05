@@ -1,39 +1,9 @@
-"""Background health probing, and withdrawing what is not answering.
+"""Background upstream health probing, and withdrawing unhealthy upstreams' tools.
 
-Top-level rather than inside ``acp.gateway`` on purpose. Health is a property of
-*upstreams*, and the admin listener needs to report it — putting it under
-``acp.gateway`` made the metrics-and-readiness app import the inbound server and
-therefore the MCP SDK, which is a dependency it has no reason to carry.
-
-The breaker already knows when an upstream is failing. Two things it
-cannot do on its own, and this module exists for both.
-
-**It cannot recover without traffic.** A breaker opens, waits out its reset
-timeout, and then needs *somebody* to make a call before it will half-open and
-find out whether the upstream came back. With no traffic there is nobody, so a
-gateway that goes quiet overnight wakes up with every circuit still open until
-the first agent of the morning pays a connect timeout to discover otherwise.
-A background prober is that somebody, and it means the cost of finding out is
-paid by a scheduled task rather than by whichever request happened to be next.
-
-**It cannot tell an agent anything.** Its knowledge reaches the logs and the
-metrics, which is to say it reaches operators. The agent still asks for the full
-catalogue and still gets a partial one with no explanation. Withdrawing an
-unhealthy upstream's tools makes the breaker's knowledge visible in the only
-place the agent actually looks — the tool list. An agent that never sees
-`mock-a__search` will not call it, and will plan around its absence, which is a
-far better outcome than calling it and handling an error.
-
-**Probing means calling `tools/list`.** MCP has no health method, and inventing
-one would be worse anyway: a synthetic ping can succeed while the operation the
-gateway actually needs is broken. The probe is the real request, through the
-whole stack, so the breaker sees its result as evidence like any other.
-
-**Unknown means ask.** An upstream that has never been probed is not withdrawn.
-Withdrawing on ignorance would turn a monitor that failed to start into a
-gateway that serves nothing — a monitoring bug escalated into an outage. The
-security posture elsewhere in this project is deny-by-default; this is
-availability, and it fails the other way on purpose.
+The prober lets open breakers recover without live traffic, and withdrawal shows
+agents an outage in the tool list. A probe is a real `tools/list` through the whole
+stack. Never-probed upstreams count as available: this is availability, so it fails
+open. Top-level so the admin app need not import the MCP SDK.
 """
 
 from __future__ import annotations
@@ -56,29 +26,14 @@ DEFAULT_INTERVAL = 15.0
 DEFAULT_JITTER = 0.3
 
 HealthObserver = Callable[["HealthRecord", "UpstreamHealth"], object]
-"""Something that wants to know when an upstream's health changes.
+"""Called on health transitions only, with the new record and the previous state.
 
-The trace console is the first, and the hook exists rather than health
-importing it for the same reason `CatalogueObserver` does: **health has no
-business knowing what a console is.** It is called on transitions only, with the
-new record and the state it came from.
-
-Not the audit chain, and that is the honest part. An upstream's health changing
-is not a decision this gateway made about anybody's call — no principal asked
-for it, nothing was permitted or refused — so it is not an auditable fact. The
-console shows it marked `observed`: true when emitted, gone when this process
-is (ADR 0056).
+Used by the trace console. Health changes are not audited, since no call was
+decided; the console marks them `observed` (ADR 0056).
 """
 
 CatalogueObserver = Callable[[str, ListToolsResult], object]
-"""Something that wants to see each catalogue the prober fetches.
-
-Schema drift detection is the first such observer, and the reason this
-hook exists rather than the prober importing it directly: health has no business
-knowing what drift is. The return value is ignored — typed as ``object`` so an
-observer that returns something useful to its own callers does not have to
-pretend otherwise here.
-"""
+"""Sees each catalogue the prober fetches (used by drift detection); return ignored."""
 
 
 class UpstreamHealth(StrEnum):
@@ -103,16 +58,11 @@ class HealthRecord:
 
     @property
     def serves_tools(self) -> bool:
-        """Whether this upstream's tools belong in the merged catalogue.
-
-        ``UNKNOWN`` counts as yes — see the module docstring. The only state
-        that withdraws anything is a probe that actually failed.
-        """
+        """Whether this upstream's tools belong in the catalogue; only ``UNHEALTHY`` is no."""
         return self.state is not UpstreamHealth.UNHEALTHY
 
     def as_dict(self) -> dict[str, object]:
-        """For the readiness endpoint. Deliberately no exception message: the
-        error *type* is reportable, its text is not."""
+        """For the readiness endpoint; carries the error type, never its message."""
         return {
             "upstream": self.upstream,
             "state": str(self.state),
@@ -170,22 +120,13 @@ class HealthMonitor:
 
     @property
     def is_serving_nothing(self) -> bool:
-        """True when upstreams are configured and none of them can serve.
-
-        Distinct from "no upstreams configured", which is a legitimate way to
-        run this gateway and must not read as an outage.
-        """
+        """True when upstreams are configured and none can serve; False with none configured."""
         return bool(self._records) and not any(r.serves_tools for r in self._records.values())
 
     # -- probing -----------------------------------------------------------
 
     async def probe_once(self) -> None:
-        """Probe every upstream concurrently.
-
-        Concurrently rather than in sequence for the same reason the catalogue
-        fan-out is: one unreachable upstream taking its full connect timeout
-        must not delay finding out about the others.
-        """
+        """Probe every upstream concurrently, so one slow upstream delays no other."""
         async with anyio.create_task_group() as tg:
             for upstream in self._upstreams:
                 tg.start_soon(self._probe, upstream)
@@ -195,19 +136,12 @@ class HealthMonitor:
         record = self._records[name]
         previous = record.state
         try:
-            # Forced past any cache. A probe answered from a cached catalogue
-            # reports on a conversation that happened minutes ago, which is the
-            # one thing a liveness check must never do — and it repopulates the
-            # cache as a side effect, so the prober keeps it warm.
+            # Bypass the cache so the probe is live; it also re-warms the cache.
             await upstream.invalidate()
             result = await upstream.list_tools()
         except UpstreamCircuitOpenError:
-            # The gateway's own refusal, not news about the upstream — the same
-            # distinction `counts_as_failure` draws in the breaker. Whatever
-            # actually broke is remembered rather than overwritten, so a reader
-            # of /readyz keeps being told "cannot connect" instead of watching
-            # the real cause decay into "we have stopped trying" a few seconds
-            # after the outage begins.
+            # Our own refusal, not news about the upstream: keep the original error
+            # so /readyz still shows the real cause.
             self._update(
                 name,
                 UpstreamHealth.UNHEALTHY,
@@ -222,10 +156,7 @@ class HealthMonitor:
                 previous=previous,
             )
         except Exception as exc:
-            # A non-taxonomy exception is a bug in the gateway rather than a
-            # verdict on the upstream — but a prober that dies takes every
-            # other upstream's monitoring with it, so it is caught, recorded
-            # and logged loudly instead.
+            # A gateway bug, but caught so the prober survives for other upstreams.
             logger.exception("health.probe_failed", extra={"upstream": name})
             self._update(
                 name, UpstreamHealth.UNHEALTHY, error=type(exc).__name__, previous=previous
@@ -237,13 +168,7 @@ class HealthMonitor:
             self._offer(name, result)
 
     def _offer(self, name: str, result: ListToolsResult) -> None:
-        """Hand a freshly fetched catalogue to the observer, if there is one.
-
-        Wrapped, for the same reason the probe itself is: an observer that
-        raises would otherwise take down health monitoring for every upstream,
-        which is a monitoring bug escalated into an outage — the failure mode
-        this whole module's docstring is about avoiding.
-        """
+        """Pass a fetched catalogue to the observer; its exceptions are logged, not raised."""
         if self._on_catalogue is None:
             return
         try:
@@ -268,9 +193,7 @@ class HealthMonitor:
             tool_count=tool_count,
         )
         if state is not previous:
-            # Only transitions. A probe every fifteen seconds forever would
-            # otherwise produce a log line every fifteen seconds forever, which
-            # is the same mistake as logging every scrape.
+            # Log transitions only, not every probe.
             logger.warning(
                 "health.changed",
                 extra={
@@ -284,14 +207,7 @@ class HealthMonitor:
             self._notify(self._records[name], previous)
 
     def _notify(self, record: HealthRecord, previous: UpstreamHealth) -> None:
-        """Tell the health observer, if there is one, and survive it if it fails.
-
-        Wrapped for the reason `_offer` gives and one more: this observer is a
-        **demo aid**. An exception from a trace console must not be able to stop
-        health monitoring, which is the thing that withdraws a broken upstream's
-        tools — a debugging convenience taking down a control is the worst
-        possible trade.
-        """
+        """Tell the health observer; its exceptions are logged so they cannot stop probing."""
         if self._on_health is None:
             return
         try:
@@ -302,24 +218,14 @@ class HealthMonitor:
     # -- the loop ----------------------------------------------------------
 
     async def run(self, *, sleep: Callable[[float], object] | None = None) -> None:
-        """Probe forever. Cancelled by whoever started it.
-
-        Probes immediately on entry rather than after one interval: a gateway
-        that has just started knows nothing, and waiting fifteen seconds to
-        find out is fifteen seconds of serving a catalogue nobody has checked.
-        """
+        """Probe immediately, then forever on a jittered interval, until cancelled."""
         rest = sleep or anyio.sleep
         while True:
             await self.probe_once()
             await rest(self._next_delay())  # type: ignore[misc]
 
     def _next_delay(self) -> float:
-        """The interval, jittered.
-
-        Every replica probing on the same tick is a synchronised burst against
-        every upstream, from a component whose whole purpose is to avoid
-        exactly that — the same reasoning as the jittered retry backoff.
-        """
+        """The interval, jittered so replicas do not probe in synchronised bursts."""
         spread = self._interval * self._jitter
         return max(0.0, self._uniform(self._interval - spread, self._interval + spread))
 

@@ -1,9 +1,4 @@
-"""Mock upstream MCP servers used as test fixtures for the gateway.
+"""Mock upstream MCP servers for tests and demos; never imported by the gateway at runtime.
 
-Development-only infrastructure — nothing in the gateway's runtime path imports
-this package. It lives under ``src/`` so the mocks can also be run standalone
-(docker-compose, manual probing with the MCP Inspector).
-
-See ``docs/decisions/0004-hand-roll-mock-protocol-layer.md`` for why these do
-not build on the MCP SDK's server class.
+Under ``src/`` so they can run standalone. They avoid the SDK's server class (ADR 0004).
 """

@@ -1,12 +1,7 @@
 """Command line entry point.
 
-``probe`` and ``call`` exist so you can point the gateway's outbound client at a
-real upstream from a terminal and watch what it does. That matters more than it
-sounds: a proxy you can only exercise through its own test suite is a proxy you
-cannot debug when something odd happens against a real server.
-
-Subcommands land here as their subsystems do — ``policy explain`` and
-``policy simulate`` beside the policy engine, ``audit verify`` beside the chain.
+``probe`` and ``call`` exercise the outbound client against a real upstream; the
+other commands serve the gateway or wrap the policy, schema, audit and secrets tools.
 """
 
 from __future__ import annotations
@@ -43,10 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Construct the argument parser.
-
-    Split out from ``main`` so tests can exercise parsing without a process exit.
-    """
+    """Construct the argument parser; separate from ``main`` so tests avoid an exit."""
     parser = argparse.ArgumentParser(
         prog="acp",
         description="Agent Control Plane — a policy-enforcing MCP gateway.",
@@ -80,10 +72,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _parse_args(pairs: list[str]) -> dict[str, str]:
-    """Turn ``["k=v", ...]`` into a mapping, for the simulator's --arg flag.
+    """Turn ``["k=v", ...]`` into a mapping, splitting on the first ``=``.
 
-    Splits on the first ``=`` only, so a value may itself contain ``=``. A pair
-    without an ``=`` is a usage error rather than a silently-empty value.
+    Raises:
+        ValueError: If a pair has no ``=`` or an empty key.
     """
     out: dict[str, str] = {}
     for pair in pairs:
@@ -96,17 +88,9 @@ def _parse_args(pairs: list[str]) -> dict[str, str]:
 
 
 def _add_policy_commands(subparsers: Any) -> None:
-    """``acp policy explain`` and ``acp policy simulate``.
+    """``acp policy explain`` (one described request) and ``simulate`` (recorded traffic).
 
-    One evaluator, three paths now. A live request reaches ``evaluate`` through
-    the gateway; ``explain`` reaches the same ``evaluate`` from a terminal;
-    ``simulate`` reaches the same matcher over recorded traffic. None of them
-    has its own copy of the rules, which is what makes the answers worth
-    anything (ADR 0030).
-
-    ``explain`` answers *what would this policy do to a request I describe*.
-    ``simulate`` answers *what would this policy do to the requests that
-    actually happened* — the difference between a spot check and a review.
+    Both use the gateway's own evaluator, never a copy of the rules (ADR 0030).
     """
     policy = subparsers.add_parser("policy", help="inspect and simulate policy")
     actions = policy.add_subparsers(dest="policy_command", metavar="<action>")
@@ -146,9 +130,7 @@ def _add_policy_commands(subparsers: Any) -> None:
     )
 
 
-# The issuer on a simulated principal: never validated, never trusted. The
-# simulator evaluates policy over an identity you describe; it does not
-# authenticate one.
+# Issuer for a described, never-authenticated principal.
 SIMULATED_ISSUER = "urn:acp:simulator"
 
 
@@ -188,15 +170,7 @@ def _policy_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -
 
 
 CHANGES_FOUND = 1
-"""Exit code for "this edit changes something".
-
-The same 1 that `explain` returns for a denial, and deliberately **not**
-`USAGE_ERROR`. This command is meant to gate a policy pull request, so a CI job
-has to be able to tell "the policy would deny 40 calls that work today" from
-"you typed the filename wrong". Both fail the build; only one of them is about
-the policy, and a reviewer reading a red job needs to know which without opening
-the log.
-"""
+"""Exit code when a simulated policy changes a decision; distinct from `USAGE_ERROR` for CI."""
 
 
 def _read_log(path: str) -> list[str] | None:
@@ -211,13 +185,7 @@ def _read_log(path: str) -> list[str] | None:
 
 
 def _simulate_command(policy: Policy, args: argparse.Namespace) -> int:
-    """``acp policy simulate`` — replay recorded traffic, report what changes.
-
-    Prints the counts first and the detail second, because the first question
-    is always "how bad is it" and the answer has to survive being piped to
-    `head`. The changed calls come after, capped by ``--show`` so a log with
-    ten thousand newly-denied calls does not bury the summary that said so.
-    """
+    """``acp policy simulate``: print counts, then up to ``--show`` changed calls."""
     lines = _read_log(args.log)
     if lines is None:
         return USAGE_ERROR
@@ -229,10 +197,7 @@ def _simulate_command(policy: Policy, args: argparse.Namespace) -> int:
             f"  read {traffic.total} lines: {traffic.other_events} other events, "
             f"{traffic.unreadable} unreadable"
         )
-        # Not a failure: an empty log is a true answer to "what would change",
-        # and it is also the answer you get before the gateway has run. Said
-        # plainly rather than reported as "no changes", which would be a
-        # dangerously reassuring way to describe having measured nothing.
+        # Not a failure, but reported as "nothing measured", never "no changes".
         return 0
 
     simulation = simulate(policy, traffic)
@@ -246,10 +211,7 @@ def _simulate_command(policy: Policy, args: argparse.Namespace) -> int:
     print()  # noqa: T201
     for outcome in Outcome:
         count = counts.get(outcome, 0)
-        # Marked only when it is both non-zero and one of the outcomes that
-        # means "not proven safe" — so the eye lands on the lines that decide
-        # whether this edit ships, and a large `unchanged` count does not
-        # compete with them for attention.
+        # Mark non-zero outcomes that are not proven safe.
         marker = "! " if count and outcome in CHANGED else "  "
         print(f"{marker}{count:>6,}  {outcome.value}")  # noqa: T201
 
@@ -268,14 +230,7 @@ def _simulate_command(policy: Policy, args: argparse.Namespace) -> int:
 
 
 def _add_schemas_commands(subparsers: Any) -> None:
-    """``acp schemas capture`` and ``acp schemas check``.
-
-    Two verbs because the workflow has two halves and conflating them is the
-    failure mode: a command that both reports drift *and* records it as the new
-    normal can only ever tell you something once, and never tells the next
-    person anything at all. ``capture`` is the act of acknowledgement, performed
-    by a human and reviewed as a diff. ``check`` only ever reads.
-    """
+    """``acp schemas capture`` (a human acknowledges drift) and ``check`` (read-only)."""
     schemas = subparsers.add_parser(
         "schemas", help="capture and check upstream tool schemas for drift"
     )
@@ -297,12 +252,7 @@ def _add_schemas_commands(subparsers: Any) -> None:
 
 
 def _add_audit_commands(subparsers: Any) -> None:
-    """``acp audit verify | checkpoint``.
-
-    Argparse wiring only; every decision lives in ``acp.audit.cli``, which has no
-    SDK import and is therefore testable and type-checkable in the environment it
-    is authored in. The same split as ``acp secrets``, for the same reason.
-    """
+    """``acp audit verify | checkpoint``; wiring only, logic lives in ``acp.audit.cli``."""
     audit = subparsers.add_parser(
         "audit", help="verify the tamper-evident audit chain, and anchor it"
     )
@@ -328,11 +278,9 @@ def _add_audit_commands(subparsers: Any) -> None:
 
 
 def _audit_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
-    """Dispatch to ``acp.audit.cli``, resolving the log path from settings.
+    """Dispatch to ``acp.audit.cli``.
 
-    ``--log-file`` beats ``ACP_AUDIT_FILE``, and a deployment with neither is a
-    usage error rather than a silent success: "verified" printed over a file the
-    command never found would be the worst possible output from this program.
+    ``--log-file`` beats ``ACP_AUDIT_FILE``; neither set is a usage error.
     """
     if args.audit_command is None:
         parser.parse_args(["audit", "--help"])
@@ -359,16 +307,9 @@ def _audit_command(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
 
 
 def _add_secrets_commands(subparsers: Any) -> None:
-    """``acp secrets init | set | list``.
+    """``acp secrets init | set | list``; wiring only, logic lives in ``acp.secrets.cli``.
 
-    Argparse wiring only. Every decision lives in ``acp.secrets.cli``, where a
-    test can reach it — this module imports the MCP SDK, so anything written
-    here is untestable and untype-checkable in the environment it is authored
-    in, which is how three bugs have shipped so far.
-
-    There is no ``get``. A command that prints a credential to a terminal is one
-    that eventually prints it into a screen-share, a scrollback buffer or a
-    support ticket, and the store exists so the value has one destination.
+    There is deliberately no ``get``, so a credential is never printed to a terminal.
     """
     secrets = subparsers.add_parser(
         "secrets", help="manage the encrypted store for upstreams that cannot exchange"
@@ -474,9 +415,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help(sys.stderr)
         return USAGE_ERROR
 
-    # A table rather than a chain of `if`s. The chain grew a branch per task and
-    # tripped the return-count lint at seven, which is the lint doing its job:
-    # the next command should be one line here, not one more branch to read past.
+    # A table, so a new command is one line rather than another return branch.
     grouped = {
         "schemas": _schemas_command,
         "audit": _audit_command,
@@ -511,12 +450,7 @@ def _upstream_command(args: argparse.Namespace) -> int:
 
 
 def _serve_command(args: argparse.Namespace) -> int:
-    """Run the gateway until interrupted.
-
-    Configuration is read and validated before uvicorn is even imported, so a
-    bad config fails in milliseconds with a readable message rather than after
-    a port has been bound.
-    """
+    """Run the gateway until interrupted; config is validated before any port is bound."""
     overrides = {
         key: value
         for key, value in (
@@ -533,15 +467,11 @@ def _serve_command(args: argparse.Namespace) -> int:
         return _usage_error(exc.message)
 
     configure_logging(settings.log_level, settings.log_format)
-    # After logging, so the decision about whether tracing is on is itself
-    # logged in the format the operator asked for. Reads OpenTelemetry's own
-    # environment variables rather than ACP_ ones, and is a no-op unless
-    # OTEL_TRACES_EXPORTER names an exporter.
+    # After logging, so its decision is logged. Reads OTEL_* variables; a no-op
+    # unless OTEL_TRACES_EXPORTER names an exporter.
     configure_tracing()
 
-    # Imported here, not at module scope: `acp probe` and `acp call` are
-    # diagnostic commands that must start instantly, and uvicorn pulls in a
-    # noticeable amount of machinery only the server needs.
+    # Lazy, so `acp probe` and `acp call` start fast.
     import uvicorn  # noqa: PLC0415
 
     def _server(app: Any, host: str, port: int) -> Any:
@@ -554,10 +484,7 @@ def _serve_command(args: argparse.Namespace) -> int:
             gateway = _server(app, settings.host, settings.port)
 
             if not settings.admin_enabled:
-                # uvicorn installs its own SIGTERM/SIGINT handling: it stops
-                # accepting, drains in-flight requests, then returns — after
-                # which the context manager closes the upstream pools. That
-                # ordering is why the clients are managed around the server.
+                # uvicorn drains on SIGTERM/SIGINT, then the context closes the pools.
                 await gateway.serve()
                 return 0
 
@@ -566,16 +493,11 @@ def _serve_command(args: argparse.Namespace) -> int:
                 build_admin_app(
                     monitor,
                     getattr(app.state, "schema_drift", None),
-                    # The store the request path is holding calls in. The same
-                    # object, deliberately: an operator channel pointed at a
-                    # second store would answer approvals nobody is waiting on.
+                    # Must be the request path's own store, or approvals go nowhere.
                     getattr(app.state, "approvals", None),
                     settings.approval_operator_token,
                     getattr(app.state, "audit", None),
-                    # The hub the audit log publishes to. The same object,
-                    # deliberately, and for the same reason as the approval
-                    # store above: a console pointed at a second hub would
-                    # show an empty page while the gateway served traffic.
+                    # Must be the hub the audit log publishes to, likewise.
                     console=getattr(app.state, "console", None),
                     operator_validator=getattr(app.state, "operator_validator", None),
                 ),
@@ -587,9 +509,7 @@ def _serve_command(args: argparse.Namespace) -> int:
                 extra={
                     "host": settings.admin_host,
                     "port": settings.admin_port,
-                    # Named at startup because its absence is silent otherwise:
-                    # a gated deployment with no channel looks identical to a
-                    # working one until the first call is held and never answered.
+                    # Logged because a missing channel is otherwise silent.
                     "approval_channel": bool(
                         (settings.approval_operator_token or settings.approval_operator_audience)
                         and getattr(app.state, "approvals", None) is not None
@@ -597,20 +517,14 @@ def _serve_command(args: argparse.Namespace) -> int:
                 },
             )
 
-            # Both servers in one task group. Each installs its own signal
-            # handling, so a Ctrl+C or SIGTERM drains both and the group exits
-            # when the last one returns — leaving the pools to close exactly as
-            # they did with one server.
+            # Each server handles signals itself, so one SIGTERM drains both.
             async with anyio.create_task_group() as tg:
                 tg.start_soon(admin.serve)
                 if monitor is not None:
-                    # Started here because this is where a task group legitimately
-                    # lives. Cancelled with the group when the gateway returns.
+                    # Cancelled with the group when the gateway returns.
                     tg.start_soon(monitor.run)
                 await gateway.serve()
-                # The gateway returning means shutdown was requested; the admin
-                # listener has no reason to outlive it, and would hold the
-                # process open if left running.
+                # Shutdown requested: stop admin too, or it holds the process open.
                 admin.should_exit = True
                 tg.cancel_scope.cancel()
         return 0
@@ -655,16 +569,9 @@ def _check_command(upstreams: list[UpstreamConfig], baseline_path: Path) -> int:
 async def _fetch_catalogues(
     upstreams: Sequence[UpstreamConfig],
 ) -> tuple[dict[str, ListToolsResult], dict[str, str]]:
-    """Read every configured upstream's catalogue, remembering what failed.
+    """Read each upstream's catalogue sequentially, returning catalogues and failures.
 
-    A plain ``UpstreamClient`` rather than the assembled stack from
-    ``build_upstream``: this must see what the server is saying *now*, and a
-    cached catalogue would let ``check`` certify a response from
-    minutes ago as current.
-
-    Sequential rather than concurrent, deliberately. This is a command a person
-    runs at a terminal, where a readable failure that names one upstream beats
-    shaving a few hundred milliseconds off a fan-out.
+    Uses a plain ``UpstreamClient``, not ``build_upstream``, so no cache is involved.
     """
     catalogues: dict[str, ListToolsResult] = {}
     failures: dict[str, str] = {}
@@ -678,13 +585,10 @@ async def _fetch_catalogues(
 
 
 async def _capture(upstreams: Sequence[UpstreamConfig], path: Path, *, allow_partial: bool) -> int:
-    """Record the current catalogues as the acknowledged baseline.
+    """Record the current catalogues as the baseline.
 
-    Refuses by default when any upstream failed, and that guard is the whole
-    reason this is not a one-liner. Capturing while a server is down records it
-    as having no tools, which turns a transient outage into a permanent, quietly
-    committed deletion — and the next time it comes back, every tool it ever had
-    is reported as newly added by an upstream nobody was suspicious of.
+    Refuses if any upstream failed, unless `allow_partial`, since a down upstream
+    would be recorded as having no tools.
     """
     catalogues, failures = await _fetch_catalogues(upstreams)
 
@@ -707,16 +611,9 @@ async def _capture(upstreams: Sequence[UpstreamConfig], path: Path, *, allow_par
 
 
 async def _check(upstreams: Sequence[UpstreamConfig], baseline: SchemaSnapshot) -> int:
-    """Compare live catalogues against the baseline. Exit 1 means drift.
+    """Compare live catalogues against the baseline, as a CI gate.
 
-    The exit code is the point: this is the shape of a CI gate. Run it against
-    the mock fleet on every build and a change to what those servers expose
-    cannot merge without somebody re-capturing the baseline in the same commit,
-    which is exactly the review step the whole design is arranged around.
-
-    An unreachable upstream fails the check rather than being skipped. "I could
-    not tell" and "nothing changed" are different answers, and a checker that
-    returns the second when it means the first is worse than no checker.
+    Returns 1 on drift or on any unreachable upstream, which is never skipped.
     """
     catalogues, failures = await _fetch_catalogues(upstreams)
     observed = SchemaSnapshot.from_catalogues(catalogues)
@@ -737,15 +634,7 @@ async def _check(upstreams: Sequence[UpstreamConfig], baseline: SchemaSnapshot) 
 
 
 def _advise(message: str) -> None:
-    """Write guidance to stderr, after everything already on stdout has landed.
-
-    The flush is not decoration. Python block-buffers stdout when it is not a
-    terminal and never buffers stderr, so `acp schemas check 2>&1 | tee` prints
-    the advice *before* the drift it refers to — the two streams interleave by
-    whichever happens to flush first. Any CLI that writes to both has this, and
-    the fix is to make the boundary explicit rather than to hope. Found by
-    capturing a demo to a file, which is the only way anyone ever finds it.
-    """
+    """Write guidance to stderr after flushing stdout, so piped output stays in order."""
     sys.stdout.flush()
     print(f"\n{message}", file=sys.stderr)  # noqa: T201
 
@@ -762,12 +651,7 @@ def _call_command(config: UpstreamConfig, args: argparse.Namespace) -> int:
 
 
 def _run(coro: Any) -> int:
-    """Drive one coroutine, turning taxonomy errors into a clean exit code.
-
-    A stack trace is the wrong output for "the upstream is down" — that is an
-    expected condition, and printing the structured error is more useful than
-    dumping frames.
-    """
+    """Drive one coroutine; an ``ACPError`` prints its structured error and returns 1."""
     try:
         return int(asyncio.run(coro))
     except ACPError as exc:
@@ -780,11 +664,7 @@ async def _probe(config: UpstreamConfig) -> int:
     async with await UpstreamClient.connect(config) as client:
         catalogue = await client.list_tools()
 
-    # The freshness hints are worth surfacing here: `acp probe` exists to show
-    # what an upstream actually said, and whether it consents to being cached
-    # is part of that. `private` means it computed this list for a particular
-    # caller, which is the kind of thing you want to notice from a terminal
-    # rather than from a cache that quietly declined to hold anything.
+    # Show cache hints too; `private` means the list was computed per caller.
     print(f"{config.name}: {len(catalogue.tools)} tool(s)")  # noqa: T201
     print(  # noqa: T201
         f"  cache: ttlMs={catalogue.ttl_ms} scope={catalogue.cache_scope}"
@@ -802,8 +682,7 @@ async def _call(config: UpstreamConfig, tool: str, arguments: dict[str, Any]) ->
 
     print(result.text())  # noqa: T201
     if result.is_error:
-        # The tool ran and failed. That is a result, not a transport failure —
-        # but the exit code should still reflect that it did not succeed.
+        # A result, not a transport failure, but still a failing exit code.
         print(f"\nacp: {tool} reported isError", file=sys.stderr)  # noqa: T201
         return FAILURE
     return 0

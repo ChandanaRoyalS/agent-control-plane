@@ -1,10 +1,6 @@
-"""Reading the corpus off disk, and refusing to read half of it.
+"""Loading the corpus from disk; every malformed file or empty directory is an error.
 
-Every failure here is loud. A corpus that loads 94 documents when it contains 97
-still produces a number, and the number is wrong in the direction nobody checks
-— a false-positive rate computed over a silently smaller denominator. So a
-malformed file stops the load rather than being skipped, and an empty directory
-is an error rather than a shrug.
+A silently skipped file would shrink the denominator of every reported rate.
 """
 
 from __future__ import annotations
@@ -24,12 +20,10 @@ SUFFIX: Final = ".txt"
 
 
 def repository_root(start: Path | None = None) -> Path:
-    """The directory containing ``pyproject.toml``.
+    """The nearest ancestor directory containing ``pyproject.toml``.
 
-    Walked rather than counted. ``parents[3]`` would work today and would break
-    the first time this module moves, silently, by resolving to a directory that
-    happens to exist — and the corpus is exactly the kind of asset whose absence
-    should be an error rather than an empty result.
+    Raises:
+        ConfigurationError: if there is none.
     """
     here = (start or Path(__file__)).resolve()
     for candidate in here.parents:
@@ -40,13 +34,7 @@ def repository_root(start: Path | None = None) -> Path:
 
 
 def default_root() -> Path:
-    """Where the corpus lives in a source checkout.
-
-    Deliberately not packaged with the distribution. The corpus is an evaluation
-    asset weighing more than the gateway itself, and shipping a firewall's test
-    set inside the firewall would put a catalogue of what it looks for into
-    every deployment.
-    """
+    """The corpus directory in a source checkout; deliberately not packaged."""
     return repository_root() / "corpus"
 
 
@@ -68,19 +56,12 @@ class Corpus:
 
     @cached_property
     def hard(self) -> tuple[Document, ...]:
-        """The deliberate near-misses.
-
-        The part of a benign corpus that decides whether its false-positive rate
-        means anything. Tidy text produces a rate near zero and the number is
-        fraudulent; these are the documents that legitimately look like attacks.
-        """
+        """The deliberate near-misses that make the false-positive rate meaningful."""
         return tuple(document for document in self.documents if document.hard)
 
     @cached_property
     def found(self) -> tuple[Document, ...]:
-        """Documents excerpted from this repository rather than written for the
-        corpus. The subset whose clean result is strongest, because nobody could
-        have shaped them around a detector."""
+        """Documents excerpted from this repository (the strongest evidence)."""
         return tuple(
             document for document in self.documents if document.source is Source.REPOSITORY
         )
@@ -122,9 +103,7 @@ def load_corpus(directory: Path) -> Corpus:
         for path in files:
             document = parse(path, path.read_text(encoding="utf-8"), kind=kind_dir.name)
             if document.id in seen:
-                # Impossible through the filesystem, and asserted anyway: the id
-                # is what a result is attributed to, and two results under one id
-                # is a slice that quietly counts one document twice.
+                # Impossible via the filesystem; asserted so no result is double-counted.
                 msg = f"duplicate corpus document id {document.id!r}"
                 raise ConfigurationError(msg)
             seen.add(document.id)
@@ -137,11 +116,7 @@ def load_corpus(directory: Path) -> Corpus:
 class AttackCorpus:
     """Every attack loaded, with the slices the harness asks for.
 
-    Deliberately a separate type from `Corpus` rather than a flag on it. The two
-    answer different questions — one is "how often is this wrong about a
-    document somebody needed", the other is "how much does it catch" — and a
-    single type carrying both would let a caller compute one from the other's
-    documents without noticing.
+    A separate type from `Corpus` so benign and attack documents cannot be mixed.
     """
 
     attacks: tuple[Attack, ...]
@@ -161,12 +136,7 @@ class AttackCorpus:
 
     @cached_property
     def undetectable(self) -> tuple[Attack, ...]:
-        """The attacks this project asserts it cannot catch.
-
-        The most valuable slice in the corpus and the one a less honest project
-        omits. A detection rate computed without these is a rate over the
-        attacks somebody already knew how to find.
-        """
+        """The attacks expected to be undetected."""
         return self.expecting(Expectation.UNDETECTED)
 
     def counts(self) -> dict[str, int]:

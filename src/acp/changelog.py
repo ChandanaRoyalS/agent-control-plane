@@ -1,18 +1,7 @@
-"""Reading `CHANGELOG.md` as data.
+"""Parse the hand-written `CHANGELOG.md`.
 
-The release workflow needs one release's notes to put in a GitHub
-release, and the test suite needs to check that the file agrees with
-`acp.__version__`. Both are parsing, both are easy to get subtly wrong, and
-neither should be a shell pipeline inside a YAML file where it cannot be tested.
-
-**Why a changelog is parsed rather than generated.** `git log` is a record of
-commits, and a commit is a unit of work rather than a unit of change: "fix
-review comments" is in the history and belongs nowhere near a release note. A
-changelog written by a person says what a *reader* has to do differently, which
-is the only question a release note answers.
-
-So it is hand-written — and therefore it can be wrong, out of date, or missing
-the version being tagged. That is what makes it worth testing.
+Used by the release workflow (one release's notes) and by tests (the file agrees
+with `acp.__version__`), so the parsing is testable Python rather than shell.
 """
 
 from __future__ import annotations
@@ -24,12 +13,7 @@ from typing import Final
 HEADING: Final = re.compile(
     r"^## \[(?P<version>[^\]]+)\](?:\s*-\s*(?P<date>\d{4}-\d{2}-\d{2}))?\s*$"
 )
-"""`## [1.0.0] - 2026-08-14`, with the date optional so `[Unreleased]` parses.
-
-Anchored at both ends: a line that merely *contains* something bracket-shaped
-is prose, and treating it as a heading would silently split one release's notes
-in half.
-"""
+"""`## [1.0.0] - 2026-08-14`, date optional; anchored so bracketed prose is not a heading."""
 
 UNRELEASED: Final = "Unreleased"
 
@@ -76,12 +60,7 @@ def parse(text: str) -> tuple[Release, ...]:
 
 
 def notes(text: str, version: str) -> str | None:
-    """One release's body, or None when the changelog does not describe it.
-
-    None rather than an empty string, and the caller is expected to treat it as
-    a failure. A release published with empty notes is indistinguishable from
-    one whose notes were lost, and the workflow refuses rather than guessing.
-    """
+    """One release's body, or None if absent or empty; callers treat None as failure."""
     for release in parse(text):
         if release.version == version:
             return release.body or None
@@ -91,9 +70,8 @@ def notes(text: str, version: str) -> str | None:
 def order(version: str) -> tuple[int, int, int]:
     """A version as a sortable triple.
 
-    Raises `ValueError` on anything that is not exactly three integers, which
-    is what makes the test for descending order also a test that every heading
-    is a real version.
+    Raises:
+        ValueError: If `version` is not exactly three dot-separated integers.
     """
     match = SEMVER.match(version)
     if match is None:

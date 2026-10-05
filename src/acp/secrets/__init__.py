@@ -1,14 +1,7 @@
-"""Secrets the gateway holds because it has to.
+"""Secrets for upstreams that cannot use token exchange (out-of-band API keys, vendor apps).
 
-Token exchange removes most of them: the gateway mints an upstream credential per call
-and keeps none. This is for the upstreams that cannot take part in that — an API
-key issued out of band, a vendor appliance that will never speak RFC 8693 — and
-which without a secret store could not be configured at all.
-
-The store's honest claim is that it reduces many secrets to one key, and makes
-that key small enough to hand to a runtime rather than to a person. See
-`store.SecretStore` for what that does and does not defend against, and ADR 0021
-for why there is an interface when there is only one backend.
+The store reduces many secrets to one key. See `store.SecretStore` for its threat model
+and ADR 0021 for why there is an interface with one backend.
 """
 
 from acp.secrets.encrypted import EncryptedFileStore, generate_key, read_key

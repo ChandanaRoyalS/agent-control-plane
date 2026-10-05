@@ -1,32 +1,9 @@
 """Replay recorded traffic against a proposed policy and report what changes.
 
-The question this answers is the one that stops people editing a policy at all:
-*if I merge this, what breaks?* Without an answer, every edit is either shipped
-on faith or padded with allows until nothing can fail — and a policy nobody
-dares tighten is a policy that only ever gets looser. So this takes the
-decisions the gateway actually made (`acp.policy.record`), asks a proposed
-policy the same questions, and prints the difference.
-
-**The recorded log is the baseline, not the old policy file.** What the gateway
-*did* is a fact; what a policy file says it would have done is a re-derivation
-that can be wrong — the file may have changed since, or never have been the one
-that was loaded. Diffing against the record also means the old policy need not
-still exist, which is exactly the situation somebody investigating a change is
-usually in.
-
-**And the honest part: the log does not carry argument values, on purpose.**
-Argument values are user data (ADR 0045); the log carries argument *names*. So a
-rule constraining an argument may or may not have fired on a recorded call, and
-no amount of analysis here can settle it. Rather than guess — in either
-direction — this reports such calls as `INDETERMINATE` and says how many. A
-simulator that quietly assumed "the argument probably matched" would produce a
-clean report and a broken deployment, which is the failure this whole tool
-exists to prevent.
-
-What the names *do* buy is that many of those calls stop being indeterminate: a
-rule constraining `doc_id` cannot have fired on a call that sent no `doc_id`,
-because a missing argument is not a match (ADR 0031). That is a definite answer
-recovered from a field that records nothing sensitive.
+The baseline is the recorded decisions (`acp.policy.record`), not the old policy
+file. The log holds argument names but not values (ADR 0045), so a call whose
+outcome depends on a value is reported `INDETERMINATE` rather than guessed; names
+still settle rules on arguments the call never sent (ADR 0031).
 """
 
 from __future__ import annotations
@@ -41,43 +18,25 @@ from acp.policy.schema import RESTRICTIVE, Policy
 
 
 class Outcome(Enum):
-    """What the proposed policy does to one recorded call.
-
-    Five, not two, and the extra three are the ones worth reading. "How many
-    allows and how many denies" is a report that hides a policy edit which
-    reached the same verdict through a rule nobody meant to write.
-    """
+    """What the proposed policy does to one recorded call."""
 
     UNCHANGED = "unchanged"
-    """Same verdict, same rule. The bulk of any healthy diff."""
+    """Same verdict, same rule."""
 
     NEWLY_DENIED = "newly denied"
-    """Was allowed, is now refused. **The outage.** Read this list first."""
+    """Was allowed, now refused: a potential outage."""
 
     NEWLY_ALLOWED = "newly allowed"
-    """Was refused, is now permitted. **The security change.** Intended or not,
-    it is the half of the diff a reviewer is accountable for."""
+    """Was refused, now permitted: the security change a reviewer must check."""
 
     NEWLY_GATED = "newly needs approval"
-    """Was decided outright, now waits for a person (ADR 0048).
-
-    Its own outcome rather than folded into "newly denied", because they are
-    different edits with different costs: a denial breaks the caller, and a gate
-    makes them slower and makes somebody's phone buzz. Reporting a wave of new
-    approvals as denials would make a careful edit look like an outage.
-    """
+    """Was decided outright, now waits for a person (ADR 0048)."""
 
     SAME_VERDICT_NEW_RULE = "same verdict, different rule"
-    """The right answer for a different reason.
-
-    Not a functional change, and not noise either: it means a rule somebody just
-    wrote is now shadowing one that used to decide this call. The verdicts agree
-    *today*, and the next edit to either rule is where they stop agreeing.
-    """
+    """Same verdict, but a different rule now decides (shadowing)."""
 
     INDETERMINATE = "depends on argument values"
-    """Cannot be settled from the record, because a rule constrains an argument
-    whose value the log deliberately does not carry."""
+    """Depends on an argument value the log does not carry."""
 
 
 CHANGED = frozenset(
@@ -88,20 +47,11 @@ CHANGED = frozenset(
         Outcome.INDETERMINATE,
     }
 )
-"""Outcomes that mean "this edit is not proven safe".
-
-`INDETERMINATE` is in here, and that is the deliberate call: unproven is not the
-same as unchanged, and a gate that treats "I could not tell" as "fine" is a gate
-that passes the one case somebody needed to look at.
-"""
+"""Outcomes meaning "not proven safe"; includes `INDETERMINATE` deliberately."""
 
 
 DENY_DEFAULT = "(deny default)"
-"""How a decision naming no rule is written in a report.
-
-Named rather than repeated, because "no rule matched" and "a rule called None"
-are the same six characters on a terminal and very different things to read.
-"""
+"""How a decision naming no rule is written in a report."""
 
 
 def _render(decision: Decision) -> str:
@@ -114,14 +64,7 @@ class Replay:
 
     recorded: RecordedDecision
     possible: tuple[Decision, ...]
-    """Every decision the proposed policy could reach for this call.
-
-    One element means the answer is settled. More than one means the walk
-    reached a rule that constrains an argument, and which of them applies
-    depends on a value the log does not carry — listed in policy order, so the
-    first is what happens if that rule matches and the rest are what happens if
-    it does not.
-    """
+    """Every decision the proposed policy could reach, in policy order; one means settled."""
 
     outcome: Outcome
 
@@ -154,12 +97,7 @@ class Simulation:
 
     @property
     def safe(self) -> bool:
-        """True when nothing changed and nothing was left unproven.
-
-        Deliberately not "no denials appeared". A policy edit that only ever
-        *adds* permissions is not safe by default; it is the other half of the
-        review.
-        """
+        """True when nothing changed and nothing was left unproven, new allows included."""
         return not self.changed
 
 
@@ -172,30 +110,11 @@ def possible_decisions(
 ) -> tuple[Decision, ...]:
     """Every decision ``policy`` could reach, given arguments nobody recorded.
 
-    The evaluator's walk (first match wins, ADR 0026) with one extra state: a
-    rule may *possibly* match. Walking in policy order, each rule is one of
-    three things.
-
-    - **Cannot apply.** Its identity or tool section does not hold, or it is an
-      ``allow`` constraining an argument the call never sent — a grant a missing
-      argument cannot earn (ADR 0068), so this is a definite "no", not an
-      uncertainty. Skip it. Recovering these is the entire reason the log
-      records argument names.
-    - **Definitely applies.** It matches on identity and tool and either
-      constrains no arguments, or is a restriction (``deny``,
-      ``require_approval``) constraining an argument the call never sent — a
-      missing argument does not clear a restriction (ADR 0068). It decides the
-      call; nothing after it can be reached. Record it and stop.
-    - **Might apply.** It matches on identity and tool and constrains only
-      arguments the call did send. Whether it fires depends on values the log
-      does not carry. Record it as one possibility and keep walking, because the
-      other possibility is that it did not fire and a later rule decided.
-
-    Falling off the end is the deny default (ADR 0025), which is itself a
-    possibility and is appended as one.
-
-    A single-element result is a settled answer. The order is meaningful: policy
-    order, so the reader can see which rule the uncertainty came from.
+    The evaluator's first-match walk (ADR 0026) where a rule may possibly match. A
+    rule matching on identity and tool either cannot apply (an ``allow`` on an unsent
+    argument), definitely applies and stops the walk (no ``args``, or a restriction on
+    an unsent argument, ADR 0068), or might apply and is recorded before walking on
+    (constrains only sent arguments). The deny default (ADR 0025) ends the walk.
     """
     reachable: list[Decision] = []
     for rule in policy.rules:
@@ -204,14 +123,11 @@ def possible_decisions(
         if rule.args:
             unsent = argument_names is not None and not set(rule.args).issubset(argument_names)
             if unsent and rule.effect not in RESTRICTIVE:
-                # A grant constrained on something this call did not send. It
-                # cannot have fired, and that is certainty, not an assumption.
                 continue
             if not unsent:
                 reachable.append(decision_for(rule))
                 continue
-            # A restriction constrained on something the call did not send
-            # holds regardless of values: it decided the call.
+            # A restriction on an unsent argument holds regardless of values.
         reachable.append(decision_for(rule))
         return tuple(reachable)
     reachable.append(Decision(allowed=False, rule=None))
@@ -226,15 +142,7 @@ _CHANGED_TO = {
 
 
 def classify(recorded: RecordedDecision, possible: tuple[Decision, ...]) -> Outcome:
-    """Which of the five outcomes this call falls into.
-
-    The uncertain case is settled first and it is settled *by the verdicts, not
-    by the count of possibilities*. Three rules that could each decide a call
-    but all deny it leave nothing uncertain about whether the caller gets in —
-    only about which rule stopped them, and a policy edit is reviewed on the
-    first question. Reporting it as indeterminate would bury a real change under
-    noise nobody can act on.
-    """
+    """Return the call's outcome; indeterminate only if the possible verdicts differ."""
     verdicts = {decision.verdict for decision in possible}
     if len(verdicts) > 1:
         return Outcome.INDETERMINATE
@@ -250,10 +158,8 @@ def classify(recorded: RecordedDecision, possible: tuple[Decision, ...]) -> Outc
 def simulate(policy: Policy, traffic: Traffic) -> Simulation:
     """Replay every recorded decision against ``policy``.
 
-    Pure, like the evaluator it is built on: no clock, no I/O, no gateway. The
-    same `matches_without_arguments` the live path uses, so the simulator cannot
-    drift from the thing it simulates — which is the property that makes its
-    answer worth anything (ADR 0030).
+    Pure; shares `matches_without_arguments` with the live path so it cannot drift
+    (ADR 0030).
     """
     replays: list[Replay] = []
     for recorded in traffic.decisions:

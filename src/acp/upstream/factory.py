@@ -1,11 +1,7 @@
-"""Assembling the layers that make up one usable upstream.
+"""The only place the upstream layer stack is built (ADR 0006).
 
-Kept in its own module, and deliberately the only place the stack is built.
-Composition order is a correctness property here rather than a matter of taste
-— retry outside the breaker means attempts are counted individually, retry
-outside the bulkhead means a backoff sleep does not hold a slot — and an order
-that only exists implicitly at each call site is one that will eventually be
-written differently in two of them.
+Order is a correctness property: retry outside the breaker counts attempts
+individually, and retry outside the bulkhead means a backoff sleep holds no slot.
 """
 
 from __future__ import annotations
@@ -21,11 +17,7 @@ from acp.upstream.resilient import RetryingUpstreamClient, policy_for
 
 
 def build_upstream(client: UpstreamClient) -> Upstream:
-    """Wrap a connected client in the guard and retry layers.
-
-    Takes an already-built client so tests can inject a transport, which is the
-    same reason ``UpstreamClient`` takes one.
-    """
+    """Wrap a connected client in the guard, retry and cache layers."""
     config = client.config
     guarded = GuardedUpstreamClient(
         client,
@@ -33,9 +25,7 @@ def build_upstream(client: UpstreamClient) -> Upstream:
         Bulkhead(config.name, config.max_concurrency),
     )
     retrying = RetryingUpstreamClient(guarded, policy_for(config))
-    # Caching outermost, so a hit costs nothing: no retry bookkeeping, no
-    # breaker check, no bulkhead slot. An answer the gateway already holds
-    # should not walk through three layers of failure handling to be returned.
+    # Caching outermost, so a hit skips retry, breaker and bulkhead.
     return CachingUpstreamClient(retrying, cache_policy_for(config))
 
 
@@ -46,10 +36,7 @@ async def connect_upstream(
 ) -> Upstream:
     """Open a pool to ``config`` and return the fully wrapped upstream.
 
-    ``credentials`` goes to the innermost layer on purpose. A credential minted
-    outside the cache would be minted for answers that are never sent, and one
-    minted outside the retry would be reused across attempts that may span
-    longer than it lives. The client is the only layer that knows a request is
-    actually about to leave the process.
+    ``credentials`` goes to the innermost layer so a credential is minted only for a
+    request actually sent, never reused across retries (ADR 0019).
     """
     return build_upstream(await UpstreamClient.connect(config, credentials, secret))

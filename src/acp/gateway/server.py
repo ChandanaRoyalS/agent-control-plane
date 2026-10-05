@@ -1,12 +1,8 @@
-"""The gateway's inbound half: the MCP server that agents connect to.
+"""The MCP server agents connect to, brokering calls to the upstreams.
 
-Built on the SDK's low-level ``Server`` rather than the high-level
-``MCPServer`` — see ADR 0005. The distinction matters more than it looks.
-``MCPServer`` registers tools statically with decorators, which models a tool
-*provider*. A gateway is a tool *broker*: its catalogue is computed on every
-request, merged from live upstreams and filtered by policy to what the
-calling principal is entitled to see. ``Server`` takes ``on_list_tools`` and
-``on_call_tool`` as per-request async handlers, which is exactly that shape.
+Built on the SDK's low-level ``Server`` (ADR 0005), whose per-request ``on_list_tools`` and
+``on_call_tool`` handlers suit a broker whose catalogue is merged from live upstreams and
+filtered per principal.
 """
 
 from __future__ import annotations
@@ -53,33 +49,18 @@ from acp.upstream.models import CallToolResult
 logger = logging.getLogger(__name__)
 
 APPROVAL_EVENT = "approval.gate"
-"""One record per approval decision on the request path — started, still
-waiting, proceeded or refused. The operator side writes the human's
-answer; this writes what the gateway did with it."""
+"""Log event for each request-path approval outcome (started, waiting, proceeded, refused)."""
 
 SERVER_NAME = "agent-control-plane"
 
 DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost")
-"""Hosts accepted when nothing else is configured.
-
-The SDK enables DNS-rebinding protection by default and its allow-list has *no*
-default value, so an unconfigured server rejects every request. That is the
-right default for a security control — deny until told otherwise — but it means
-the allow-list is a required decision rather than an optional one.
-"""
+"""Hosts accepted by default; the SDK's DNS-rebinding allow-list rejects all when empty."""
 
 
 def to_mcp_error(exc: ACPError) -> MCPError:
-    """Render a gateway error as an MCP protocol error.
-
-    The taxonomy already knows how to describe itself as a JSON-RPC error
-    object, including the ``recoverable`` hint the agent reasons over, so this
-    reuses that rather than inventing a second representation. One error shape,
-    one place to change it.
-    """
+    """Render a gateway error as an MCP protocol error via ``to_jsonrpc_error``."""
     rendered = exc.to_jsonrpc_error()
-    # MCPError takes the JSON-RPC error fields directly rather than an
-    # ErrorData object. Verified against mcp 2.0.0's signature, not assumed.
+    # MCPError takes the fields directly (verified against mcp 2.0.0).
     return MCPError(rendered["code"], rendered["message"], rendered["data"])
 
 
@@ -91,14 +72,11 @@ def _result_key(
     ttl: float | None,
     results: ResultCache | None,
 ) -> ResultKey | None:
-    """The cache key for this call, or ``None`` when it must not be cached.
+    """Return the cache key for this call, or ``None`` when it must not be cached.
 
-    ``None`` for four separate reasons, and each is a deliberate refusal rather
-    than a missing feature: the tool is not declared cacheable, no cache is
-    configured, there is no principal to key on, or the arguments will not
-    encode. The third is the one worth naming — an unauthenticated deployment
-    gets no result caching at all, because a shared entry is exactly the bug, and
-    the control that would make it safe is the one that is absent.
+    ``None`` when the tool is not cacheable, no cache is configured, the arguments will
+    not encode, or there is no principal: unauthenticated deployments get no result
+    caching, since a shared entry would leak across callers.
     """
     if ttl is None or results is None or principal is None:
         return None
@@ -113,11 +91,10 @@ def _result_key(
 
 
 def _framed(result: CallToolResult, tool: str, provenance: bool) -> CallToolResult:
-    """The result the caller receives: fenced when provenance framing is on.
+    """Return the result fenced when provenance framing is on.
 
-    Applied at the point of return and nowhere else, so both the cache-hit and
-    cache-miss paths get their own fresh delimiter, and the cache never holds
-    one. See ADR 0037.
+    Applied only at return, so each hit or miss gets a fresh delimiter and the cache
+    never holds one (ADR 0037).
     """
     return frame(result, tool=tool) if provenance else result
 
@@ -125,8 +102,7 @@ def _framed(result: CallToolResult, tool: str, provenance: bool) -> CallToolResu
 def _keeper(
     budgets: Budgets | None, limiter: RateLimiter | None, quota: QuotaCounter | None
 ) -> Budgets | None:
-    """The budgets' keeper: the one handed over, or the in-memory one wrapped
-    around whichever of the two budgets were. Neither means nothing is charged."""
+    """Return ``budgets``, else ``LocalBudgets`` over the given limiter/quota, else ``None``."""
     if budgets is not None:
         return budgets
     if limiter is None and quota is None:
@@ -142,28 +118,16 @@ async def _charge(
     costs: CostTable | None,
     charged: Callable[[str, str, float], None] | None = None,
 ) -> None:
-    """Draw this call against both budgets, or raise the refusal it earns.
+    """Charge this call against both budgets, or raise the refusal as an MCP error.
 
-    ``payer`` is the tenant-qualified account (`acp.budget.account`), not the
-    bare subject — two tenants' alices must drain two buckets. With
-    no principal (auth off) there is no per-caller budget to charge, so both
-    are skipped. The cost is resolved
-    once and shared, because a tool that costs ten should cost ten to each
-    budget rather than ten to one and one to the other.
-
-    Extracted from ``on_call_tool`` for a reason worth stating: it is the *only*
-    thing between authorization and the cache, so a reader following the
-    security argument in that function should be able to see the whole ordering
-    on one screen. The check-both-then-debit-both ordering (ADR 0044 §3) is the
-    keeper's to guarantee — `LocalBudgets` by awaiting nothing between the
-    four calls, `RedisBudgets` by one server-side script (ADR 0067).
+    ``payer`` is the tenant-qualified account (`acp.budget.account`); ``None`` (auth off)
+    skips charging. One resolved cost is applied to both budgets. Check-both-then-debit-both
+    (ADR 0044 §3) is the keeper's guarantee (`RedisBudgets`: ADR 0067).
     """
     if payer is None or budgets is None:
         return
     cost = costs.cost_of(tool) if costs is not None else 1.0
-    # A monotonic clock for the rate: a wall-clock jump must not hand out or
-    # withhold burst allowance. Wall-clock time for the window: a daily quota
-    # aligns to real calendar time, not to how long the process has been running.
+    # Monotonic for the rate (immune to clock jumps); wall clock for calendar quotas.
     mono, wall = time.monotonic(), time.time()
     try:
         await budgets.charge(payer, cost, mono=mono, wall=wall)
@@ -171,19 +135,13 @@ async def _charge(
         raise to_mcp_error(exc) from exc
 
     if charged is not None:
-        # The trace console's spend line, and it is reported **after** both draws
-        # succeeded rather than before them. A refused call is not spend — the
-        # budget was not debited — and a console that counted the attempt would
-        # show a total that disagrees with the limiter the moment anybody is
-        # throttled, which is exactly when somebody is looking at it.
-        #
-        # A callback, so this module keeps no idea that a console exists. See
-        # `AuditLog.published` for the same boundary drawn the same way.
+        # Reported only after both draws succeed, so a refused call is not spend. A
+        # callback keeps this module unaware of the console (cf. `AuditLog.published`).
         charged(payer, tool, cost)
 
 
 def _served_from_cache(results: ResultCache, key: ResultKey, tool: str) -> CallToolResult | None:
-    """A held result for this key, with the hit or miss recorded either way."""
+    """Return a cached result for this key, recording the hit or miss."""
     held = results.get(key)
     results.record(hit=held is not None)
     metrics.record_result_cache(outcome="hit" if held is not None else "miss")
@@ -199,20 +157,14 @@ TOOL_CALL_EVENT = "tool.called"
 
 
 async def _chain(audit: AuditLog, *args: Any, **fields: Any) -> None:
-    """Write one record, turning a fail-closed refusal into the caller's error.
+    """Write one audit record, converting a fail-closed refusal into an MCP error.
 
-    Without this, `AuditUnavailableError` escapes `on_call_tool` unconverted and
-    the SDK renders it as `-32603 Handler returned an invalid result` — the
-    caller is still refused, which is the guarantee, but they are refused with a
-    code that says *the gateway is broken* rather than one that says *wait and
-    retry*. `recoverable` exists precisely so an agent can tell those apart, and
-    it is worth nothing if the error never reaches the wire in one piece.
+    Otherwise `AuditUnavailableError` would reach the caller as a generic -32603 and lose
+    its ``recoverable`` hint.
     """
     try:
-        # `arecord`, not `record`: the write is a synchronous `fsync`, and
-        # running it here would park the event loop for every other request in
-        # the process (ADR 0053). Awaited, so this request still may
-        # not proceed until its entry is durable.
+        # `arecord` keeps the fsync off the event loop (ADR 0053); awaited, so the
+        # request waits until its entry is durable.
         await audit.arecord(*args, **fields)
     except ACPError as exc:
         raise to_mcp_error(exc) from exc
@@ -231,17 +183,9 @@ async def _audit_decision(
     rule: str | None,
     held: bool = False,
 ) -> None:
-    """Chain one authorization decision.
+    """Chain one authorization decision: allowed, denied or held.
 
-    Three outcomes rather than two, because a held call is neither. Folding it
-    into `DENIED` would make the approval flow invisible in the one record meant
-    to explain what happened — the same argument `Decision.requires_approval`
-    makes in the evaluator, carried into the artifact an auditor reads.
-
-    **Argument names, never values.** The same rule the decision log follows
-    (ADR 0045): a `doc_id` is as likely to be a patient record as a public page,
-    and this file is durable and widely readable. The names still buy something
-    real — a rule constraining an argument the call never sent cannot have fired.
+    Records argument names, never values (ADR 0045).
     """
     if audit is None:
         return
@@ -268,18 +212,9 @@ async def _audit_screening(
     tool: str,
     inspection: Inspection,
 ) -> None:
-    """Chain a screening finding, when there was one.
+    """Chain a screening finding, if any; clean results are counted by metrics only.
 
-    Nothing is recorded for a result with no findings at all. The chain is evidence, not
-    telemetry: `firewall_decisions_total` already counts every screening
-    including the clean ones, because a detection count without its denominator
-    is not a rate. Writing a chained, fsynced entry per clean result would
-    multiply the log by every call for a fact the metric already carries.
-
-    **Families and confidences, never the matched text.** A refusal that quotes
-    the payload is a better attack than the original (ADR 0038), and an audit
-    log is precisely the place that payload would be read out of, years later,
-    by somebody with no idea it was hostile.
+    Records families and confidences, never the matched text (ADR 0038).
     """
     findings = inspection.screening.findings
     if audit is None or not findings:
@@ -297,11 +232,7 @@ async def _audit_screening(
             "families": sorted({str(f.family) for f in findings}),
             "confidences": sorted({str(f.confidence) for f in findings}),
             "finding_count": len(findings),
-            # What was found, and what crossed the bar. Both, because they are
-            # different questions and the gap between them is the whole of
-            # ADR 0039: `trigger_count` is 0 for a document that was flagged and
-            # served, which is the common case and the one a reader would
-            # otherwise misread as a withheld result.
+            # 0 for a flagged-but-served document, the common case (ADR 0039).
             "trigger_count": len(inspection.triggers),
         },
     )
@@ -310,13 +241,10 @@ async def _audit_screening(
 async def _screen_catalogue(
     firewall: Firewall | None, audit: AuditLog | None, catalogue: Catalogue
 ) -> Catalogue:
-    """The catalogue with every tool's description screened.
+    """Return the catalogue with tool descriptions screened (ADR 0065).
 
-    A description is model-visible text an upstream wrote. It is screened like
-    a result and, in enforce mode, a tool whose description crosses the same
-    bar is withheld from the catalogue — see `acp.firewall.catalogue` and ADR
-    0065. Called after policy filtering, so a tool the caller may not see is
-    neither screened nor recorded against them.
+    In enforce mode a description crossing the bar is withheld. Runs after policy
+    filtering, so hidden tools are neither screened nor recorded.
     """
     if firewall is None or not catalogue.tools:
         return catalogue
@@ -330,14 +258,7 @@ async def _audit_catalogue(
     principal: Principal | None,
     inspection: CatalogueInspection,
 ) -> None:
-    """Chain each tool whose description produced a finding.
-
-    One record per flagged tool, not per catalogue: the fact worth keeping is
-    *which* tool an upstream described in a way the detectors noticed, and
-    whether the caller was shown it. Clean tools are not recorded, for the
-    reason clean results are not (`_audit_screening`). Families and
-    confidences only — never the description text, which is the payload.
-    """
+    """Chain one record per flagged tool, never the description text."""
     if audit is None:
         return
     for screened in inspection.flagged:
@@ -368,7 +289,7 @@ async def _audit_call(
     *,
     reason: str | None = None,
 ) -> None:
-    """Chain the fact that a call did or did not reach an upstream."""
+    """Chain whether a call reached an upstream."""
     if audit is None:
         return
     await _chain(
@@ -385,16 +306,13 @@ async def _audit_call(
 
 
 MRTR_VERSION: Final = "2026-07-28"
-"""The first protocol revision with `input_required`, the only way this gateway
-can tell a caller to wait for a person. Revisions are dates, so they order as
-strings."""
+"""First protocol revision with `input_required`; revisions are dates and order as strings."""
 
 
 def can_wait(protocol_version: str | None) -> bool:
-    """Whether a client on this revision can be held for an approval (ADR 0072).
+    """Return whether a client on this revision can be held for approval (ADR 0072).
 
-    An unknown version is treated as one that cannot: holding a call for a
-    client that will never come back creates an approval nobody can resume.
+    An unknown version cannot, since nobody could resume its approval.
     """
     return protocol_version is not None and protocol_version >= MRTR_VERSION
 
@@ -408,17 +326,9 @@ async def _await_approval(
 ) -> types.InputRequiredResult | None:
     """Start or resolve an approval; ``None`` means the call may now proceed.
 
-    **`params.input_responses` is read by nobody, and that is the point.** MRTR
-    lets a client answer the questions a server asked, and an approval answered
-    by the caller is not an approval — the caller is the agent, and an agent
-    talked into a destructive call by a poisoned document is exactly the one
-    that will answer "yes" on its own behalf. Only `request_state` is read, and
-    only as a handle to a decision made somewhere the agent cannot reach.
-
-    A loaded policy that holds a call with no store configured is the same
-    fail-closed misconfiguration as a policy with no principal: refused, not
-    permitted. The alternative is a deployment where `require_approval` silently
-    means `allow`, which is the worst possible reading of that word.
+    Only `request_state` is read, as a handle; ``input_responses`` is ignored because the
+    caller (the agent) must not approve its own call. With no store configured a held call
+    is refused (fail closed), never allowed.
     """
     if store is None:
         logger.error(
@@ -441,9 +351,7 @@ async def _await_approval(
             ttl=ttl,
         )
     except ACPError as exc:
-        # A shared store that cannot be reached (ADR 0070): the call is held
-        # for a person and nothing can hold it, so it is refused, legibly,
-        # rather than served or left on a socket.
+        # Unreachable shared store (ADR 0070): refuse legibly.
         raise to_mcp_error(exc) from exc
     logger.info(
         APPROVAL_EVENT,
@@ -477,12 +385,9 @@ async def _authorize(
 ) -> types.InputRequiredResult | None:
     """Decide a call under a loaded policy: raise, hold, or ``None`` to proceed.
 
-    Everything before budget, cache and upstream, in the order the security
-    argument needs: the decision, its record, and the approval it may start.
+    Runs before budget, cache and upstream: decision, its audit record, then any approval.
     """
-    # Fail-closed: a loaded policy means authorization is
-    # expected. A missing principal here is a misconfiguration
-    # (policy set, auth not), and must deny rather than permit.
+    # Fail closed: a loaded policy with no principal is a misconfiguration.
     if principal is None:
         raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
     try:
@@ -493,16 +398,11 @@ async def _authorize(
             params.arguments or {},
         )
     except ACPError as exc:
-        # Recorded before the refusal is raised, so a denial reaches the
-        # chain even though the caller never gets a result. An audit log
-        # that only contains the calls which succeeded answers the wrong
-        # question — the interesting row is always the one that stopped.
+        # Audit the denial before raising, so refusals reach the chain.
         await _audit_decision(audit, principal, params, allowed=False, rule=None)
         raise to_mcp_error(exc) from exc
 
-    # A held call from a client that cannot wait is refused, and the
-    # chain says refused: recording it as held would describe an
-    # approval nobody created (ADR 0072).
+    # Unwaitable held call: refused and recorded as refused, not held (ADR 0072).
     unwaitable = decision.requires_approval and not can_wait(protocol_version)
     await _audit_decision(
         audit,
@@ -521,10 +421,7 @@ async def _authorize(
         )
 
     if decision.requires_approval:
-        # Held for a person (ADR 0048). Returns before budget is
-        # charged, before the cache is consulted and before anything
-        # reaches an upstream — a call that has not happened must not
-        # spend, must not be answered from memory, and must not run.
+        # Held (ADR 0048): return before budget, cache or upstream.
         return await _await_approval(approvals, principal, params, decision.rule, approval_ttl)
     return None
 
@@ -548,31 +445,18 @@ def build_server(
 ) -> Server[None]:
     """Build an MCP server that brokers for the registry's upstreams.
 
-    The handlers are closures over ``registry`` rather than methods on a class
-    because the SDK wants plain callables, and because there is no per-server
-    mutable state to hold — every request is answered from the upstreams as they
-    are *now*, which is the property that makes health-driven catalogue
-    withdrawal possible later.
+    Handlers are stateless closures; every request is answered from the upstreams as
+    they are now.
     """
 
-    # A bare `Policy` still works everywhere one was accepted, wrapped as a
-    # set whose default it is. The wrapping is what makes tenancy fail closed
-    # from every direction: a tenanted principal reaching a gateway built with
-    # a bare policy selects an unknown tenant and gets DENY_ALL — never the
-    # single-tenant rules, which from that principal's point of view are some
-    # other tenant's policy.
+    # A bare `Policy` becomes a set's default, so a tenanted principal fails closed to
+    # DENY_ALL rather than getting the single-tenant rules.
     policies = policy if isinstance(policy, PolicySet) or policy is None else PolicySet(policy)
 
-    # The budgets' keeper. A caller that hands over a limiter or a quota gets
-    # the in-memory one wrapped around them; a caller with a shared store
-    # hands over the keeper itself (`RedisBudgets`, ADR 0067). Neither means
-    # nothing is charged and no keeper is built.
+    # In-memory keeper around limiter/quota, or a shared one (`RedisBudgets`, ADR 0067).
     keeper = _keeper(budgets, limiter, quota)
 
-    # `_ctx` and `_params` are positional in the SDK's handler contract, so
-    # they cannot be dropped. Underscore-prefixed until they are used:
-    # `_ctx` carries the HTTP request (headers, auth) for authentication and
-    # policy filtering; `_params.cursor` matters once catalogues paginate.
+    # `_ctx` and `_params` are positional in the SDK contract; unused for now.
     async def on_list_tools(
         _ctx: ServerRequestContext[None, Any],
         _params: types.PaginatedRequestParams | None,
@@ -580,11 +464,7 @@ def build_server(
         catalogue = await registry.list_tools()
 
         if policies is not None:
-            # Show only what this principal may call. Fail-closed, like
-            # on_call_tool: a loaded policy with no principal sees an
-            # empty catalogue, not the full one. Selection happens per
-            # request: the catalogue acme's alice sees is filtered by acme's
-            # rules and nobody else's.
+            # Only what this principal's tenant policy permits; no principal sees nothing.
             principal = current_principal()
             visible = (
                 visible_tools(policies.policy_for(principal.tenant), principal, catalogue.tools)
@@ -596,17 +476,11 @@ def build_server(
         catalogue = await _screen_catalogue(firewall, audit, catalogue)
 
         if catalogue.is_total_failure:
-            # Nothing answered. Returning an empty catalogue would tell the
-            # agent it has no tools, which is indistinguishable from a correctly
-            # configured gateway with nothing attached — and would send it off
-            # to attempt the task without them. An error says "ask again later".
+            # Raise rather than return an empty list the agent would take as "no tools".
             first = next(iter(catalogue.failures.values()))
             raise to_mcp_error(first)
 
-        # Withdrawals are deliberately not logged here. They were logged once,
-        # by the health monitor, when the upstream changed state — logging them
-        # again on every request would produce a warning per request for as long
-        # as the outage lasts.
+        # Withdrawals are not logged here; the health monitor logged the state change.
         for name, exc in catalogue.failures.items():
             # Partial failure is served, not raised — see UpstreamRegistry.
             logger.warning(
@@ -621,11 +495,7 @@ def build_server(
                 },
             )
 
-        # The gateway's own freshness hint, composed from the upstreams that
-        # contributed. An agent's prompt contains this list, so a catalogue that
-        # changes every turn misses the model provider's prompt cache and the
-        # whole prompt is billed again — stability here is a cost decision, not
-        # only a latency one.
+        # Stable hints keep the agent's prompt cache warm, which is a cost decision.
         return types.ListToolsResult(
             tools=[to_mcp_tool(tool) for tool in catalogue.tools],
             ttl_ms=catalogue.ttl_ms,
@@ -650,8 +520,7 @@ def build_server(
             if awaiting is not None:
                 return awaiting
 
-        # After authorization: a denied call must not spend budget, and charging
-        # a call we would refuse anyway is wasted work.
+        # Budget after authorization: a denied call must not spend.
         await _charge(
             payer=account(principal.tenant, principal.subject) if principal is not None else None,
             tool=params.name,
@@ -659,18 +528,8 @@ def build_server(
             costs=costs,
             charged=charged,
         )
-        # The result cache, and its position in this function is the whole
-        # security argument (ADR 0035). Everywhere else in this codebase caching
-        # is outermost, because a hit should cost nothing — ADR 0006 argues it
-        # explicitly. Here that instinct is a vulnerability: a result cache
-        # consulted before authorization serves a caller the policy would have
-        # refused, and the denial never runs at all.
-        #
-        # So it sits *after* policy and *after* budget. After policy, because a
-        # denied call must never be answered from memory. After budget, because
-        # a caller repeating themselves is still making a call — otherwise the
-        # cheapest way to stay under a quota is to ask the same question twice,
-        # and ADR 0033's cost table quietly stops meaning anything.
+        # Cache after policy and budget (ADR 0035): a denied call is never served from
+        # memory, and a repeat still spends (ADR 0033), unlike outermost caching (ADR 0006).
         arguments = params.arguments or {}
         ttl = cacheable.ttl_for(params.name) if cacheable is not None else None
         cache_key = _result_key(
@@ -683,9 +542,7 @@ def build_server(
         if cache_key is not None and results is not None:
             held = _served_from_cache(results, cache_key, params.name)
             if held is not None:
-                # Framed here rather than before storing: a cached fence is a
-                # fence the attacker has already seen, and a per-result nonce
-                # replayed from a cache entry is a per-entry one (ADR 0037).
+                # Framed on return, never stored framed, so the nonce stays fresh (ADR 0037).
                 return to_mcp_call_tool_result(_framed(held, params.name, provenance))
 
         try:
@@ -696,37 +553,25 @@ def build_server(
             )
             raise to_mcp_error(exc) from exc
 
-        # A call that reached an upstream and came back. Separate from the
-        # authorization record above on purpose: "alice was allowed to search"
-        # and "the search ran" are different facts, and a cache hit or a held
-        # approval makes the first true while the second never happens.
+        # Separate from the authorization record: allowed is not the same as ran.
         await _audit_call(audit, principal, params.name, AuditOutcome.COMPLETED)
 
-        # Screened on the miss path only. A cache hit was screened before it was
-        # stored, so what is held is by construction what the firewall allowed —
-        # and re-screening every hit would erase the reason the cache exists.
-        # The honest cost, and its two bounds, are in ADR 0038.
+        # Screen on the miss path only; cached results were screened before storing
+        # (ADR 0038).
         if firewall is not None:
             inspection = await firewall.ainspect(
                 result, tool=params.name, tools=registry.known_tools
             )
             await _audit_screening(audit, principal, params.name, inspection)
             if inspection.refused:
-                # Returned unframed, and that is deliberate: the fence marks
-                # text the gateway did *not* write, so fencing the gateway's own
-                # notice would be a lie about its origin. With framing on, an
-                # unfenced block is by construction the gateway speaking.
+                # Unframed: the fence marks upstream text, and this notice is the gateway's.
                 return to_mcp_call_tool_result(inspection.result)
             if not inspection.cacheable:
-                # Truncated screening: served once, examined in part, never
-                # repeated. Storing a document whose tail was never examined
-                # turns one unexamined document into every later caller's answer
-                # for the length of its ttl.
+                # Partially screened: serve once, never cache.
                 cache_key = None
 
         if cache_key is not None and results is not None and ttl is not None:
-            # `put` refuses an `is_error` result itself, so a failed tool call
-            # cannot be cached even from here.
+            # `put` itself refuses `is_error` results.
             results.put(cache_key, result, ttl=ttl)
         return to_mcp_call_tool_result(_framed(result, params.name, provenance))
 
@@ -761,24 +606,10 @@ def build_app(
 ) -> Starlette:
     """Build the ASGI application agents connect to.
 
-    ``stateless_http=True`` matches ADR 0001: the 2026-07-28 revision removed
-    the initialize handshake and the session header, so there is no session to
-    keep and any instance can serve any request.
-
-    ``json_response=True`` returns a plain JSON body rather than an SSE stream
-    for unary responses. Simpler to proxy, simpler to test, and nothing in the
-    gateway's current surface streams.
-
-    ``allowed_hosts`` and ``allowed_origins`` drive the SDK's DNS-rebinding
-    protection: it rejects any ``Host`` it was not told to expect, which defends
-    a locally-bound server against a malicious web page resolving a hostname to
-    a loopback address. Defaults cover local development; deployment behind a
-    real hostname must pass its own list, via ``allowed_hosts`` in the settings.
-
-    ``resource``, when given, adds the RFC 9728 metadata route *and* is what the
-    authentication middleware exempts. One object doing both is the point: the
-    only unauthenticated path in the gateway is derived from the document being
-    served there rather than from a list of paths kept in step by hand.
+    ``stateless_http=True`` per ADR 0001 (no session in the 2026-07-28 revision);
+    ``json_response=True`` since nothing streams. ``allowed_hosts``/``allowed_origins``
+    drive the SDK's DNS-rebinding protection; deployments must pass their own hostnames.
+    ``resource`` adds the RFC 9728 route and is also the middleware's only exemption.
     """
     security = TransportSecuritySettings(
         allowed_hosts=list(allowed_hosts),
@@ -805,39 +636,13 @@ def build_app(
         transport_security=security,
     )
     if resource is not None:
-        # Inserted at the front rather than appended, because the SDK is free to
-        # mount its transport at the root — and a route added after a catch-all
-        # mount is a route that never matches. This is one line of defence
-        # against a silent 404 on the one endpoint whose entire job is to be
-        # findable by a client that knows nothing else about this gateway.
-        #
-        # The middleware receives the same object, which is what makes this
-        # route reachable without a token: the exemption is `metadata_path`
-        # taken from `resource`, so serving it and exempting it cannot come
-        # apart. See `acp.identity.resource`.
+        # Insert first: a route after the SDK's catch-all mount would never match. The
+        # middleware exempts the same `metadata_path` (see `acp.identity.resource`).
         app.router.routes.insert(0, metadata_route(resource))
-    # Added to Starlette's own stack rather than by wrapping the app, so the
-    # returned object is still a Starlette instance — `app.router` and the
-    # lifespan context are part of this function's contract and the tests use
-    # them. Safe to call here because Starlette builds its middleware stack
-    # lazily, on the first request rather than at construction.
-    #
-    # Order matters, and Starlette's is the reverse of the reading order:
-    # `add_middleware` inserts at the front, so the *last* one added runs
-    # outermost and the *first* one added runs innermost. Read the three calls
-    # below bottom-up and you have the order a request actually meets them:
-    # request context, then authentication, then pre-dispatch authorization.
-    #
-    # Authentication runs *inside* the request-context middleware, which is what
-    # makes a rejected request still carry a request ID in its log line. A 401
-    # nobody can correlate is a 401 nobody can investigate.
-    #
-    # Pre-dispatch authorization runs innermost of the three, inside
-    # authentication, which is what lets it read a principal that has already
-    # been resolved. It refuses a call the policy could never permit before the
-    # body is parsed (ADR 0043), and it can only ever subtract: anything it does
-    # not refuse still reaches `enforce_call`, which reads the body and remains
-    # authoritative.
+    # Added via Starlette's stack so the app stays a Starlette instance (tests use it).
+    # The last added runs outermost, so requests meet: request context (so 401s carry a
+    # request ID), then authentication, then pre-dispatch authorization (ADR 0043),
+    # which can only subtract; `enforce_call` remains authoritative.
     app.add_middleware(PreDispatchAuthorizationMiddleware, policy=policy, audit=audit)
     app.add_middleware(AuthenticationMiddleware, validator=validator, resource=resource)
     app.add_middleware(RequestContextMiddleware)

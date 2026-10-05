@@ -1,17 +1,8 @@
-"""The held-out split: the attacks the firewall is not allowed to be built against.
+"""The held-out split: attacks no detector may be tuned against (ADR 0041).
 
-A detection rate over the corpus the firewall was tuned on measures fit, not
-generalisation — it answers "does the firewall catch the attacks it was shaped
-by", which it must, because it was shaped by them. The held-out split is the
-answer to a different and harder question: does it catch attacks it has never
-seen. That number only means anything if the split is sealed — if nothing in it
-influenced a detector — so the split is a committed, versioned manifest rather
-than a random draw, and the loader that serves the development corpus excludes it
-by construction.
-
-This module is deliberately incurious about what the held-out documents *say*.
-It partitions by id and never inspects a body; the whole discipline is that those
-documents stay unread until there is a number to report against them.
+A committed, versioned manifest of attack IDs; the development loader excludes
+them by construction. A split is scored once, after which its manifest records
+``unsealed:``. This module partitions by ID and never reads a held-out body.
 """
 
 from __future__ import annotations
@@ -34,22 +25,22 @@ class HeldoutManifest:
     version: int
     ids: frozenset[str]
     unsealed: str | None = None
-    """When and where this version was scored, if it has been — e.g.
-    ``2026-10-04, ADR 0060``. A split is unseen exactly once: after its number
-    has been read, it is a third development set that happens to be excluded
-    from tuning, and every later run must say so rather than present the same
-    documents as unseen again."""
+    """When and where this version was scored (e.g. ``2026-10-04, ADR 0060``), else None.
+
+    Once scored, a split is no longer unseen, and later runs must say so.
+    """
 
     def __len__(self) -> int:
         return len(self.ids)
 
 
 def load_heldout_manifest(path: Path) -> HeldoutManifest:
-    """Parse the held-out manifest, or raise naming what stopped it.
+    """Parse the manifest: a ``version:`` line, optional ``unsealed:``, one ID per line.
 
-    The format is intentionally plain — a ``version:`` line and one attack id per
-    line, ``#`` comments and blanks ignored — because a split that a human cannot
-    read and check in a diff is a split they cannot trust is sealed.
+    ``#`` comments and blank lines are ignored.
+
+    Raises:
+        ConfigurationError: if the file is unreadable, malformed, or holds no IDs.
     """
     try:
         raw = path.read_text(encoding="utf-8")
@@ -84,8 +75,7 @@ def load_heldout_manifest(path: Path) -> HeldoutManifest:
                 )
                 raise ConfigurationError(msg)
             continue
-        # Anything else is an attack id. It must look like <family>/<slug> — a
-        # bare word here is a typo that would silently hold nothing out.
+        # An attack ID must be <family>/<slug>; a bare word is a typo.
         if "/" not in stripped:
             msg = (
                 f"held-out manifest {str(path)!r} line {lineno}: "
@@ -121,11 +111,10 @@ class Split:
 
 
 def split_attacks(corpus: AttackCorpus, manifest: HeldoutManifest) -> Split:
-    """Partition ``corpus`` into development and held-out on the manifest's ids.
+    """Partition ``corpus`` into development and held-out on the manifest's IDs.
 
-    Raises if the manifest names an id the corpus does not contain: a held-out
-    entry pointing at nothing is a seal on an empty box, and usually a rename the
-    manifest did not follow.
+    Raises:
+        ConfigurationError: if the manifest names an ID not in the corpus.
     """
     by_id = {attack.id: attack for attack in corpus.attacks}
     missing = sorted(manifest.ids - by_id.keys())
@@ -163,9 +152,5 @@ def load_split(root: Path | None = None) -> Split:
 
 
 def load_development_attacks(root: Path | None = None) -> AttackCorpus:
-    """The attacks a detector may be built and tuned against — the held-out split
-    removed. This is the loader detector tuning should call instead of
-    ``load_attacks``, so a detector cannot be shaped by a sealed document without
-    someone deliberately reaching past this function to do it.
-    """
+    """The attacks without the held-out split; detector tuning calls this, not ``load_attacks``."""
     return load_split(root).development

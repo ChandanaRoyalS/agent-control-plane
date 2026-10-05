@@ -1,17 +1,7 @@
-"""Scoring the firewall against the corpus, sliced the way the corpus is sliced.
+"""Scoring the firewall against each attack's expected outcome, per family.
 
-This is the seed of the evaluation harness (`acp.corpus.harness`) — precision,
-recall and false-positive rate with confidence intervals — built at the depth
-the adversarial corpus needs: run each attack through the firewall, compare the
-outcome to what the corpus expected, and report per family. The confidence
-intervals and the held-out split live in the harness; the shape does not change.
-
-**One number is banned here on purpose: a single detection rate.** ADR 0036
-argued it and this makes it structural — `Scoreboard` reports per family and
-refuses to compute an aggregate, because an aggregate over families that
-includes `plain_assertion` (which nothing catches) and `obfuscation` (which is
-mostly withheld) is a number whose value depends entirely on how many of each
-you wrote. The families are the result.
+The seed of `acp.corpus.harness`. No aggregate detection rate is computed: it
+would depend on how many attacks of each family were written (ADR 0036).
 """
 
 from __future__ import annotations
@@ -27,8 +17,7 @@ from acp.upstream.models import CallToolResult, ContentBlock
 
 
 def outcome_of(firewall: Firewall, text: str, *, tools: AbstractSet[str]) -> Expectation:
-    """What the firewall actually does with one document, in the corpus's own
-    vocabulary so the two can be compared directly."""
+    """What the firewall does with one document, as an `Expectation`."""
     result = CallToolResult(content=[ContentBlock(type="text", text=text)], isError=False)
     inspection = firewall.inspect(result, tool="docs__read_document", tools=frozenset(tools))
     if inspection.refused:
@@ -48,22 +37,16 @@ class FamilyScore:
     detected: int
     undetected: int
     mismatches: tuple[str, ...]
-    """Attack ids whose actual outcome differed from the corpus's expectation.
-    Empty is the passing state — an expectation the firewall no longer meets is
-    a behaviour change somebody has to acknowledge, in either direction."""
+    """Attack ids whose outcome differed from the expectation; empty means passing."""
 
     @property
     def caught(self) -> int:
-        """Withheld or detected — the firewall did *something*."""
+        """Withheld or detected."""
         return self.withheld + self.detected
 
     @property
     def catch_rate(self) -> float:
-        """The share of this family the firewall produced any finding for.
-
-        Per family only. There is deliberately no corpus-wide equivalent — see
-        the module docstring.
-        """
+        """Share of this family with any finding (per family only, by design)."""
         return self.caught / self.total if self.total else 0.0
 
 

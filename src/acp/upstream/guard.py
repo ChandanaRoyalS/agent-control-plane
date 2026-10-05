@@ -1,35 +1,9 @@
 """Bulkhead and breaker, wrapped around one upstream.
 
-The bulkhead is the older of the two ideas and the less discussed. A ship's hull
-is divided into compartments so that a breach floods one and the ship stays up.
-The failure it prevents here is the one where a single slow upstream consumes
-everything: every request to it holds a worker for the full read timeout, those
-requests pile up because agents keep asking, and eventually the gateway has no
-capacity left for the four upstreams that are working perfectly. The gateway
-does not fall over because it broke — it falls over because it was too patient
-with something that did.
-
-So each upstream gets a fixed number of concurrent in-flight calls, and the
-(N+1)th is refused *immediately* rather than queued. Queueing is the tempting
-alternative and it is the wrong one: a queue converts saturation into latency,
-and latency is precisely what the caller cannot distinguish from the upstream
-being slow. Refusing says something true and says it in a millisecond.
-
-**Ordering.** The breaker is checked first, then the bulkhead slot is taken.
-Both orderings are defensible; this one is chosen so that fast-failing an open
-circuit never has to wait for capacity — the cheapest possible answer should not
-queue behind the most expensive one.
-
-The whole stack, outermost to innermost:
-
-    RetryingUpstreamClient   → decides whether to try again, and sleeps
-      GuardedUpstreamClient  → decides whether to try at all
-        UpstreamClient       → one call in, one HTTP request out
-
-Retry sits outside the bulkhead so a retry's backoff sleep does not occupy a
-slot it is not using, and outside the breaker so the breaker counts *attempts*
-rather than logical calls — three retries of one failing call are three pieces
-of evidence that the upstream is down, not one.
+The bulkhead caps concurrent calls per upstream so one slow upstream cannot take
+all capacity; the call over the cap is refused immediately, never queued. The
+breaker is checked before a slot is taken, so an open circuit fails fast. Retry
+sits outside this layer (see ``acp.upstream.factory``).
 """
 
 from __future__ import annotations
@@ -57,13 +31,8 @@ T = TypeVar("T")
 class Bulkhead:
     """A hard ceiling on concurrent calls to one upstream.
 
-    Distinct from the connection-pool limit already on the HTTP client, which
-    bounds *sockets* and, on reaching the limit, waits for ``pool_timeout``.
-    This bounds *calls* and does not wait. Configuration keeps the bulkhead at
-    or below the pool size (see ``UpstreamConfig``), which has a useful
-    consequence: the pool can then never be the thing that saturates, so a pool
-    timeout in production stops being routine backpressure and becomes a signal
-    that something is genuinely wrong.
+    Bounds calls without waiting, unlike the HTTP pool limit. Config keeps it at
+    or below the pool size, so a pool timeout signals a real fault.
     """
 
     def __init__(self, upstream: str, capacity: int) -> None:
@@ -86,9 +55,7 @@ class Bulkhead:
         try:
             self._semaphore.acquire_nowait()
         except anyio.WouldBlock as exc:
-            # At WARNING, not INFO: refusing a call is a real event with a real
-            # consequence for the agent, and a burst of these is the earliest
-            # signal that an upstream has started to slow down.
+            # WARNING: a burst is the earliest sign an upstream is slowing.
             logger.warning(
                 "upstream.overloaded",
                 extra={"upstream": self._upstream, "capacity": self._capacity},
@@ -102,8 +69,7 @@ class Bulkhead:
         try:
             yield
         finally:
-            # In a `finally`, so a cancelled or failing call cannot leak the
-            # slot. A leaked slot is permanent: capacity only ever goes down.
+            # In `finally` so a cancelled call cannot leak the slot permanently.
             self._semaphore.release()
             self._publish()
 
@@ -114,12 +80,7 @@ class Bulkhead:
 
 
 class GuardedUpstreamClient:
-    """An upstream that refuses calls it should not make.
-
-    Wraps any :class:`~acp.upstream.protocol.Upstream`, so it composes with the
-    retry wrapper in either order — though the stack described in this module's
-    docstring is the one the factory builds, and the reasons are given there.
-    """
+    """An upstream that refuses calls its breaker or bulkhead should not allow."""
 
     def __init__(
         self,
@@ -137,8 +98,7 @@ class GuardedUpstreamClient:
 
     @property
     def breaker(self) -> CircuitBreaker:
-        """Exposed for the health monitor in `acp.health`, which withdraws an
-        upstream from the catalogue while its circuit is open."""
+        """For `acp.health`, which withdraws an upstream while its circuit is open."""
         return self._breaker
 
     @property
@@ -154,8 +114,7 @@ class GuardedUpstreamClient:
         await self._inner.aclose()
 
     async def invalidate(self) -> None:
-        """Not guarded: forgetting a cache entry makes no network call, so
-        putting it behind a breaker would only make recovery harder."""
+        """Not guarded: it makes no network call, and must work during recovery."""
         await self._inner.invalidate()
 
     async def __aenter__(self) -> Self:

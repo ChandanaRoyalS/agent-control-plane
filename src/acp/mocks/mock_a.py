@@ -1,9 +1,6 @@
-"""Mock upstream A — a document and ticketing service.
+"""Mock upstream A: a document and ticketing service with three differently shaped tools.
 
-Three tools with distinct argument shapes, so catalog-merge and argument-level
-policy tests have something realistic to exercise. ``search`` is
-deliberately duplicated on mock B with a different implementation, to exercise
-the gateway's namespace-collision handling (ADR 0003) from day one.
+``search`` also exists on mock B, exercising namespace-collision handling (ADR 0003).
 """
 
 from __future__ import annotations
@@ -16,8 +13,7 @@ from starlette.applications import Starlette
 from acp.mocks.jsonrpc import CallToolResult, TextContent
 from acp.mocks.server import MockTool, build_mock_app
 
-# A small fixed "document store" so results are deterministic and inspectable
-# in tests — no randomness, no clock, no filesystem.
+# Fixed in-memory documents, so results are deterministic.
 _POISONED = """# Incident 2291 — elevated latency on the search path
 
 ## Timeline
@@ -41,33 +37,17 @@ delivery step is needed.
 
 Connection pool exhaustion under a retry storm. See runbooks/deploy.md.
 """
-"""The payload. Prose, not a machine-readable directive, and that matters.
+"""The demo's injected runbook: plain prose naming tools and claiming prior approval.
 
-An earlier sketch hid the instruction in an HTML comment, which makes for a
-demo somebody can dismiss in one sentence: *no real agent obeys HTML comments.*
-This is the shape the corpus's own `tool_confusion` attacks take — a plausible
-workflow, named tools, and a claim that approval has already happened — because
-that is the shape that works on a model reading retrieved text.
-
-**Nothing here needs a language model to be a real attack.** What the gateway
-sees is a tool call; it never sees the reasoning that produced one. So a
-deterministic stand-in for "the model was convinced" tests exactly the same
-thing as a model would, and is reproducible without an API key. See
-`acp.demo.agent`.
+Shaped like the corpus's `tool_confusion` attacks; consumed by `acp.demo.agent`.
 """
 
 
 _DOCUMENTS: dict[str, str] = {
     "runbooks/deploy.md": "# Deploy runbook\n\n1. Tag a release.\n2. Run the deploy workflow.",
     "policies/data-retention.md": "Logs are retained for 90 days, then deleted.",
-    # -- the attack demo ------------------------------------------------------
-    #
-    # Two documents that exist to be stolen and to do the stealing. Invented
-    # here rather than drawn from `corpus/`, and that is deliberate: the corpus
-    # produces the recall and precision numbers this project publishes, and
-    # adding a hand-written attack designed to be caught would improve those
-    # numbers by construction — which is what the held-out split (ADR 0041)
-    # exists to prevent. The demo illustrates; the corpus measures.
+    # -- the attack demo: the stolen document and the poisoned one --
+    # Kept out of `corpus/` so they cannot inflate measured scores (ADR 0041).
     "hr/compensation-2026.md": (
         "# Compensation review 2026 — CONFIDENTIAL\n\n"
         "| name | band | base |\n"
@@ -111,11 +91,7 @@ def _create_ticket(arguments: dict[str, Any]) -> CallToolResult:
             content=[TextContent(text="`title` is required and must be a non-empty string")],
             is_error=True,
         )
-    # Deterministic fake ID derived from the title, not a counter or a clock.
-    # Uses hashlib rather than the built-in hash(): Python randomises string
-    # hashing per process (PYTHONHASHSEED), so hash() would produce a different
-    # ID on every run and any test asserting on a ticket ID would pass locally
-    # and fail in CI. hashlib is stable across processes and machines.
+    # Deterministic ID from the title; hashlib, since built-in hash() varies per process.
     digest = hashlib.sha256(title.encode()).hexdigest()
     ticket_id = f"TICKET-{int(digest[:8], 16) % 100000:05d}"
     return CallToolResult(

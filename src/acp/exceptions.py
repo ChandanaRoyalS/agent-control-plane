@@ -1,14 +1,6 @@
-"""The exception taxonomy.
+"""The exception taxonomy, each mapped onto a JSON-RPC error the agent reasons over.
 
-Every error that crosses the gateway boundary is deliberately mapped onto a
-JSON-RPC error response. This matters more than usual here because *the caller
-is a language model*: an error is not just a log line for a human, it is context
-the agent will reason over and act on. An error that explains what to do instead
-produces better agent behaviour than an opaque failure.
-
-Subclasses are added as the layers land (upstream, policy, identity, budget,
-firewall). Keep `code` values aligned with the JSON-RPC spec: -32000 to -32099
-is the implementation-defined server error range.
+`code` values stay in JSON-RPC's implementation-defined range, -32000 to -32099.
 """
 
 from __future__ import annotations
@@ -17,11 +9,7 @@ from typing import Any
 
 
 class ACPError(Exception):
-    """Base class for every error the gateway raises deliberately.
-
-    Anything that is *not* an ``ACPError`` reaching the boundary is a bug, and
-    should be logged as such rather than returned to the caller.
-    """
+    """Base for deliberate gateway errors; any other exception at the boundary is a bug."""
 
     code: int = -32000
     """JSON-RPC error code returned to the caller."""
@@ -30,21 +18,11 @@ class ACPError(Exception):
     """Whether the agent could plausibly succeed by trying something different."""
 
     retry_locally: bool = True
-    """Whether the gateway's *own* retry layer should try again immediately.
+    """Whether the gateway's own retry layer should retry within milliseconds.
 
-    Deliberately separate from ``recoverable``, because the two answer different
-    questions on different timescales. ``recoverable`` is advice to the agent:
-    "this is worth another go, later, or with a different tool." This flag is a
-    decision about the current request: "another attempt, within the next few
-    hundred milliseconds, could plausibly change the outcome."
-
-    They usually agree. Where they part company is a failure the gateway raised
-    *itself* — an open circuit, a full bulkhead. Both are genuinely recoverable
-    from the agent's point of view, and both are pointless to retry in-process:
-    the condition is measured in seconds, the backoff in milliseconds, so every
-    attempt is spent waiting on something no local retry can influence. Retrying
-    them converts a fast, honest failure into a slow one, which is the exact
-    behaviour the circuit breaker exists to eliminate.
+    Separate from ``recoverable`` (advice to the agent): the gateway's own refusals,
+    such as an open circuit or full bulkhead, are recoverable but last seconds, so
+    retrying them locally only slows the failure.
     """
 
     def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
@@ -53,11 +31,7 @@ class ACPError(Exception):
         self.details: dict[str, Any] = details or {}
 
     def to_jsonrpc_error(self) -> dict[str, Any]:
-        """Render as a JSON-RPC ``error`` object.
-
-        The ``data`` payload is what the agent actually sees, so it carries the
-        recoverability hint rather than hiding it in a log.
-        """
+        """Render as a JSON-RPC ``error`` object; ``data`` carries ``recoverable``."""
         return {
             "code": self.code,
             "message": self.message,
@@ -66,11 +40,7 @@ class ACPError(Exception):
 
 
 class ConfigurationError(ACPError):
-    """Raised at startup when configuration is invalid.
-
-    Deliberately fatal: a gateway with a malformed policy or a missing upstream
-    credential must refuse to start rather than fail open on the first request.
-    """
+    """Invalid configuration at startup; fatal so the gateway never starts open."""
 
     code = -32001
     recoverable = False
@@ -79,16 +49,9 @@ class ConfigurationError(ACPError):
 class AuthenticationError(ACPError):
     """The caller did not prove who they are.
 
-    ``recoverable`` is **true**, and that is a statement about the agent rather
-    than about the request: a token that has expired can be exchanged for a new
-    one and the call retried, which is a genuinely different instruction from
-    "this will never work". It is not, however, a suggestion to retry the same
-    token — the agent is expected to re-authenticate first.
-
-    Carries a ``reason`` in ``details`` for the log. That reason is stripped
-    before anything is written to the caller (see ``acp.identity.asgi``): a
-    validator that distinguishes "expired" from "wrong audience" from "bad
-    signature" is an oracle an attacker can query one request at a time.
+    Recoverable after re-authenticating, not by retrying the same token. The
+    ``reason`` in ``details`` is for the log and is stripped before reaching the
+    caller (``acp.identity.asgi``) so it cannot serve as an oracle.
     """
 
     code = -32030
@@ -98,16 +61,8 @@ class AuthenticationError(ACPError):
 class IdentityProviderUnavailableError(ACPError):
     """The authorization server could not be reached, or answered nonsense.
 
-    Deliberately **not** a subclass of ``AuthenticationError``, and the
-    distinction is the whole reason it exists. "Your token is bad" and "I cannot
-    currently check your token" are different statements with different correct
-    responses: the first says get a new token, the second says try again. Report
-    the second as the first and every agent in the fleet goes off to
-    re-authenticate against an identity provider that is already down — a
-    dependency outage converted into a login storm.
-
-    Discovered by a test asserting the status code rather than by design: the
-    key cache originally raised ``AuthenticationError`` for both.
+    Not an ``AuthenticationError``: "cannot check your token" must say retry, not
+    re-authenticate, or an identity-provider outage becomes a login storm.
     """
 
     code = -32031
@@ -115,53 +70,30 @@ class IdentityProviderUnavailableError(ACPError):
 
 
 # ---------------------------------------------------------------------------
-# Upstream failures
-#
-# The `recoverable` flag on each of these is not decoration. It is forwarded to
-# the agent in the JSON-RPC `data` payload, and it is the signal the agent uses
-# to decide whether to try again, try a different tool, or give up. Setting it
-# wrongly produces either a stuck agent or an infinite retry loop.
+# Upstream failures. `recoverable` reaches the agent and decides whether it retries;
+# a wrong value means a stuck agent or a retry loop.
 # ---------------------------------------------------------------------------
 
 
 class CredentialExchangeError(ACPError):
     """The gateway could not obtain a credential for an upstream.
 
-    A *refusal* rather than a degradation, and the distinction is the point: the
-    alternative to failing here is calling the upstream without a credential, or
-    with the caller's own token. The first is a gateway that quietly stops
-    enforcing the thing it exists to enforce; the second is the passthrough this
-    entire phase is built to make impossible.
-
-    A *refused* exchange lands here: the audience does not exist, this client
-    may not exchange, the subject token lacks the requester in its ``aud``. All
-    of those fail identically on the next attempt, so ``recoverable`` is false.
-    An authorization server that is merely unreachable raises the subclass below.
+    The call is refused rather than sent without a credential or with the caller's
+    token. A refused exchange (unknown audience, client not permitted, wrong ``aud``)
+    is not recoverable; an unreachable server raises the subclass below.
     """
 
     code = -32032
 
     retry_locally = False
-    """Never retried inside the upstream's retry budget.
-
-    The authorization server is a different dependency with different
-    availability characteristics, and borrowing an upstream's backoff policy for
-    it means an identity outage is measured against — and eventually charged
-    to — a service that is behaving perfectly. Caching exchanged credentials is
-    the real mitigation; a tighter retry loop is not.
-    """
+    """Not retried in the upstream's budget, so an identity outage is not charged to it."""
 
 
 class CredentialProviderUnavailableError(CredentialExchangeError):
     """The authorization server could not be reached, or answered 5xx.
 
-    A subclass here, unlike ``IdentityProviderUnavailableError``, which is
-    deliberately *not* a subclass of ``AuthenticationError``. The difference is
-    what a shared handler would do. There, ``except AuthenticationError`` sends
-    a 401 — telling an agent to go and get a new token because somebody else's
-    server is down, which is how a dependency outage becomes a login storm.
-    Here there is no such handler: both mean "no credential, so the call cannot
-    proceed", and the only thing that differs is the advice attached to it.
+    A subclass, unlike ``IdentityProviderUnavailableError``: no shared handler here
+    turns it into a 401; only the ``recoverable`` advice differs.
     """
 
     code = -32033
@@ -182,78 +114,45 @@ class UpstreamError(ACPError):
 
 
 class UpstreamTimeoutError(UpstreamError):
-    """The upstream did not answer within its configured budget.
-
-    Recoverable: a timeout says nothing about whether the request was valid, and
-    the same call may well succeed on a retry.
-    """
+    """The upstream did not answer within its configured budget; may succeed on retry."""
 
     code = -32011
     recoverable = True
 
 
 class UpstreamUnavailableError(UpstreamError):
-    """The upstream could not be reached at all — connection refused, DNS, TLS.
-
-    Recoverable in the sense that matters to an agent: the tool is not broken,
-    it is temporarily unreachable, so routing around it is the right response.
-    """
+    """The upstream could not be reached (connection refused, DNS, TLS); recoverable."""
 
     code = -32012
     recoverable = True
 
 
 class UpstreamProtocolError(UpstreamError):
-    """The upstream answered, but not with valid JSON-RPC.
-
-    Deliberately *not* recoverable. A malformed response means the upstream is
-    broken or is not an MCP server at all, and retrying will produce the same
-    garbage while burning the agent's budget.
-    """
+    """The upstream answered with invalid JSON-RPC; not recoverable, retries repeat it."""
 
     code = -32013
     recoverable = False
 
 
 class UnknownUpstreamError(UpstreamError):
-    """A qualified tool name referenced an upstream that is not configured.
-
-    Not recoverable: the agent cannot conjure the upstream into existence, and
-    the tool catalogue it was given never contained this name. Almost always
-    means a stale catalogue or a hand-written tool name.
-    """
+    """A qualified tool name referenced an unconfigured upstream; usually a stale catalogue."""
 
     code = -32015
     recoverable = False
 
 
 class UnknownToolError(UpstreamError):
-    """A qualified name could not be resolved to a tool on its upstream.
-
-    Reached only for names that may have been truncated, after re-reading the
-    upstream's catalogue. Usually means the upstream removed the tool between
-    the agent listing it and calling it.
-    """
+    """A possibly truncated name matched no tool even after re-reading the catalogue."""
 
     code = -32016
     recoverable = False
 
 
 class UpstreamCircuitOpenError(UpstreamError):
-    """The gateway refused to call this upstream, because it is failing.
+    """The circuit breaker is open, so the call was never made.
 
-    Not a report of a failed call — the call never happened. The breaker has
-    already watched enough consecutive failures to conclude the upstream is
-    unhealthy, and is now failing fast rather than making every caller wait out
-    a full timeout to rediscover the same thing.
-
-    Recoverable, and it says so with a concrete number: ``retry_after_seconds``
-    is how long until the breaker will next allow a trial call. An agent given
-    that can plan around the outage instead of hammering it.
-
-    ``retry_locally`` is False. The reset timeout is seconds; the retry backoff
-    is milliseconds. Retrying here would burn the request's whole attempt budget
-    against a gate that has not had time to move.
+    ``retry_after_seconds`` is the time until the breaker allows a trial call.
+    Not retried locally: the reset timeout is seconds, the backoff milliseconds.
     """
 
     code = -32017
@@ -277,17 +176,10 @@ class UpstreamCircuitOpenError(UpstreamError):
 
 
 class UpstreamOverloadedError(UpstreamError):
-    """This upstream already has as many in-flight calls as it is allowed.
+    """The bulkhead is full: the upstream has its maximum in-flight calls; not sent.
 
-    The bulkhead's refusal. Like an open circuit, the request was never sent, so
-    nothing happened upstream — but unlike an open circuit this says nothing
-    about the upstream's health. It says the gateway is protecting itself: one
-    slow upstream must not be able to hold every worker in the process hostage
-    while the other upstreams sit idle and answerable.
-
-    ``retry_locally`` is False for a second reason as well as the timing one:
-    retrying into a saturated upstream is adding load to the thing that is
-    already overloaded.
+    Says nothing about upstream health. Not retried locally, which would add load
+    to a saturated upstream.
     """
 
     code = -32018
@@ -296,15 +188,9 @@ class UpstreamOverloadedError(UpstreamError):
 
 
 class UpstreamRejectedError(UpstreamError):
-    """The upstream returned a well-formed JSON-RPC error.
+    """The upstream returned a well-formed JSON-RPC error, kept as ``upstream_code``.
 
-    This is the upstream working correctly and saying no — unknown method,
-    unknown tool, bad parameters. It carries the upstream's own error code so
-    the gateway can map it rather than flattening every rejection into one.
-
-    Note this is a *protocol* rejection. A tool that ran and failed is not an
-    error at all at this layer: MCP reports that as ``isError`` inside a normal
-    result, and it is returned to the caller as data.
+    A protocol rejection only; a tool that ran and failed is an ``isError`` result.
     """
 
     code = -32014
@@ -325,19 +211,10 @@ class UpstreamRejectedError(UpstreamError):
 
 
 class PolicyDeniedError(ACPError):
-    """A policy rule refused this call, or no rule allowed it.
+    """A policy rule refused this call, or no rule allowed it; not recoverable.
 
-    ``recoverable`` is **false**. Unlike an expired token, a denial is not a
-    transient condition the agent can fix by trying again — the principal is not
-    entitled to this tool, and retrying the identical call will be refused
-    identically. The correct agent behaviour is to stop, not to back off.
-
-    Carries the deciding rule's name in ``details`` for the audit log, or
-    ``None`` when the deny default applied. As with ``AuthenticationError``, the
-    reason is for the log rather than the caller: telling an agent *which* rule
-    denied it, or that a tool exists but is forbidden, is an oracle worth
-    denying. With catalogue filtering the tool will not appear in the catalogue
-    at all, so the honest answer to the caller is simply that no such tool is available.
+    ``details`` carries the deciding rule (``None`` for the default deny) for the
+    audit log only; telling the caller which rule denied it would be an oracle.
     """
 
     code = -32040
@@ -345,19 +222,10 @@ class PolicyDeniedError(ACPError):
 
 
 class ApprovalUnsupportedError(ACPError):
-    """The call needs a person's approval and this client cannot wait for one.
+    """The call needs approval but this client cannot receive `input_required`.
 
-    Holding a call is an `input_required` answer (ADR 0048), which exists from
-    MCP 2026-07-28. A client that connected with the older initialize
-    handshake has no `requestState` to come back with, so the result cannot
-    even be serialised to it: the SDK reported ``-32603 Handler returned an
-    invalid result``, an internal error, for what was a policy decision (ADR
-    0072). Refused before an approval is created, so an operator is never asked
-    about a call nobody can resume.
-
-    ``recoverable`` is **false**: retrying the same call from the same client
-    is refused identically. Disclosing that the call is held is not a new
-    oracle — a 2026-07-28 client is told exactly that by `input_required`.
+    Holding uses `input_required` (ADR 0048), which pre-2026-07-28 clients cannot
+    resume (ADR 0072). Raised before an approval is created; not recoverable.
     """
 
     code = -32041
@@ -365,20 +233,10 @@ class ApprovalUnsupportedError(ACPError):
 
 
 class RateLimitExceededError(ACPError):
-    """The caller has made too many requests and must slow down.
+    """The caller's per-principal token bucket is empty; wait, then retry.
 
-    ``recoverable`` is **true**, and unlike an expired token it recovers on its
-    own: the bucket refills with the passage of time, so the identical request
-    will succeed once enough of it has passed. That is genuinely different advice
-    from a policy denial — "wait, then retry" rather than "stop" — and the flag
-    is what tells the agent which. The first budget defence: a runaway
-    or compromised agent cannot spend without bound, because each principal draws
-    from a bucket that fills at a fixed rate.
-
-    Carries ``retry_after`` seconds in ``details`` — a hint, not a promise, of
-    how long until a token is available. It is safe to expose: it reveals only
-    the shape of the limit the caller is already hitting, not anything about
-    other callers or the policy.
+    ``details`` carries ``retry_after`` seconds, a hint that reveals only the
+    caller's own limit.
     """
 
     code = -32050
@@ -386,18 +244,10 @@ class RateLimitExceededError(ACPError):
 
 
 class QuotaExceededError(ACPError):
-    """The caller has used up their allowance for the current window.
+    """The caller has used up their allowance for the current window; recoverable.
 
-    ``recoverable`` is **true**, like a rate-limit error, but the wait is longer
-    and coarser: not "a token will refill in a moment" but "your quota resets when
-    this window ends". The identical call succeeds once the window rolls over.
-    Where the rate limiter stops a fast flood, the quota stops a slow drain that
-    never trips the rate limiter but would still run up unbounded spend across the
-    window.
-
-    Carries ``retry_after`` seconds — the time until the window resets — in
-    ``details``. Safe to expose: it describes only the window the caller is
-    already in, nothing about other callers or the size of anyone else's budget.
+    ``details`` carries ``retry_after``, the seconds until the caller's own window
+    resets.
     """
 
     code = -32051
@@ -405,25 +255,11 @@ class QuotaExceededError(ACPError):
 
 
 class AuditUnavailableError(ACPError):
-    """This call could not be recorded, so it was not made.
+    """This call could not be audited, so it was not made.
 
-    The fail-closed half of the audit record. An audit log that stops recording
-    while the gateway keeps serving is worse than no audit log, because the record then
-    *asserts by omission* that nothing happened during the window somebody will
-    eventually ask about. So an unwritable record refuses the call, unless a
-    deployment has deliberately said otherwise with ``ACP_AUDIT_REQUIRED=false``.
-
-    ``recoverable`` is **true**, and honestly so: a full disk or a transient I/O
-    error is a condition that gets fixed, and the identical call will succeed
-    afterwards. "Wait and retry" is the correct agent behaviour, unlike a policy
-    denial where the correct behaviour is to stop.
-
-    **The wire message names nothing.** A caller told "the audit log is down"
-    has learned which subsystem to attack in order to stop being recorded, and
-    that is a strictly more valuable thing to know than the fact they were
-    refused. The reason goes to the operational log at ERROR and to a metric —
-    which is also the only place it *can* go, since the sink that would normally
-    record it is the thing that just failed.
+    Disabled by ``ACP_AUDIT_REQUIRED=false``. Recoverable. The wire message names
+    nothing, so callers cannot learn which subsystem to attack; the reason goes to
+    the ERROR log and a metric.
     """
 
     code = -32060
@@ -431,16 +267,10 @@ class AuditUnavailableError(ACPError):
 
 
 class StateStoreUnavailableError(ACPError):
-    """The shared store for approvals or budgets could not be reached in time.
+    """The approval or budget store could not be reached in time.
 
-    Raised instead of the client library's own error so that the request path
-    fails **closed and legibly** (ADR 0070): a call whose budget could not be
-    charged, or whose approval could not be read, is refused with a code the
-    agent can act on rather than served unchecked or left hanging on a socket
-    with no timeout. ``recoverable`` is true in the sense that matters to the
-    agent — the store comes back, the identical call then succeeds — and the
-    wire message names nothing about which store or where, for the reason
-    `AuditUnavailableError` gives.
+    The call fails closed with a recoverable code (ADR 0070); the wire message
+    names no store, as with `AuditUnavailableError`.
     """
 
     code = -32070

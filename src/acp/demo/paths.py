@@ -1,16 +1,8 @@
 """The two ways the model-driven agent reaches its tools.
 
-**Direct** is the agent wired straight to the upstreams: no authentication, no
-policy, no screening, no approval and no record. It uses this project's own
-`UpstreamClient`, the transport the gateway uses to reach the same servers, so
-what differs between the paths is the gateway and nothing else. The catalogue
-is shown to the model under the gateway's qualified names (ADR 0003), so both
-paths offer the model the same tool names and the same document can name them.
-
-**Through the gateway** uses the official MCP Python client (ADR 0072), as an
-agent built on the SDK would. A held call is surfaced as held and not retried:
-there is no operator in a demo run, and an agent that kept asking would only
-be asking the gateway the same question.
+Direct uses the gateway's own `UpstreamClient` with no controls, exposing tools under the
+qualified names (ADR 0003) so the only difference is the gateway. Through the gateway uses the
+official MCP client (ADR 0072); a held call is reported as held, not retried.
 """
 
 from __future__ import annotations

@@ -1,9 +1,6 @@
-"""A generic factory for building a mock MCP upstream as a Starlette ASGI app.
+"""Factory for a mock MCP upstream as a Starlette app; protocol and chaos handling live here.
 
-Each mock server is just a name plus a list of ``MockTool`` definitions — see
-``mock_a.py`` and ``mock_b.py`` for the two concrete servers. All the protocol
-and chaos handling lives here, once, so the two servers stay a declarative list
-of tools and nothing else.
+Concrete servers (``mock_a.py``, ``mock_b.py``) are just a name and a list of ``MockTool``.
 """
 
 from __future__ import annotations
@@ -61,20 +58,10 @@ from acp.upstream.envelope import (
 )
 
 CATALOGUE_TTL_MS = 60_000
-"""What these mocks advertise on `tools/list`, so caching is observable.
-
-A real upstream picks this from how often its catalogue actually changes. Sixty
-seconds is short enough that a demo does not have to wait around and long enough
-that the second request in a burst is obviously a cache hit.
-"""
+"""The `tools/list` TTL these mocks advertise, so caching is observable in a demo."""
 
 ToolHandler = Callable[[dict[str, Any]], CallToolResult]
-"""A deterministic function from tool arguments to a result.
-
-Deliberately synchronous: mock tool logic has no I/O, and keeping handlers sync
-means every test can assert on output without an event loop of its own beyond
-the one already driving the request.
-"""
+"""A deterministic, synchronous function from tool arguments to a result."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,39 +84,21 @@ def _json_response(payload: JsonRpcResponse) -> JSONResponse:
 
 
 async def _disconnect_stream() -> Any:  # AsyncIterator[bytes], typed loosely for Starlette
-    """Yield one partial chunk, then blow up.
-
-    Starlette's ``StreamingResponse`` has already sent HTTP headers by the time
-    the second ``yield`` is reached, so raising here reproduces a connection
-    that dies mid-body rather than one that never starts.
-    """
+    """Yield a partial chunk then raise, after headers are sent, simulating a mid-body drop."""
     yield b'{"jsonrpc": "2.0", "id": 1, "result": {"chaos": "disconnect'
     raise Disconnected
 
 
 def _apply_oversized(result: dict[str, Any], byte_count: int) -> dict[str, Any]:
-    """Inflate a result payload past any reasonable size limit.
-
-    Appended as an extra key rather than mutating existing fields, so this
-    works identically for a ``tools/list`` result and a ``tools/call`` result
-    without either method needing chaos-specific logic.
-    """
+    """Inflate any result by adding a filler key."""
     return {**result, "_chaos_filler": oversized_text(byte_count)}
 
 
 def unverified_claims(token: str) -> dict[str, Any]:
-    """The payload of a JWT, decoded and emphatically *not* verified.
+    """A JWT's payload, decoded but *not* verified; ``{}`` if undecodable.
 
-    Test infrastructure, in a package the production image does not contain
-    (ADR 0014). A mock upstream has no business validating anything — that is
-    the gateway's job, and a mock that verified signatures would be a second
-    implementation of the thing under test, agreeing with the first for reasons
-    nobody could check.
-
-    What this is for is the only question an upstream can answer that the
-    gateway cannot: *which* credential actually arrived. `sub`, `aud` and `azp`
-    from here are what prove the token on the wire is the exchanged one and not
-    the caller's.
+    Test-only (not in the production image, ADR 0014). Shows which credential arrived
+    (`sub`, `aud`, `azp`), proving it is the exchanged token, not the caller's.
     """
     try:
         segment = token.split(".")[1]
@@ -141,21 +110,10 @@ def unverified_claims(token: str) -> dict[str, Any]:
 
 
 class SeenCredential:
-    """What the last ``tools/call`` carried, so a test outside the process can look.
+    """The credential the last ``tools/call`` carried, for out-of-process tests.
 
-    ``tools/call`` only, because the gateway's health prober issues a
-    credential-less ``tools/list`` against every upstream every few seconds. If
-    probes were recorded too, a smoke test that calls a tool and then reads this
-    would race the prober — and lose whenever the tool call was answered from
-    the gateway's result cache, which never reaches this process at all. The
-    question this answers is "what did the last *call* arrive with", and a probe
-    is not a call.
-
-    Deliberately holds the decoded claims and a *fingerprint* rather than the
-    token. A demo that prints a working bearer token to a terminal, into a log,
-    or onto a screenshot has taught the reader something they should not have,
-    and the interesting part was never the token — it is whose it is and who it
-    was minted for.
+    Ignores health-probe ``tools/list`` requests, which would race the test. Stores claims and
+    a fingerprint, never the token itself.
     """
 
     def __init__(self) -> None:
@@ -178,8 +136,7 @@ class SeenCredential:
         audience = self.claims.get("aud")
         return {
             "present": self.present,
-            # Enough to prove two requests carried *different* credentials, and
-            # useless to anybody who intercepts it.
+            # Distinguishes credentials without revealing them.
             "fingerprint": self.fingerprint,
             "subject": self.claims.get("sub"),
             "audience": audience if isinstance(audience, list) else [audience] if audience else [],
@@ -192,12 +149,9 @@ class SeenCredential:
 
 
 def build_mock_app(server_name: str, tools: list[MockTool]) -> Starlette:
-    """Build a mock MCP upstream exposing ``tools`` over a single ``/mcp`` route.
+    """Build a mock upstream serving ``tools`` on ``/mcp`` (plus ``/debug/credential``).
 
-    Speaks JSON-RPC 2.0 with the MCP tool primitives (``tools/list``,
-    ``tools/call``). Every request is first checked for a chaos override —
-    see ``acp.mocks.chaos`` — which, when active, short-circuits normal
-    handling entirely.
+    An active chaos mode (``acp.mocks.chaos``) overrides normal handling.
     """
     tools_by_name = {t.name: t for t in tools}
 
@@ -212,8 +166,7 @@ def build_mock_app(server_name: str, tools: list[MockTool]) -> Starlette:
             return StreamingResponse(_disconnect_stream(), media_type="application/json")
 
         if mode is ChaosMode.MALFORMED:
-            # Deliberately not valid JSON: a real upstream bug looks like this,
-            # not like a well-formed error the client can parse cleanly.
+            # Deliberately invalid JSON, like a real upstream bug.
             return Response(
                 content='{"jsonrpc": "2.0", "id": 1, "result": {truncated',
                 media_type="application/json",
@@ -270,10 +223,7 @@ def build_mock_app(server_name: str, tools: list[MockTool]) -> Starlette:
     async def credential(_request: Request) -> Response:
         """What credential the last ``tools/call`` carried.
 
-        The only vantage point from which the no-passthrough invariant is
-        observable from *outside* the gateway process: everything else in this
-        repository asserts it by inspecting a request the gateway built, which
-        is the same code path being tested.
+        The only view of the no-passthrough invariant from outside the gateway process.
         """
         return JSONResponse(seen.as_json())
 
@@ -288,25 +238,12 @@ def build_mock_app(server_name: str, tools: list[MockTool]) -> Starlette:
 def validate_envelope(
     rpc_request: JsonRpcRequest, headers: Mapping[str, str]
 ) -> JsonRpcResponse | None:
-    """Reject anything a real MCP server would reject. ``None`` means valid.
+    """Reject what a real 2026-07-28 MCP server would; ``None`` means valid.
 
-    This exists because of a bug the whole test suite missed. The gateway sent
-    a `_meta` envelope of its own invention, these mocks accepted it, and 297
-    passing tests said nothing — a mock that agrees with your client proves only
-    that you wrote both. So the mocks now enforce the 2026-07-28 rules, and
-    `tests/integration/test_spec_conformance.py` checks these rules against the
-    SDK's own validator so this implementation cannot drift either.
-
-    ADR 0004 still holds: *responses* stay hand-rolled, because chaos modes have
-    to emit genuinely malformed output that a real server would never produce.
-    Validating *requests* strictly is the opposite concern and pulls the other
-    way.
+    `tests/integration/test_spec_conformance.py` checks these rules against the SDK's own
+    validator. Responses stay hand-rolled for chaos (ADR 0004).
     """
-    # Folded to lowercase rather than trusting the caller's mapping to be
-    # case-insensitive. Starlette's `Headers` is; a plain dict is not, and a
-    # validator that quietly passes or fails depending on which one it was
-    # handed is a trap for whoever calls it next. HTTP field names are
-    # case-insensitive by definition, so this is the correct reading anyway.
+    # Fold case ourselves: a plain dict, unlike Starlette's `Headers`, is case-sensitive.
     folded = {name.lower(): value for name, value in headers.items()}
     params = rpc_request.params or {}
     meta = params.get("_meta")
@@ -326,10 +263,7 @@ def validate_envelope(
             f"params._meta is missing the required envelope key(s): {', '.join(missing)}",
         )
 
-    # The headers are checked against the body, not merely for presence. That
-    # is the point of them: a proxy authorizes on the cheap header, so a server
-    # that let the body say something else would be authorizing one method and
-    # executing another.
+    # Headers must match the body: proxies authorize on headers.
     if folded.get(MCP_PROTOCOL_VERSION_HEADER.lower()) != meta[REQUIRED_META_KEYS[0]]:
         return error_response(
             rpc_request.id,
@@ -364,10 +298,7 @@ def _dispatch(rpc_request: JsonRpcRequest, tools_by_name: dict[str, MockTool]) -
     """Route a validated request to the right MCP method handler."""
     match rpc_request.method:
         case "tools/list":
-            # `apply_drift` is a no-op unless MOCK_SCHEMA_DRIFT is set, and is
-            # applied here rather than at startup so the catalogue can be
-            # changed under a running gateway — which is the situation drift
-            # detection exists for and the only honest way to demonstrate it.
+            # Per request (no-op unless MOCK_SCHEMA_DRIFT), so drift can start mid-run.
             definitions = apply_drift([t.definition() for t in tools_by_name.values()])
             return JsonRpcResponse(
                 id=rpc_request.id,
@@ -400,12 +331,7 @@ def _dispatch_tools_call(
 
 
 def _run_tool(tool: MockTool, arguments: dict[str, Any]) -> CallToolResult:
-    """Execute a tool handler, converting a raised exception into isError.
-
-    Mirrors the real MCP convention (see ``jsonrpc.py`` docstring): execution
-    failures are reported *inside* a successful JSON-RPC result, not as a
-    JSON-RPC error, because the request itself was well-formed.
-    """
+    """Run a handler; a raised exception becomes an ``isError`` result, per MCP convention."""
     try:
         return tool.handler(arguments)
     except Exception as exc:  # deliberately broad: any handler failure becomes isError

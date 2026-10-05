@@ -1,9 +1,4 @@
-"""Making the gateway's behaviour visible from outside it.
-
-Structured logging, tracing and metrics live here together because they answer
-the same question at different resolutions — what happened, in what order, and
-how often — and because they all depend on the same request-scoped context.
-"""
+"""Structured logging, tracing and metrics, sharing one request-scoped context."""
 
 from acp.observability.context import bind, new_request_id, request, request_id
 from acp.observability.log import (

@@ -1,29 +1,8 @@
-"""Schema drift detection: noticing when an upstream's tools change under you.
+"""Schema drift detection: noticing when an upstream's tools change (ADR 0013).
 
-An MCP server can change a tool's description or its argument schema at any
-moment, and nothing in the protocol announces it. There is no version on a tool,
-no ``ETag`` on a catalogue, and no event a client can subscribe to. The gateway
-finds out the same way everybody else does — by asking again and reading the
-answer carefully.
-
-Three things break quietly when that happens, and they are worth separating
-because only the first is obvious.
-
-An argument schema that gains a required field breaks every caller written
-against the old one. That is the ordinary correctness case.
-
-A tool nobody has written policy for appears in the catalogue. Deny-by-default means it cannot be
-called, which is correct and is also why nobody would notice — the alert is what makes the gap
-actionable instead of invisible.
-
-And a description changes. The description is prose that goes straight into the
-agent's prompt, which makes it the most powerful field in the entire protocol and
-the only one an upstream can rewrite without breaking a single client. A server
-that has behaved impeccably for six months and then appends a sentence beginning
-"Before using any other tool…" has performed the MCP rug pull. No schema moved,
-no test failed, no call errored. This module is the thing that says so.
-
-See ``docs/decisions/0013-schema-drift-is-a-security-control.md``.
+MCP announces no catalogue changes, so the gateway re-fetches and compares against a
+committed baseline. It flags schema changes that break callers, new tools without policy,
+and description changes (the "rug pull", since descriptions go straight into the prompt).
 """
 
 from acp.schema.detector import DriftDetector

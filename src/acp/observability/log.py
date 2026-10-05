@@ -1,23 +1,7 @@
-"""Structured logging, built on the standard library.
+"""Structured logging on the standard library, without structlog (ADR 0007).
 
-Two decisions shape this module, and both are argued in ADR 0007.
-
-**Events, not sentences.** A log line is ``logger.info("upstream.call",
-extra={...})`` rather than ``logger.info("called %s on %s in %dms", ...)``. The
-message becomes a stable identifier you can group and alert on, and everything
-variable becomes a field you can filter by. Sentences are pleasant to read and
-impossible to query: ``upstream mock-a failed during tools/list`` cannot be
-counted per upstream without a regular expression that breaks the first time
-someone rewords the message.
-
-**No structlog.** Every library in this stack — httpx, uvicorn, the MCP SDK —
-logs through ``logging``, so a bridge from the standard library is needed
-whatever else is chosen. Building on it directly means one pipeline instead of
-two and one dependency fewer, at the cost of the ~150 lines below.
-
-The pieces: a ``Filter`` that merges request-scoped context into every record,
-a formatter that renders JSON, a formatter that renders something a human can
-read at a terminal, and a redaction pass that runs over both.
+Messages are stable event names (``logger.info("upstream.call", extra={...})``) with variable
+data in fields. Provides a context filter, JSON and console formatters, and `redact`.
 """
 
 from __future__ import annotations
@@ -54,22 +38,13 @@ _SENSITIVE_FRAGMENTS: Final = (
     "session_key",
     "signature",
 )
-"""Matched as *substrings* of a normalised key, deliberately.
+"""Matched as substrings of a normalised key, so `refresh_token` or `x-api-key` are caught.
 
-Over-redacting is the correct direction to fail. A false positive costs one
-confusing debugging session; a false negative writes a live credential into a
-log aggregator that a dozen people and three vendors can read, and that cannot
-be taken back. `refresh_token`, `x-api-key` and `clientSecret` all have to be
-caught without anyone remembering to add them.
+Over-redaction is the intended failure direction.
 """
 
 _MAX_DEPTH: Final = 6
-"""Structures deeper than this are summarised rather than walked.
-
-Logging is not the place to discover that a tool returned a deeply nested or
-self-referential payload. A recursion limit blown inside a log call takes down
-the request it was trying to describe.
-"""
+"""Deeper structures are summarised, so a nested or cyclic payload cannot blow recursion."""
 
 
 def _is_sensitive(key: object) -> bool:
@@ -83,12 +58,7 @@ def _is_sensitive(key: object) -> bool:
 
 
 def redact(value: object, *, _depth: int = 0) -> object:
-    """Replace secret-shaped values anywhere in a structure.
-
-    Walks mappings and sequences because secrets are rarely top level — an
-    upstream's headers arrive as a nested dict, and a request dump nests further
-    still.
-    """
+    """Replace values under secret-shaped keys anywhere in nested mappings and sequences."""
     if _depth >= _MAX_DEPTH:
         return f"<truncated {type(value).__name__}>"
 
@@ -98,8 +68,7 @@ def redact(value: object, *, _depth: int = 0) -> object:
             for key, item in value.items()
         }
     if isinstance(value, str | bytes):
-        # Ahead of the Sequence check: a string is a sequence of strings, and
-        # walking it would produce a list of characters.
+        # Before the Sequence check, or a string would become a list of characters.
         return value
     if isinstance(value, Sequence):
         return [redact(item, _depth=_depth + 1) for item in value]
@@ -138,31 +107,16 @@ _RESERVED: Final = frozenset(
         "threadName",
     }
 )
-"""Attributes the logging module puts on every record itself.
-
-Anything on a record that is *not* in this set arrived via ``extra=`` and is
-therefore one of our fields. Diffing against a known set is the only way to
-recover them — the standard library offers no accessor.
-"""
+"""Standard `LogRecord` attributes; anything else on a record came from ``extra=``."""
 
 
 class ContextFilter(logging.Filter):
-    """Copies request-scoped context onto each record as it is emitted.
-
-    A filter rather than a formatter concern, because the context has to be read
-    in the task that *logged* the line. Formatting can happen later, on a
-    different thread if a queue handler is added, by which point the contextvars
-    of the originating task are long gone.
-    """
+    """Copies request context onto each record in the logging task (formatting may run later)."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        # Trace IDs first, request context second, so an explicitly bound
-        # `trace_id` (a test, or a replayed request) still wins — the rule
-        # everywhere here is that the more specific source beats the more
-        # ambient one.
+        # Bound context overrides trace IDs; an explicit `extra=` overrides both.
         for key, value in {**tracing.trace_ids(), **context.current()}.items():
             if not hasattr(record, key):
-                # An explicit `extra=` on the call site wins over both.
                 setattr(record, key, value)
         return True
 
@@ -194,21 +148,12 @@ class JsonFormatter(logging.Formatter):
         if record.stack_info:
             payload["stack"] = self.formatStack(record.stack_info)
 
-        # `default=str` so an unserialisable value degrades to its repr instead
-        # of raising. A logging call that throws is strictly worse than a log
-        # line that is slightly lossy — it takes down the request it was
-        # describing, and usually in the error path where the log mattered most.
+        # `default=str`: a lossy line beats a logging call that raises mid-request.
         return json.dumps(redact(payload), default=str, separators=(",", ":"))
 
 
 class ConsoleFormatter(logging.Formatter):
-    """Human-readable, for a developer watching a terminal.
-
-    The same fields, laid out for eyes rather than for a parser. Worth the extra
-    class: JSON on a terminal is unreadable enough that people disable
-    structured logging locally and then never see the fields they will have to
-    rely on in production.
-    """
+    """The same fields, human-readable, for a terminal."""
 
     def format(self, record: logging.LogRecord) -> str:
         stamp = datetime.fromtimestamp(record.created, tz=UTC).strftime("%H:%M:%S.%f")[:-3]
@@ -231,13 +176,7 @@ QUIET_LOGGERS: Final = {
     "httpx": logging.WARNING,
     "httpcore": logging.WARNING,
 }
-"""Third-party loggers turned down to WARNING.
-
-httpx logs a line per request at INFO. The gateway makes one upstream request
-per tool call and several per catalogue fetch, so at INFO the useful signal is
-outnumbered several to one by an echo of what the gateway is already reporting
-with more context.
-"""
+"""Third-party loggers turned down to WARNING; httpx's per-request INFO lines duplicate ours."""
 
 _HANDLER_NAME: Final = "acp"
 
@@ -255,15 +194,9 @@ def formatter_for(fmt: str) -> logging.Formatter:
 
 
 def configure_logging(level: str = "INFO", fmt: str = "auto") -> None:
-    """Install the gateway's logging pipeline on the root logger.
+    """Install the gateway's stderr logging handler on the root logger.
 
-    Idempotent: it replaces its own handler rather than adding another. Calling
-    it twice is easy to do — a CLI entry point and a test fixture both want to —
-    and the symptom of getting it wrong is every line appearing twice, which
-    people tend to diagnose as a bug in the code doing the logging.
-
-    Writes to stderr, not stdout. Stdout belongs to the program's actual output;
-    a gateway that mixes logs into it cannot be piped anywhere useful.
+    Idempotent: replaces its own handler rather than adding a second one.
     """
     root = logging.getLogger()
     for existing in [h for h in root.handlers if h.name == _HANDLER_NAME]:

@@ -1,46 +1,10 @@
-"""Budgets every replica charges against the same bucket and the same tally.
+"""Budgets shared by every replica in Redis, so N gateways do not grant N times the limit.
 
-The in-memory limiter and quota are per process, and the threat model
-(section 6.6) names the consequence: a replicated fleet multiplies every limit
-by the number of processes. Three gateways behind one load balancer hand out
-three bursts and three daily quotas to the same payer, and which one a call
-drains is up to the balancer. This module keeps one bucket and one tally per
-payer in Redis, so the limit configured is the limit enforced, however many
-gateways enforce it.
-
-**One script, one round trip, atomic.** `charge` runs a Lua script that
-refills the bucket to ``now``, reads the window's tally, checks *both* against
-the cost, and only then debits *both* — ADR 0044 §3's "check both, then debit
-both", which on one process was four calls with nothing awaited between them
-and across replicas is only true inside a script. Redis runs scripts without
-interleaving, so two replicas charging the same payer at the same instant are
-serialised by the server, not raced by the clients. ADR 0066 chose
-`WATCH`/`MULTI` over Lua for approvals; the trade flips here, and ADR 0067
-says why: an approval key moves a few times in its life, a payer's bucket
-moves on every call, and an optimistic transaction on a hot key is a retry
-loop under exactly the load a rate limiter exists for.
-
-**The arithmetic is the in-memory arithmetic.** The bucket is `TokenBucket`'s:
-start full, refill at the rate up to the capacity, never go backwards when
-the clock does. The window is `QuotaCounter`'s: clock-aligned,
-``floor(now / window)``, reset at absolute boundaries. The two Python classes
-remain the specification, and the contract tests run the same cases against
-both keepers so that they cannot drift apart unnoticed.
-
-**One clock.** The in-memory limiter refills on a monotonic clock so that a
-wall-clock step cannot hand out or withhold burst. Replicas share no monotonic
-clock, so this keeper refills on the wall clock the caller passes — the one
-the quota window already used. A step on one replica's clock misgrants or
-withholds at most one capacity, once, on that replica; the elapsed-time guard
-still never removes tokens for a backwards step.
-
-**Time is the bound.** A bucket key expires when the bucket would be full
-again, because a missing bucket *is* a full one — that is what "start full on
-first sight" means in a store. A tally key is the window index, and expires
-when the window ends. Neither needs `max_principals`: a payer who is never
-seen again costs Redis memory for one refill or one window, and nobody is
-evicted to make room, which was the eviction-order argument of
-`RateLimiter._bucket` with nothing left to defend.
+`charge` runs one Lua script that checks both budgets then debits both (ADR 0044 §3);
+Redis serialises scripts, and Lua beats `WATCH`/`MULTI` on hot keys (ADR 0067).
+`TokenBucket` and `QuotaCounter` remain the spec, and contract tests run both keepers.
+The bucket refills on the wall clock, as replicas share no monotonic one. Keys expire
+when the bucket would be full or the window ends, so no `max_principals` is needed.
 """
 
 from __future__ import annotations
@@ -125,21 +89,15 @@ def rate_key(payer: str) -> str:
 
 
 def quota_key(payer: str, now: float, window_seconds: float) -> str:
-    """The tally for the window containing ``now`` — the index is in the key,
-    so a window's spend is a value that expires, not a field that resets."""
+    """Return the tally key for the window containing ``now``; the window index is in the key."""
     return f"{QUOTA_PREFIX}{payer}:{math.floor(now / window_seconds)}"
 
 
 class RedisBudgets:
     """`Budgets`, against a Redis every replica shares.
 
-    ``capacity`` and ``refill_per_second`` describe the rate limit; ``None``
-    for ``capacity`` means there is no rate limit. ``limit`` and
-    ``window_seconds`` describe the quota; ``None`` for ``limit`` means there
-    is none. The values travel with every charge rather than being stored, so
-    a configuration change takes effect at the next call and two replicas
-    with different settings are a misconfiguration this store cannot hide —
-    whichever answers, answers with its own numbers.
+    ``capacity=None`` means no rate limit; ``limit=None`` means no quota. Settings are
+    sent with every charge, not stored, so each replica applies its own numbers.
     """
 
     def __init__(
@@ -163,7 +121,7 @@ class RedisBudgets:
 
     @classmethod
     def from_url(cls, url: str, **kwargs: Any) -> RedisBudgets:
-        """With the timeouts and pool every store here has (`acp.redis_url`)."""
+        """Build with the shared timeouts and pool (`acp.redis_url`)."""
         return cls(client_for(url), **kwargs)
 
     @property
@@ -175,12 +133,7 @@ class RedisBudgets:
         return self._limit
 
     async def ping(self) -> None:
-        """Refuse to start a gateway whose budgets it cannot reach.
-
-        A configured, unreachable store would refuse every charged call with
-        a connection error dressed as an internal failure — or, worse, be
-        made to fail open. Startup is where somebody is watching.
-        """
+        """Raise ``ConfigurationError`` at startup if the store is unreachable."""
         try:
             await self._redis.ping()
         except Exception as exc:
@@ -194,9 +147,7 @@ class RedisBudgets:
     async def charge(self, payer: str, cost: float, *, mono: float, wall: float) -> None:
         """Check both budgets and debit both, in one step on the server.
 
-        ``mono`` is accepted for the protocol's sake and unused: replicas share
-        no monotonic clock, so the bucket refills on ``wall`` (module
-        docstring).
+        ``mono`` is unused: the bucket refills on ``wall`` (see module docstring).
         """
         del mono
         async with unavailable("budget"):

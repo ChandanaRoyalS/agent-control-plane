@@ -1,16 +1,8 @@
 """Process lifecycle: building the gateway from config and taking it down cleanly.
 
-Upstream clients own connection pools, and a pool that is never closed leaks
-sockets until the process dies. So their lifetime is bound to a context manager
-rather than left to garbage collection.
-
-**On draining.** ``aclose`` closes idle connections and waits for in-flight
-requests on that pool to finish. It does not stop *new* requests arriving —
-that is the server's job, and uvicorn already does it: on ``SIGTERM`` it stops
-accepting, lets in-flight requests complete, then returns from ``serve()``, at
-which point this context manager's ``finally`` runs. The ordering matters and
-is the reason the clients are managed *around* the server rather than inside
-the ASGI app's own lifespan.
+Upstream pools are closed by a context manager wrapped around the server, not the
+ASGI lifespan: uvicorn drains in-flight requests on ``SIGTERM`` and returns from
+``serve()``, and only then does ``aclose`` run.
 """
 
 from __future__ import annotations
@@ -66,18 +58,13 @@ logger = logging.getLogger(__name__)
 def build_drift_detector(baseline_file: Path, known: Sequence[str]) -> DriftDetector:
     """Load the committed baseline, tolerating its absence and its corruption.
 
-    The only place in this project where a bad file on disk does *not* stop the
-    process. Configuration failures are fatal by design — a gateway that starts
-    with a broken policy has already failed open. A schema baseline is the other
-    kind of thing: it is a monitor, and a monitor that can prevent the gateway
-    from serving is a bigger risk than the one it exists to reduce. So a
-    corrupt baseline is logged at ERROR and treated as no baseline, which
-    reports every upstream as unbaselined — noisy, obvious, and not an outage.
+    Unlike config errors this is not fatal, since a monitor must not stop the
+    gateway: a corrupt baseline is logged at ERROR and treated as absent.
     """
     try:
         baseline = SchemaSnapshot.load(baseline_file)
     except ConfigurationError as exc:
-        logger.error(  # noqa: TRY400 — the traceback adds nothing; the message is the point
+        logger.error(  # noqa: TRY400 — the traceback adds nothing
             "schema.baseline_unreadable",
             extra={"path": str(baseline_file), "error": exc.message},
         )
@@ -122,16 +109,13 @@ async def gateway_from_configs(
 ) -> AsyncIterator[Starlette]:
     """Build the ASGI app, and close every upstream pool on the way out.
 
-    Clients are created one at a time and torn down in reverse on failure, so a
-    bad upstream part-way through startup does not leak the pools already
-    opened before it.
+    Clients are opened one at a time and closed in reverse, so a failure part-way
+    through startup leaks no pool.
     """
     clients: list[Upstream] = []
     try:
         for config in upstreams:
-            # Resolved before this point, so a missing secret is a startup
-            # failure rather than a request that reaches an upstream with no
-            # credential. `None` for every upstream that exchanges instead.
+            # Secrets are resolved at startup; `None` for upstreams that exchange.
             clients.append(
                 await connect_upstream(config, credentials, (secrets or {}).get(config.name))
             )
@@ -143,10 +127,7 @@ async def gateway_from_configs(
             },
         )
 
-        # Drift detection rides on the health prober's fetch (see
-        # `acp.schema.detector`), so it needs one to ride on. Asking for it
-        # without probing is a configuration that cannot do what it says, and
-        # saying so beats silently detecting nothing.
+        # Drift detection uses the health prober's fetch, so warn if probing is off.
         detector: DriftDetector | None = None
         if detect_drift and probe_health:
             detector = build_drift_detector(
@@ -157,18 +138,9 @@ async def gateway_from_configs(
             logger.warning("schema.drift_detection_inert", extra={"reason": "probing disabled"})
 
         def _watch_spend(payer: str, tool: str, cost: float) -> None:
-            """A budget was drawn. The trace console's fifth source.
+            """Publish a budget draw to the console as `observed`, since the chain holds no totals.
 
-            `observed`, and this one is worth being precise about *why*. The
-            chain records the calls a running total could be computed from, and
-            never the total — a total is a thing you derive, not a fact that
-            happened. Publishing it as `recorded` would put a number on screen
-            that no entry in the chain contains.
-
-            `payer` is the tenant-qualified account, decoded by the module that
-            encodes it (`acp.budget.parties`) rather than split on a comma here
-            — a subject containing one is exactly what its list encoding exists
-            to make harmless.
+            `payer` is decoded with `acp.budget.parties`, never split by hand.
             """
             if console is None:
                 return
@@ -185,24 +157,14 @@ async def gateway_from_configs(
             )
 
         def _watch_health(record: HealthRecord, previous: UpstreamHealth) -> None:
-            """An upstream's health changed.
-
-            `observed`, not recorded: nobody asked for this and no decision was
-            made about a call, so it is not an auditable fact — and the console
-            renders it differently so a viewer can tell (ADR 0056).
-            """
+            """Publish a health change to the console as `observed`, not audited (ADR 0056)."""
             if console is None:
                 return
             console.publish(
                 observed(
                     "upstream",
                     "health.changed",
-                    # `time.time()`, and deliberately NOT `record.checked_at`.
-                    # Health's clock defaults to `time.monotonic`, which counts
-                    # from an arbitrary origin — rendering it on the console's
-                    # timeline beside audit's `time.time` would put every health
-                    # event somewhere near 1970. Two clocks, one timeline, and
-                    # only one of them means anything to a browser.
+                    # Not `record.checked_at`, which is monotonic, not wall-clock.
                     time.time(),
                     upstream=record.upstream,
                     detail={
@@ -225,9 +187,7 @@ async def gateway_from_configs(
             else None
         )
         if validator is None:
-            # Said once, at startup, at WARNING. The other half of making this
-            # impossible to miss is that every request then logs
-            # `principal: anonymous` — see `acp.identity.asgi`.
+            # Each request then logs `principal: anonymous` (`acp.identity.asgi`).
             logger.warning(
                 "auth.disabled",
                 extra={"reason": "no identity provider configured", "principal": "anonymous"},
@@ -253,35 +213,21 @@ async def gateway_from_configs(
             audit=audit,
             charged=_watch_spend,
         )
-        # Attached rather than yielded, so the signature every existing caller
-        # and test depends on is unchanged. The probe loop itself is started by
-        # whoever owns a task group — deliberately not here: starting a
-        # long-lived task inside an async generator puts its cancel scope in a
-        # different task from the one that exits the generator, which is the
-        # classic way to get a cancellation that fires in the wrong place.
+        # Read by `acp serve` for the admin app. The probe loop is started there,
+        # not here: a task started inside an async generator gets a cancel scope
+        # in the wrong task.
         app.state.health = monitor
         app.state.schema_drift = detector
-        # Read by `acp serve` to mount the operator channel on the admin
-        # listener. Attached rather than returned for the same reason the other
-        # two are: the signature every existing caller depends on is unchanged.
         app.state.approvals = approvals
         app.state.audit = audit
-        # The validator for *operator* tokens — the request path's issuers,
-        # re-targeted at the operator audience (ADR 0059). Shares the key
-        # caches with `validator`, so it is never closed on its own.
+        # Operator-audience validator (ADR 0059); shares key caches with
+        # `validator`, so it is never closed on its own.
         app.state.operator_validator = operator_validator
-        # Read by `acp serve` to mount the trace console on the admin
-        # listener, beside the operator channel and behind the same credential.
-        #
-        # Passed in rather than built here, because the hub has to reach the
-        # `AuditLog` before this function is called — that is what publishes to
-        # it. Not handed to `build_app`: the console is an admin-side concern
-        # and the gateway app has no business knowing one exists.
+        # Built by the caller because `AuditLog` publishes to it; admin-side only.
         app.state.console = console
         yield app
     finally:
-        # Reverse order, and every close attempted even if one raises — a
-        # failure closing one pool must not strand the others open.
+        # Reverse order; every close is attempted even if one raises.
         for client in reversed(clients):
             try:
                 await client.aclose()
@@ -293,17 +239,11 @@ async def gateway_from_configs(
 
 
 SAFETY_CONTROLS: Final = ("authentication", "audit", "firewall")
-"""The controls whose absence the startup banner names at WARNING. The others
-are configuration choices; these three are the difference between a gateway
-and a proxy (ADR 0071)."""
+"""Controls whose absence the startup banner names at WARNING (ADR 0071)."""
 
 
 def control_states(settings: GatewaySettings) -> dict[str, str]:
-    """Every control the gateway has, and whether these settings turn it on.
-
-    One place that answers "what is this deployment actually running", read
-    from the settings alone so it can be printed before anything is built.
-    """
+    """Every control and its state, from settings alone so it prints before building."""
     operator = (
         "jwt"
         if settings.approval_operator_audience
@@ -327,14 +267,7 @@ def control_states(settings: GatewaySettings) -> dict[str, str]:
 
 
 def report_controls(settings: GatewaySettings) -> dict[str, str]:
-    """Log what is on and what is off, every start (ADR 0071).
-
-    One INFO line with the whole table, so an operator can grep a single
-    event for the deployment's shape. And one WARNING line naming any of
-    the three safety controls that is off — a reviewer's finding was that a
-    bare `acp serve` ran with no audit and no firewall and said so nowhere a
-    person would look.
-    """
+    """Log the control table at INFO, and any off safety control at WARNING (ADR 0071)."""
     states = control_states(settings)
     logger.info("gateway.controls", extra={"controls": states})
     off = [name for name in SAFETY_CONTROLS if states[name] == "off"]
@@ -350,32 +283,16 @@ def report_controls(settings: GatewaySettings) -> dict[str, str]:
 
 
 def build_audit_log(settings: GatewaySettings, console: TraceHub | None = None) -> AuditLog | None:
-    """Open the audit chain, or return ``None`` when none is configured.
+    """Open the audit chain, or return ``None`` when none is configured and not required.
 
-    Presence-based on the path, like the secret store: a boolean would let a
-    deployment believe it had an audit log because a flag said `true` while the
-    path it needed was never set. There is deliberately no default path — an
-    evidentiary artifact appearing in somebody's working directory the first time
-    they run the gateway is one that gets gitignored, then forgotten.
+    Running without a chain, or with one not required, logs a WARNING every start.
 
-    **The two states are both logged, and differently.** Running without a chain
-    is a legitimate choice; running with one that is not required is a *third*
-    state, and the one worth naming loudly, because it means the gateway will
-    keep serving calls it cannot record. `ACP_AUDIT_REQUIRED=false` gets the same
-    treatment `ACP_AUTH_REQUIRED=false` gets: a warning that says what the
-    deployment has traded away, every single start.
-
-    A failure to open is fatal. Every other configuration failure in this module
-    is (a gateway that starts with a broken policy has already failed open), and
-    an unopenable audit sink is the same class: the alternative is a process that
-    serves without the record it was configured to keep.
+    Raises:
+        ConfigurationError: If no file is set while required (ADR 0071).
     """
     if settings.audit_file is None:
         if settings.audit_required:
-            # Fatal, before a port is bound — the treatment an unconfigured
-            # identity provider gets under ACP_AUTH_REQUIRED, and for the same
-            # reason (ADR 0071): the gateway would otherwise serve every call
-            # it is required not to serve unrecorded.
+            # Fatal before a port is bound, like ACP_AUTH_REQUIRED (ADR 0071).
             msg = (
                 "ACP_AUDIT_REQUIRED is set and ACP_AUDIT_FILE is not, so this "
                 "gateway would serve every call without recording it. Set "
@@ -419,15 +336,8 @@ def build_audit_log(settings: GatewaySettings, console: TraceHub | None = None) 
     )
     published = None
     if console is not None:
-        # A closure rather than handing the hub to `AuditLog`, so the audit
-        # module keeps no import of the console. Audit is what everything else
-        # depends on; an import pointing at a demo aid is the dependency
-        # pointing the wrong way, and the first thing to make the audit tests
-        # need a UI.
-        #
-        # `entry.record` and not the AuditRecord: the mapping is the REDACTED
-        # one, and it is what was hashed and written. Rendering the object would
-        # put on screen exactly the fields redaction exists to keep off disk.
+        # A closure so the audit module never imports the console. Publishes
+        # `entry.record`, the redacted mapping, never the unredacted AuditRecord.
         def published(entry: Entry) -> None:
             console.publish(from_entry(entry.seq, entry.record))
 
@@ -435,12 +345,7 @@ def build_audit_log(settings: GatewaySettings, console: TraceHub | None = None) 
 
 
 def _gated_rule_names(policy: Policy | PolicySet) -> set[str]:
-    """Every rule, in any tenant's policy, that can hold a call for a person.
-
-    Duplicate names across tenants collapse in the set, which is correct for a
-    startup log line and would be wrong for enforcement — enforcement never
-    reads this; it selects one tenant's policy and reads that.
-    """
+    """Names of rules in any tenant's policy that can hold a call; for logging only."""
     if isinstance(policy, Policy):
         return {r.name for r in policy.rules if r.effect is Effect.REQUIRE_APPROVAL}
     names = {r.name for r in policy.default.rules if r.effect is Effect.REQUIRE_APPROVAL}
@@ -452,28 +357,12 @@ def _gated_rule_names(policy: Policy | PolicySet) -> set[str]:
 def build_approval_store(
     settings: GatewaySettings, policy: Policy | PolicySet | None
 ) -> ApprovalStore | None:
-    """A store when the policy can hold a call, and nothing when it cannot.
+    """An approval store when the policy can hold a call, else ``None``.
 
-    Presence-based on the *policy* rather than on a flag, because the rule that
-    holds a call is already the statement of intent — a second switch beside it
-    could only ever be forgotten, and forgetting it means `require_approval`
-    silently fails closed on every gated call at request time rather than at
-    startup where somebody would see it.
-
-    **The loud case is a policy that gates calls with no operator channel.** The
-    gateway is then perfectly correct and completely useless: every gated call is
-    held, nothing can ever answer it, and each caller waits out the TTL and is
-    refused. That is a warning rather than a refusal to start, because a
-    replicated deployment may legitimately answer approvals from a different
-    process against a shared store (`ACP_APPROVAL_STORE_URL`, ADR 0066). What
-    it must not be is quiet.
-
-    **Which store** is decided by that one setting: a Redis every replica
-    shares when it is set, this process's memory when it is not. The Redis
-    store is returned unpinged; `gateway_from_settings` pings it before it
-    serves, so that an unreachable store refuses to start rather than holding
-    calls nobody can answer. Tests of the assembly build the store without a
-    network.
+    Warns, without refusing, when no operator channel is configured, since another
+    replica may answer via a shared store (ADR 0066). Redis when
+    `ACP_APPROVAL_STORE_URL` is set, otherwise memory; the Redis store is returned
+    unpinged and `gateway_from_settings` pings it.
     """
     if policy is None or not policy.gates_calls:
         return None
@@ -510,9 +399,7 @@ def build_approval_store(
         },
     )
     if settings.approval_operator_token and not settings.approval_operator_audience:
-        # Named at startup, every start, like `ACP_AUTH_INSECURE_ISSUER_HOSTS`:
-        # a channel on a shared secret records `shared-token` as the operator
-        # on every decision, which is the honest row and not the useful one.
+        # A shared token is audited as operator `shared-token`, naming nobody.
         logger.warning(
             "approval.shared_token_only",
             extra={
@@ -528,14 +415,10 @@ def build_approval_store(
 
 
 def build_budgets(settings: GatewaySettings) -> RedisBudgets | None:
-    """The shared keeper of rate-limit and quota state, when one is configured.
+    """The shared Redis budget store, or ``None`` (ADR 0067).
 
-    ``None`` when `ACP_BUDGET_STORE_URL` is empty — the in-memory limiter and
-    quota are built instead, as before — and also when it is set but neither
-    budget is enabled, because a store with nothing to charge is a connection
-    held for no reason. Returned unpinged, like the approval store, so the
-    assembly can be asserted without a Redis; `gateway_from_settings` pings
-    it before it serves (ADR 0067).
+    ``None`` when `ACP_BUDGET_STORE_URL` is empty (in-memory budgets are used) or
+    when no budget is enabled. Returned unpinged; `gateway_from_settings` pings it.
     """
     if not settings.budget_store_shared:
         return None
@@ -565,24 +448,11 @@ def build_budgets(settings: GatewaySettings) -> RedisBudgets | None:
 
 
 def build_firewall(settings: GatewaySettings) -> Firewall | None:
-    """Assemble the injection firewall, or ``None`` when it is switched off.
+    """Assemble the injection firewall, or ``None`` when it is off.
 
-    Two things are said out loud here, because both are configurations that look
-    like they are doing more than they are.
-
-    **Enforcing without framing.** ADR 0038's interlock: the refusal notice is
-    the gateway speaking, so it is deliberately *not* fenced — which means that
-    with framing on, an unfenced block is by construction the gateway, and with
-    framing off a hostile document can impersonate a refusal notice. The content
-    is still withheld either way, so this is a warning rather than a refusal to
-    start; a deployment can reasonably adopt the two controls in either order,
-    but it should know which half it has.
-
-    **Screening with no allowed hosts.** The URL and image detectors then report
-    *every* link and every image in every document. Nothing is withheld either
-    way — neither detector may withhold anything since the benign corpus demoted
-    them (ADR 0039) — but the finding count becomes noise, and a finding count
-    that is mostly noise is how a log stops being read.
+    Warns when enforcing without provenance framing, since a document can then
+    impersonate the unfenced refusal notice (ADR 0038), and when no allowed hosts
+    are set, since every link and image is then reported (ADR 0039).
     """
     if settings.firewall_mode is FirewallMode.OFF:
         return None
@@ -631,14 +501,7 @@ def build_firewall(settings: GatewaySettings) -> Firewall | None:
 
 
 def _build_classifier(settings: GatewaySettings) -> OllamaClassifier | None:
-    """The model-based detector when it is switched on, else ``None``.
-
-    Off returns ``None`` rather than an inert classifier, so the screener's
-    detector set does not grow a name for a detector that never runs. When on,
-    the transport is bound to the configured model and endpoint; a failure to
-    reach it at screening time is already handled as no-finding, so nothing is
-    verified here beyond that the settings are wired to the call.
-    """
+    """The model-based detector bound to the configured model and endpoint, else ``None``."""
     if not settings.firewall_classifier_enabled:
         return None
 
@@ -656,29 +519,17 @@ def _build_classifier(settings: GatewaySettings) -> OllamaClassifier | None:
 async def build_token_validator(settings: GatewaySettings) -> TokenValidator | None:
     """Assemble token validation, or ``None`` when no provider is configured.
 
-    Note what is *not* here: a flag. Authentication is on when an identity
-    provider is configured and off when one is not — see ``acp.config`` for why
-    a boolean is the wrong control. Incoherent combinations are already a
-    startup failure by this point, so reaching here with a half-configured
-    provider is impossible.
+    Async because missing ``jwks_url`` values are discovered at startup, which
+    checks the issuer-key binding (RFC 8414 §3.3). Symmetric algorithms are
+    refused here too, before a port is bound.
 
-    Async because a registration without an explicit ``jwks_url`` has to ask the
-    authorization server for one, and that request is also where the binding
-    between issuer and key set is checked (RFC 8414 §3.3). Doing it at startup
-    rather than lazily is deliberate: an issuer whose metadata contradicts its
-    own identity should stop a deployment, not surprise the first request.
-
-    ``TokenPolicy`` refuses a symmetric algorithm in its constructor, so a
-    configuration that would accept forged tokens fails here, before a port is
-    bound.
+    Raises:
+        ConfigurationError: If ``auth_required`` and no provider is configured.
     """
     if not settings.authentication_configured:
         if settings.auth_required:
-            # Fatal, before a port is bound and before an upstream pool is
-            # opened. Deliberately here rather than in the settings validator:
-            # the claim is that this gateway must not *serve* unauthenticated,
-            # and enforcing it at construction made `acp schemas capture` — a
-            # local command with no connection to authentication — refuse to run.
+            # Enforced here, not in settings, so local commands like
+            # `acp schemas capture` still run.
             msg = (
                 "ACP_AUTH_REQUIRED is set and no identity provider is configured, "
                 "so this gateway would serve every request as `anonymous`. Set "
@@ -690,9 +541,7 @@ async def build_token_validator(settings: GatewaySettings) -> TokenValidator | N
         return None
 
     for host in settings.auth_insecure_issuer_hosts:
-        # One line per host, at WARNING, on every start. The whole justification
-        # for having an escape hatch at all is that it cannot be used quietly —
-        # see ADR 0018 for the two worse hatches this exists instead of.
+        # Warned per host on every start so the escape hatch is never quiet (ADR 0018).
         logger.warning(
             "auth.plaintext_issuer_permitted",
             extra={
@@ -731,19 +580,11 @@ async def build_token_validator(settings: GatewaySettings) -> TokenValidator | N
 def build_operator_validator(
     settings: GatewaySettings, validator: TokenValidator | None
 ) -> TokenValidator | None:
-    """The validator for operator JWTs on the approval channel, or ``None``.
+    """The validator for operator JWTs, or ``None`` without an operator audience.
 
-    Derived from the request path's validator rather than built again: the same
-    authorization servers, keys, issuer binding and tenant stamping, with one
-    field changed — the audience (`IssuerRegistry.for_audience`). A token for
-    the gateway therefore cannot open the channel and an operator's token cannot
-    call a tool, and there is exactly one set of trusted issuers to reason
-    about rather than two that have to agree.
-
-    ``None`` when no operator audience is configured. The settings model has
-    already refused an audience with no issuers behind it, so ``validator`` is
-    never ``None`` when the audience is set; the guard is for the type checker
-    and for callers that build settings by hand.
+    Derived from the request validator with only the audience changed
+    (`IssuerRegistry.for_audience`), so agent and operator tokens are not
+    interchangeable and there is one set of trusted issuers.
     """
     audience = settings.approval_operator_audience
     if not audience or validator is None:
@@ -758,22 +599,13 @@ def build_operator_validator(
 def build_protected_resource(
     settings: GatewaySettings, validator: TokenValidator | None
 ) -> ProtectedResource | None:
-    """Assemble the RFC 9728 document, or ``None`` when there is nothing to say.
+    """Assemble the RFC 9728 document from the registry's issuers, or ``None``.
 
-    The authorization servers are not configured separately — they are the
-    registry's issuers. Two lists that had to be kept in step would eventually
-    not be, and the failure mode is a client sent to an authorization server
-    this gateway does not actually trust, which looks from the client's side
-    like its own token being inexplicably rejected.
-
-    Nothing here is fatal on its own; a gateway with no metadata document
-    authenticates exactly as strictly. What it must not do is be *silent* about
-    either degraded case, because both produce a client that cannot log in for
-    reasons visible only from here.
+    Never fatal, but warns when ``ACP_AUTH_RESOURCE`` is unset or is not one of
+    the configured audiences.
     """
     if validator is None:
-        # Config already refuses a resource identifier with no issuer, so this
-        # is the plain unauthenticated case. `auth.disabled` has been said.
+        # Unauthenticated; `auth.disabled` was already logged.
         return None
 
     if not settings.auth_resource:
@@ -796,14 +628,8 @@ def build_protected_resource(
 
     audiences = {registration.audience for registration in validator.issuers}
     if settings.auth_resource not in audiences:
-        # Every step of discovery works and the last one fails: the client reads
-        # this document, asks the authorization server for `resource=<this>`,
-        # receives a token whose `aud` is `<this>`, and the gateway rejects it
-        # for carrying the wrong audience. A warning rather than a refusal
-        # because plenty of authorization servers identify a resource by an
-        # opaque client ID rather than by its URL, and that is a legitimate
-        # deployment — it simply requires the client to be told, which is the
-        # thing this document was meant to stop being necessary.
+        # Discovered tokens would be rejected for their `aud`. Only a warning, as
+        # some servers name resources by opaque client ID.
         logger.warning(
             "auth.resource_audience_mismatch",
             extra={
@@ -833,15 +659,9 @@ def build_token_exchanger(
     upstreams: Sequence[UpstreamConfig] = (),
     audit: AuditLog | None = None,
 ) -> TokenExchanger | None:
-    """Assemble RFC 8693 token exchange, or ``None`` when it is not configured.
+    """Assemble RFC 8693 token exchange, or ``None`` without client credentials.
 
-    Presence-based like everything else in this module: client credentials are
-    the switch, because a credential is not a thing you can forget to supply and
-    still have the feature appear to work.
-
-    ``require_token_endpoints`` runs here rather than on the first request, so
-    an issuer that cannot be exchanged against stops a deployment instead of
-    surprising whichever tenant happens to use it.
+    Checks every issuer has a token endpoint at startup, not on first use.
     """
     if not settings.exchange_configured:
         return None
@@ -860,34 +680,22 @@ def build_token_exchanger(
         validator.issuers,
         client_id=settings.auth_client_id,
         client_secret=settings.auth_client_secret,
-        # The whole estate, so a credential minted for one upstream can be
-        # checked for opening another's door. Passed here rather than
-        # discovered, because "which audiences are mine" is a fact about this
-        # deployment's configuration and not about any token.
+        # Every upstream audience, so a minted credential can be checked
+        # against opening another upstream.
         peer_audiences=[u.audience for u in upstreams if u.audience],
-        # Every deployment gets one. Minting per call and caching nothing was
-        # correct only while the key had not been argued over; ADR 0022 is
-        # that argument.
+        # Always cached (ADR 0022).
         cache=CredentialCache(max_entries=settings.auth_credential_cache_max_entries),
-        # So a minted credential appears in the chain beside the call that
-        # needed it. Four categories, four emit points, one artifact.
+        # Minted credentials are audited beside the call that needed them.
         audit=audit,
     )
 
 
 def build_secret_store(settings: GatewaySettings) -> SecretStore:
-    """Open the encrypted store, or return one that is honestly empty.
-
-    ``EmptyStore`` rather than ``None``, because "no store is configured" and "a
-    store is configured and does not contain that" are different mistakes with
-    different fixes, and a ``None`` here would collapse them into one branch that
-    could only say "missing".
-    """
+    """Open the encrypted store, or an ``EmptyStore`` so "no store" has its own error."""
     if not settings.secret_store_configured:
         return EmptyStore()
 
-    # Narrowed for mypy: `secret_store_configured` already proved both are set,
-    # but a property cannot tell the type checker that.
+    # Narrowed for mypy; the property already proved both are set.
     secrets_file = settings.secrets_file
     key_file = settings.secret_key_file
     if secrets_file is None or key_file is None:  # pragma: no cover — see above
@@ -899,15 +707,9 @@ def build_secret_store(settings: GatewaySettings) -> SecretStore:
 async def resolve_upstream_secrets(
     upstreams: Sequence[UpstreamConfig], store: SecretStore
 ) -> dict[str, str]:
-    """Look up every referenced secret now, so none is looked up later.
+    """Resolve every referenced secret at startup, keyed by upstream name.
 
-    At startup, before a port is bound, for the reason every other configuration
-    check in this module runs there: an upstream whose credential is missing is
-    one the gateway would otherwise reach with no credential at all, and it would
-    discover that on somebody's first real request.
-
-    It also means the request path holds a string rather than a store, which is
-    what keeps a secrets backend from becoming a dependency of every tool call.
+    A missing secret fails startup, and the request path never touches the store.
     """
     resolved: dict[str, str] = {}
     for config in upstreams:
@@ -922,20 +724,13 @@ async def resolve_upstream_secrets(
 
 
 def check_upstream_audiences(upstreams: Sequence[UpstreamConfig], *, exchanging: bool) -> None:
-    """Refuse to start when exchange is on and an upstream has no audience.
+    """Refuse to start when exchange is on and an upstream has no credential route.
 
-    Fatal rather than a warning, and it is the one place in this file where that
-    is worth arguing. The alternative is a gateway which mints scoped
-    credentials for four upstreams and reaches the fifth with none — while every
-    log line, every ADR and every README says the estate is credentialed. A
-    control with a silent hole in it is worse than no control, because the hole
-    is the only part nobody is watching.
+    Fatal, so no upstream is silently reached without a credential.
     """
     if not exchanging:
         return
-    # Two ways to be credentialed, and an upstream needs one of
-    # them: it exchanges (`audience`) or it presents something stored
-    # (`credential_ref`). The config model already refuses both at once.
+    # Each upstream needs `audience` or `credential_ref`; config refuses both.
     missing = [u.name for u in upstreams if not u.audience and not u.credential_ref]
     if not missing:
         return
@@ -956,8 +751,7 @@ def _issuer_documents(settings: GatewaySettings) -> list[dict[str, Any]]:
         {
             "issuer": settings.auth_issuer,
             "audience": settings.auth_audience,
-            # Absent rather than empty when undiscovered, so `_with_keys` can
-            # tell "not configured" from "configured as an empty string".
+            # Absent, not empty, when unset, so `_with_keys` discovers it.
             **({"jwks_url": settings.auth_jwks_url} if settings.auth_jwks_url else {}),
             **(
                 {"token_endpoint": settings.auth_token_endpoint}
@@ -971,11 +765,8 @@ def _issuer_documents(settings: GatewaySettings) -> list[dict[str, Any]]:
 async def _with_keys(document: dict[str, Any], settings: GatewaySettings) -> dict[str, Any]:
     """Fill in ``jwks_url`` by discovery when it was not configured by hand.
 
-    An explicit URL is honoured and *not* checked against the issuer's metadata,
-    which is a real gap and a deliberate one: some authorization servers publish
-    no metadata at all, and refusing to talk to them would be a purity the
-    deployment cannot act on. It is logged, because skipping the RFC 8414 §3.3
-    check is a thing somebody should have decided rather than inherited.
+    An explicit URL skips the RFC 8414 §3.3 check, since some servers publish no
+    metadata; that is logged as a warning.
     """
     if document.get("jwks_url"):
         logger.warning(
@@ -993,9 +784,7 @@ async def _with_keys(document: dict[str, Any], settings: GatewaySettings) -> dic
         request_timeout=settings.auth_discovery_timeout,
         insecure_hosts=settings.auth_insecure_issuer_hosts,
     )
-    # The token endpoint comes along for free and carries the same proof: this
-    # document has already been shown to belong to this issuer. An explicitly
-    # configured one on the document wins, because somebody typed it on purpose.
+    # The verified token endpoint too, unless one was configured explicitly.
     discovered = {"jwks_url": metadata.jwks_uri}
     if metadata.token_endpoint and not document.get("token_endpoint"):
         discovered["token_endpoint"] = metadata.token_endpoint
@@ -1003,15 +792,13 @@ async def _with_keys(document: dict[str, Any], settings: GatewaySettings) -> dic
 
 
 def check_costs_are_payable(costs: CostTable | None, settings: GatewaySettings) -> None:
-    """Refuse a cost no budget could ever cover.
+    """Refuse a tool cost above the rate-limit capacity or quota limit.
 
-    A tool whose cost exceeds the rate limiter's capacity can never be called
-    by anyone: the bucket is never that full. The refusal it earned reported a
-    finite `retry_after` — the shortfall at the refill rate — which told the
-    agent to wait for a moment that would not arrive. The same for a cost above
-    the quota limit. Both are configuration errors, and like every
-    configuration error in this project they are fatal at startup rather than
-    discovered by the first caller of the one tool nobody tested.
+    Such a tool could never be called, yet its refusal would report a finite
+    `retry_after`.
+
+    Raises:
+        ConfigurationError: Naming the unaffordable tools.
     """
     if costs is None:
         return
@@ -1038,18 +825,10 @@ def check_costs_are_payable(costs: CostTable | None, settings: GatewaySettings) 
 
 @asynccontextmanager
 async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Starlette]:
-    """Build the gateway described by ``settings``.
-
-    Upstreams are read and validated *before* any connection is opened, so a
-    malformed config fails without side effects.
-    """
+    """Build the gateway described by ``settings``; all config is validated before connecting."""
     report_controls(settings)
     upstreams = load_upstreams(settings.upstreams_file)
-    # The whole set, not one file: the default policy plus one per declared
-    # tenant, each validated at startup so a malformed or missing tenant policy
-    # is a boot failure naming the tenant rather than a surprise on that
-    # tenant's first request. With no tenant labels this collapses to
-    # exactly the old single-policy behaviour.
+    # Default policy plus one per declared tenant, all validated at startup.
     tenants = (
         tenant_labels(_issuer_documents(settings))
         if settings.authentication_configured
@@ -1060,9 +839,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         tenant_policy_dir=settings.tenant_policy_dir,
         tenants=tenants,
     )
-    # The budgets live in one of two places. With a shared store, the keeper
-    # is the store and the in-memory limiter and quota are not built at all —
-    # a bucket in this process would be a second, unshared budget.
+    # With a shared store, no in-memory limiter or quota is built.
     budgets = build_budgets(settings)
     limiter = (
         RateLimiter(
@@ -1075,10 +852,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     costs = load_costs(settings.cost_file) if settings.cost_file is not None else None
     check_costs_are_payable(costs, settings)
     cacheable = load_cacheable(settings.cache_file) if settings.cache_file is not None else None
-    # The cache is built only when something is actually cacheable. A table that
-    # names no tools produces no cache at all, so "configured but empty" and
-    # "not configured" are the same runtime shape rather than two paths that
-    # have to stay in step.
+    # No cache unless some tool is cacheable; an empty table equals no table.
     results = ResultCache(max_entries=settings.result_cache_max_entries) if cacheable else None
     if cacheable is not None:
         logger.info(
@@ -1099,17 +873,11 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
     firewall = build_firewall(settings)
     approvals = build_approval_store(settings, policy)
     if isinstance(approvals, RedisApprovalStore):
-        # Fail at startup, where somebody is watching, not on the first gated
-        # call, where the caller would wait out a TTL for a decision that was
-        # never stored.
+        # Fail at startup rather than on the first gated call.
         await approvals.ping()
     if budgets is not None:
         await budgets.ping()
-    # The trace console's hub. Built unconditionally and cheap when nobody is
-    # watching — an empty subscriber list and a 50-event ring. Whether the console is
-    # *reachable* is decided by `console_routes`, which needs the operator
-    # credential; building the hub here regardless keeps that one decision in
-    # one place instead of two that have to agree.
+    # Always built (cheap when unwatched); `console_routes` decides reachability.
     console = TraceHub()
     # Before the exchanger, which is handed it.
     audit = build_audit_log(settings, console)
@@ -1126,8 +894,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             probe_interval=settings.health_probe_interval,
             detect_drift=settings.schema_drift_detection_enabled,
             baseline_file=settings.schema_baseline_file,
-            # Expanded to include `host:port`, because that is what a client
-            # actually sends in the Host header on a non-default port.
+            # Adds `host:port`, as sent in Host on a non-default port.
             allowed_hosts=allowed_hosts_for(settings.allowed_hosts, settings.port),
             allowed_origins=settings.allowed_origins,
             validator=validator,
@@ -1151,8 +918,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         ) as app:
             yield app
     finally:
-        # The key cache owns an HTTP connection pool, for the same reason the
-        # upstream clients do and with the same consequence for leaking it.
+        # The secret store is closed with everything else this function opened.
         await store.aclose()
         if isinstance(approvals, RedisApprovalStore):
             await approvals.aclose()

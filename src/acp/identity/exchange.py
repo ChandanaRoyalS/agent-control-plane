@@ -1,48 +1,10 @@
-"""Minting a short-lived credential for one upstream — RFC 8693.
+"""RFC 8693 token exchange: a short-lived credential scoped to one upstream, per call.
 
-This is the task the whole phase was built toward, and the problem it closes is
-worth restating in one sentence: an agent wired into internal systems normally
-holds one credential per system carrying the union of every permission any user
-might need, so the same request reaches the same data whether it was made for an
-intern or for the CFO.
-
-Everything before this established *who* is asking. This changes *what the
-upstream is handed*. For each call the gateway presents the caller's token to
-the authorization server and asks for a different one — same subject, narrower
-audience, minutes of lifetime, scoped to exactly one upstream. The gateway holds
-no long-lived upstream credential at all, because there is nothing for it to
-hold: the credential is made per call and expires before anyone could reuse it.
-
-**The exchange goes back to the server that issued the token.** Not to a
-configured token endpoint, not to a default one: the subject token's ``iss``
-selects the registration, and the request goes to *that* registration's endpoint
-(ADR 0016). Sending one authorization server's token to another's token endpoint
-is the mix-up attack wearing a helpful face — the second server cannot validate
-it, and if it could, it would be minting credentials on the first one's say-so.
-
-**The inbound token goes here and nowhere else.** It is read from
-``current_subject_token()``, whose whole reason for existing separately from the
-``Principal`` is that exactly one module should be able to reach it. The
-no-passthrough invariant the test suite proves is a statement about this file.
-
-**A failed exchange fails the call.** The two alternatives are to call the
-upstream with no credential, which is a gateway that has silently stopped
-enforcing the thing it exists for, or to forward the caller's own token, which
-is the passthrough this phase exists to make impossible. Neither is a
-degradation worth having; refusing is.
-
-**Asking for a scope is not the same as getting one**. RFC 8707 §2
-says an authorization server that cannot honour a `resource` request SHOULD
-answer `invalid_target`. Keycloak 26.7, measured rather than assumed, accepts
-the parameter and discards it — including when it directly contradicts
-`audience`, where it returns a token for the *audience* and no error at all
+The exchange goes to the token endpoint of the issuer that minted the subject token
+(ADR 0016). This is the only reader of the inbound token, and a failed exchange fails the
+call; nothing is forwarded or sent uncredentialed. The returned credential is checked
+against the request, because Keycloak ignores RFC 8707 ``resource``
 (`scripts/probe_resource_indicator.py`, ADR 0020).
-
-So the credential that comes back is checked against the one that was asked
-for. It must name the requested target, and it must not name any *other*
-upstream this gateway brokers for. That second half is the confused-deputy
-condition stated exactly: a credential that opens two doors is not a credential
-scoped to one, however it was requested.
 """
 
 from __future__ import annotations
@@ -75,23 +37,15 @@ from acp.observability import metrics
 logger = logging.getLogger(__name__)
 
 GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange"
-ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"  # noqa: S105 — a
-# token *type* identifier from RFC 8693 §3, not a token. Suppressed rather than
-# renamed: the rule is right to be suspicious of a constant ending in "token".
+ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"  # noqa: S105 — type URN
 
 DEFAULT_TIMEOUT = 10.0
-"""Longer than discovery's five seconds, and shorter than any upstream's read
-timeout. This runs on the request path, so it is part of the caller's latency
-budget — but it is a token endpoint doing signing work, not a metadata document
-being served from memory."""
+"""Token endpoint timeout in seconds; on the request path, so part of caller latency."""
 
 DEFAULT_EXPIRY_SKEW = 30.0
-"""Treated as expired this many seconds early.
+"""Seconds early a token counts as expired, so it cannot expire in flight upstream.
 
-A token that is valid when the gateway checks it and expired when the upstream
-does is the worst possible outcome, because it fails *after* the side effect
-might have happened. The cache refreshes against this margin; an uncached exchange
-only records it.
+The cache refreshes against this margin; an uncached exchange only records it.
 """
 
 
@@ -110,12 +64,7 @@ class ExchangedToken:
         return (now if now is not None else time.time()) >= self.expires_at - skew
 
     def __repr__(self) -> str:
-        """Never the token.
-
-        A credential that reaches a log or a traceback has escaped, and the
-        commonest way that happens is a dataclass repr in an exception message
-        nobody meant to print. The default here would have done exactly that.
-        """
+        """Return a repr that never includes the token."""
         return f"ExchangedToken(audience={self.audience!r}, expires_at={self.expires_at!r})"
 
 
@@ -138,15 +87,10 @@ class TokenExchanger:
         self._client_id = client_id
         self._client_secret = client_secret
         self._audit = audit
-        # Every audience this gateway brokers for. Used only to answer one
-        # question about a credential that has just been minted: does it also
-        # open somebody else's door? Empty is not a failure — it just means the
-        # cross-upstream check has nothing to compare against, which is the
-        # correct state for a single-upstream deployment.
+        # Audiences this gateway brokers for, used only to reject a credential that opens
+        # another upstream. Empty is valid for a single-upstream deployment.
         self._peers = frozenset(peer_audiences)
-        # `None` disables caching entirely, which is the original behaviour and the
-        # right shape for a test that wants to count exchanges. Every deployment
-        # has one; see `runtime.build_token_exchanger`.
+        # `None` disables caching (useful in tests); see `runtime.build_token_exchanger`.
         self._cache = cache
         self._owns_http = http is None
         self._http = http or httpx.AsyncClient(timeout=request_timeout)
@@ -158,15 +102,10 @@ class TokenExchanger:
     async def exchange(
         self, *, subject_token: str, issuer: str, audience: str, resource: str = ""
     ) -> ExchangedToken:
-        """A credential for this upstream — cached, or minted and then cached.
+        """Return a credential for this upstream, from cache or freshly minted.
 
-        The cache is checked, then a per-key lock is taken, then the cache is
-        checked *again*. That second read is the whole single-flight mechanism
-        and it is easy to leave out: without it, every request that queued on the
-        lock while the first one was minting proceeds to mint its own. The JWKS
-        cache originally shipped exactly that defect, where twenty concurrent
-        misses produced twenty-one fetches — found by asserting a *count* rather
-        than a type.
+        Single-flight: the cache is re-checked under the per-key lock so queued callers do
+        not each mint.
         """
         if self._cache is None:
             return await self._mint(
@@ -203,9 +142,7 @@ class TokenExchanger:
         registration = self.issuers.registration_for(issuer)
         endpoint = registration.token_endpoint
         if not endpoint:
-            # Startup should have caught this. If it did not, refusing beats
-            # improvising an endpoint from the issuer URL — a guessed token
-            # endpoint is a credential sent somewhere nobody chose.
+            # Never guess an endpoint from the issuer URL.
             msg = f"issuer {issuer!r} has no token endpoint, so no credential can be minted"
             raise CredentialExchangeError(msg)
 
@@ -217,9 +154,7 @@ class TokenExchanger:
             "audience": audience,
         }
         if resource:
-            # RFC 8707. Sent because it is the specified way to name a target
-            # and any conformant server acts on it; not *relied* on, because the
-            # one server this project runs against does not. See `_verify_scope`.
+            # RFC 8707; sent but not relied on, see `_verify_scope`.
             form["resource"] = resource
         try:
             response = await self._http.post(
@@ -229,9 +164,7 @@ class TokenExchanger:
                 headers={"Accept": "application/json"},
             )
         except httpx.HTTPError as exc:
-            # The authorization server is unreachable or misbehaving. Worth
-            # retrying, and emphatically not the caller's fault — the same
-            # distinction the validator draws between 401 and 503.
+            # Unreachable server: retryable and not the caller's fault (503, not 401).
             logger.warning(
                 "auth.exchange_unreachable",
                 extra={"issuer": issuer, "audience": audience, "error": type(exc).__name__},
@@ -269,25 +202,14 @@ class TokenExchanger:
             extra={
                 "issuer": issuer,
                 "audience": audience,
-                # Never the token. The lifetime is the interesting number and
-                # the only one safe to write down.
+                # Never the token.
                 "expires_in": expires_in,
             },
         )
         acting = current_principal()
         if self._audit is not None:
-            # The credential half of the plan's four categories. Never the token:
-            # the audience and the lifetime are what an auditor needs — *which
-            # door was opened, for how long* — and the token itself is the one
-            # value whose presence in a durable file would be a breach rather
-            # than a record.
-            #
-            # The principal comes from the contextvar rather than being
-            # threaded down, because that is where it already is: the
-            # exchange happens inside the request whose principal the
-            # authentication middleware bound. Passing it through four
-            # signatures to arrive at the same value would be four more
-            # places for it to be dropped.
+            # Never the token: audience and lifetime are the record. The principal comes
+            # from the contextvar the authentication middleware bound.
             await self._audit.arecord(
                 AuditCategory.CREDENTIAL,
                 "auth.exchanged",
@@ -303,38 +225,18 @@ class TokenExchanger:
         )
 
     def _verify_scope(self, token: ExchangedToken) -> None:
-        """Check the credential we were given against the one we asked for.
+        """Check the returned credential against the one requested.
 
-        This is the real scope control. The parameter that requests a scope is
-        advisory — RFC 8707 §2 only *recommends* that a server which cannot
-        honour it answers `invalid_target`, and the server this project runs
-        against neither honours it nor complains. A control built on the request
-        would be a control that reports success when nothing happened.
+        The real scope control, since RFC 8707 only recommends ``invalid_target``. The
+        credential must name the target and must not name another brokered upstream
+        (confused deputy). Audiences that are not upstreams are ignored.
 
-        Two conditions, and the second is the interesting one:
-
-        **The credential must name the target.** If it does not, whatever came
-        back is for something else, and sending it upstream would at best fail
-        confusingly and at worst succeed somewhere unintended.
-
-        **It must not name another upstream this gateway brokers for.** That is
-        the confused-deputy condition written out: a credential that opens two
-        doors is not scoped to one, and an upstream that receives it can replay
-        it against its neighbour as the caller. The measured Keycloak default —
-        an exchange with no `audience` returns *every* audience the requester
-        can reach — is exactly this failure, one missing config line away.
-
-        Audiences that are not upstreams (`account`, the requester's own client
-        id, whatever a given server adds) are ignored. The check is deliberately
-        about *this gateway's* estate rather than about tidiness, so it has no
-        false positives to tune away — which is what stops it being disabled.
+        Raises:
+            CredentialExchangeError: Wrong target, or valid at another upstream.
         """
         audiences = _audiences_of(token.access_token)
         if audiences is None:
-            # Opaque, or not a JWT. Nothing can be checked, and refusing would
-            # rule out every authorization server that issues opaque tokens for
-            # a property this gateway cannot observe either way. Said out loud
-            # rather than passed over — see SECURITY.md.
+            # Opaque token: cannot be checked, so warn rather than refuse (SECURITY.md).
             logger.warning(
                 "auth.scope_unverifiable",
                 extra={
@@ -375,13 +277,9 @@ class TokenExchanger:
     def _refused(
         self, response: httpx.Response, *, issuer: str, audience: str
     ) -> CredentialExchangeError:
-        """Turn the authorization server's refusal into one of our errors.
+        """Turn a token endpoint refusal into an error; 5xx means unavailable.
 
-        OAuth error bodies are small, defined by RFC 6749 §5.2, and contain no
-        secret — the whole point of `error_description` is to be read by whoever
-        is debugging. They go in the log, not into the message returned to the
-        caller: an agent learns nothing useful from `invalid_target`, and
-        somebody probing the gateway learns which audiences exist.
+        The RFC 6749 §5.2 body is logged, never returned to the caller.
         """
         detail = ""
         try:
@@ -410,11 +308,7 @@ class TokenExchanger:
 class ExchangedCredentials:
     """Supplies the ``Authorization`` header for one outbound request.
 
-    Sits between the upstream client, which knows which upstream it is calling,
-    and the exchanger, which knows how to obtain a credential for it. The
-    upstream client therefore never touches an inbound token, never sees an
-    issuer, and needs no branch for whether exchange is configured — it either
-    has one of these or it has ``None``.
+    The upstream client never touches an inbound token; it has one of these or ``None``.
     """
 
     def __init__(self, exchanger: TokenExchanger) -> None:
@@ -423,19 +317,11 @@ class ExchangedCredentials:
     async def authorization_for(
         self, upstream: str, audience: str, resource: str = ""
     ) -> str | None:
-        """A ``Bearer`` value for this upstream, or ``None`` when there is no caller.
+        """Return a ``Bearer`` value for this upstream, or ``None`` when there is no caller.
 
-        ``None`` happens on the background health prober's requests, which have
-        no principal because no user asked for them. That is a real gap and a
-        deliberately scoped one: the correct answer is a client-credentials
-        grant for the gateway's own service account, which needs a second grant
-        type and belongs with the caching layer. Until then a probe
-        reaches an upstream uncredentialed, which the mock fleet accepts and a
-        real upstream would not.
-
-        It is safe *here* because a deployment with exchange configured also has
-        ``ACP_AUTH_REQUIRED`` set, so every request-path call has a principal.
-        The prober is the only caller that does not.
+        ``None`` only for the background health prober, which has no principal and so
+        reaches upstreams uncredentialed (a known gap). With exchange configured,
+        ``ACP_AUTH_REQUIRED`` ensures every request-path call has a principal.
         """
         principal = current_principal()
         subject_token = current_subject_token()
@@ -456,19 +342,10 @@ class ExchangedCredentials:
 
 
 def _audiences_of(token: str) -> frozenset[str] | None:
-    """The `aud` of a JWT, or ``None`` when it is not one.
+    """Return a JWT's `aud`, or ``None`` when it is not a readable JWT.
 
-    Deliberately *not* verified. The signature is irrelevant to the question
-    being asked: this credential arrived over TLS from a token endpoint the
-    gateway authenticated to moments ago, and what is being read is not a trust
-    decision but a scope one — "is this the thing I asked for". Verifying it
-    would also be checking somebody else's audience, which is the upstream's
-    job and not ours.
-
-    ``None`` for anything unparseable, which the caller reports rather than
-    treats as empty. An empty audience set and an unreadable token are different
-    facts, and conflating them would turn "cannot check" into "checked, found
-    nothing wrong".
+    Not signature-verified: this is a scope check on a token just received over TLS from
+    an authenticated endpoint. ``None`` (unreadable) is distinct from an empty set.
     """
     parts = token.split(".")
     expected_segments = 3
@@ -494,18 +371,10 @@ def _audiences_of(token: str) -> frozenset[str] | None:
 def require_token_endpoints(issuers: IssuerRegistry, insecure_hosts: Iterable[str] = ()) -> None:
     """Refuse to start when exchange is configured and an issuer cannot do it.
 
-    At startup, before a port is bound, because the alternative is a gateway
-    that serves happily and fails the first request from whichever authorization
-    server happens to be the one without an endpoint. With several issuers that
-    could be the tenant nobody tested.
-
-    **And refuse a plaintext endpoint.** The exchange POSTs the gateway's
-    client secret and the caller's own token to this URL (RFC 8693 sends the
-    inbound token as `subject_token`). The https rule was applied to the issuer
-    and to the key set, and not to the one URL that receives both credentials —
-    the same control present on two of three paths into one decision. Exempt
-    hosts (`ACP_AUTH_INSECURE_ISSUER_HOSTS`) stay exempt here too, which is what
-    lets the compose stack talk to `http://keycloak:8080`.
+    Raises:
+        ConfigurationError: An issuer has no token endpoint, or a plaintext one; the
+            exchange POSTs the client secret and caller's token. Hosts in
+            `ACP_AUTH_INSECURE_ISSUER_HOSTS` are exempt.
     """
     missing = [r.issuer for r in issuers if not r.token_endpoint]
     if missing:

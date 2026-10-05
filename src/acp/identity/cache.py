@@ -1,36 +1,9 @@
-"""Holding an exchanged credential, and the one line that decides whether that is safe.
+"""Cache for exchanged credentials, keyed so one caller's credential never reaches another.
 
-Token exchange originally minted a credential per call and cached nothing, with a
-test asserting it. This is that test changing — deliberately, with the key argued
-over, rather than a behaviour nobody noticed.
-
-**The key is the whole task.** Everything else here is a dictionary with a size
-limit. Get the key wrong and this is a privilege escalation with excellent p99:
-key on the upstream alone and alice's credential is served to bob; key on the
-*agent* rather than the human and the same leak happens more quietly, because
-both requests genuinely arrive from `agent-7`. Neither mistake fails a
-functional test. Both would pass a load test beautifully.
-
-**So the key is the request, not a model of the request.** An exchange is a pure
-function of what is sent to the token endpoint: the subject token, the audience,
-the resource indicator, and this gateway's own client credentials. Two requests
-that send the same thing get the same answer. So the key is a digest of the
-subject token plus the audience and resource — and the correctness argument is
-one sentence with nothing left to reason about.
-
-The alternative was to key on the *claims* — issuer, subject, actor, scopes —
-which is what "cache per principal" naturally suggests. It requires deciding
-which claims the authorization server might have used to decide what to put in
-the token, and being wrong about that is invisible. Keycloak's realm here maps
-`sub` and `act` and nothing else; a different server might scope by `azp`, by
-the subject token's own scopes, by a claim nobody here has heard of. A key
-derived from the request cannot be wrong about any of them, because it does not
-guess.
-
-**A digest, never the token.** The exchange invariant is that the inbound token
-exists in one place with one reader. Using it as a dictionary key would put it
-in a second, and a cache is a structure whose whole purpose is to outlive the
-request. SHA-256 of it is not a credential and cannot be replayed.
+An exchange is a pure function of what is sent to the token endpoint, so the key is a
+SHA-256 digest of the subject token plus audience and resource. Keying on claims would
+guess what the authorization server uses; keying on the agent would leak across humans.
+The digest keeps the inbound token itself out of the cache.
 """
 
 from __future__ import annotations
@@ -44,34 +17,18 @@ from typing import TYPE_CHECKING
 import anyio
 
 if TYPE_CHECKING:  # pragma: no cover
-    # Type-only, because `exchange` imports this module for the cache itself and
-    # a runtime import here would close the loop. Nothing in this file *calls*
-    # anything on the class beyond `expired()`, which is exactly the amount of
-    # coupling a cache should have to the thing it holds.
+    # Type-only: `exchange` imports this module, so a runtime import would be circular.
     from acp.identity.exchange import ExchangedToken
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_ENTRIES = 1024
-"""Ceiling on cached credentials, and it is a security limit before it is a
-memory one.
-
-Unbounded, this grows with the number of distinct (token, upstream) pairs the
-gateway has ever seen — which an unauthenticated attacker cannot influence, but
-an authenticated one with a token mint can: obtain tokens in a loop, call once
-with each, and every one is retained until it expires. A bound turns that into
-eviction of somebody else's entry, which costs an exchange rather than the
-process.
-"""
+"""Ceiling on cached credentials; a security bound against a caller minting tokens in a loop."""
 
 
 @dataclass(frozen=True, slots=True)
 class CredentialKey:
-    """What makes two exchange requests the same request.
-
-    Every field is something the token endpoint sees. Nothing here is a guess
-    about what the authorization server does with them.
-    """
+    """Identity of an exchange request: only fields the token endpoint sees."""
 
     subject_digest: str
     audience: str
@@ -80,9 +37,7 @@ class CredentialKey:
     @classmethod
     def of(cls, subject_token: str, audience: str, resource: str) -> CredentialKey:
         return cls(
-            # Hex rather than raw bytes so the key prints safely if it ever ends
-            # up in a debugger, a log line, or an exception message. It is a
-            # one-way function of a credential, not the credential.
+            # Hex so the key prints safely; a one-way digest, not the credential.
             subject_digest=hashlib.sha256(subject_token.encode()).hexdigest(),
             audience=audience,
             resource=resource,
@@ -90,29 +45,21 @@ class CredentialKey:
 
     @property
     def short(self) -> str:
-        """Twelve characters, for logs. Enough to tell two keys apart in a trace
-        and useless for anything else."""
+        """First twelve hex characters, for logs."""
         return self.subject_digest[:12]
 
 
 class CredentialCache:
-    """Exchanged credentials, held until shortly before they expire.
+    """Bounded LRU of exchanged credentials, held until shortly before expiry.
 
-    Bounded and least-recently-used. **Single-flight**: concurrent misses for the
-    same key produce one exchange, not one each — the same defect the JWKS cache
-    originally shipped with, where twenty concurrent misses produced twenty-one
-    fetches. Here the consequence is worse than wasted work: a burst of calls
-    from one agent would turn into a burst of token requests, and an
-    authorization server that rate-limits the gateway takes the whole estate
-    down rather than one caller.
+    Single-flight: concurrent misses for one key produce one exchange, so a burst
+    cannot trip the authorization server's rate limit for the whole gateway.
     """
 
     def __init__(self, *, max_entries: int = DEFAULT_MAX_ENTRIES) -> None:
         self._entries: OrderedDict[CredentialKey, ExchangedToken] = OrderedDict()
         self._max_entries = max_entries
-        # One lock per key, created on demand. A single global lock would
-        # serialise every exchange in the gateway behind the slowest one, which
-        # is a latency bug wearing a correctness costume.
+        # Per-key locks: a global lock would serialise every exchange behind the slowest.
         self._locks: dict[CredentialKey, anyio.Lock] = {}
         self.hits = 0
         self.misses = 0
@@ -121,21 +68,15 @@ class CredentialCache:
         return len(self._entries)
 
     def get(self, key: CredentialKey) -> ExchangedToken | None:
-        """A live credential for this key, or ``None``.
+        """Return a live credential for this key, or ``None``.
 
-        Expiry is judged against ``DEFAULT_EXPIRY_SKEW`` — a token treated as
-        good here and expired by the time the upstream reads it fails *after*
-        the side effect may have happened, which is the worst available ordering.
+        Expiry uses ``DEFAULT_EXPIRY_SKEW`` so a token cannot expire in flight to the upstream.
         """
         token = self._entries.get(key)
         if token is None:
             return None
         if token.expired():
-            # Dropped rather than returned-and-refreshed. A caller that receives
-            # an expired credential has no way to tell it apart from a live one.
-            # The lock goes with it: locks were only ever released on LRU
-            # eviction, so a long-running gateway accumulated one `anyio.Lock`
-            # per distinct subject token it had ever seen.
+            # Dropped, with its lock, so locks do not accumulate per subject token.
             del self._entries[key]
             self._locks.pop(key, None)
             return None
@@ -154,7 +95,7 @@ class CredentialCache:
             )
 
     def lock_for(self, key: CredentialKey) -> anyio.Lock:
-        """The lock that makes concurrent misses collapse into one exchange."""
+        """Return the per-key lock that collapses concurrent misses."""
         lock = self._locks.get(key)
         if lock is None:
             lock = anyio.Lock()

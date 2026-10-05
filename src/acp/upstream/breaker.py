@@ -1,38 +1,10 @@
-"""A circuit breaker for one upstream.
+"""A circuit breaker for one upstream, so a dead upstream fails fast.
 
-Retries answer "this attempt failed, try again." They do not answer
-the question that follows: *this upstream has failed the last twenty times, why
-is every new caller still waiting thirty seconds to find that out?* A dead
-upstream with retries and no breaker is worse than one with neither — each
-request now costs `max_attempts * read_timeout` before failing, so the gateway's
-workers fill with calls that are all going to fail, and the healthy upstreams
-starve behind them. Failing fast is the whole point.
-
-**The state machine.**
-
-``CLOSED`` is normal: calls pass through, consecutive failures are counted.
-Reaching ``failure_threshold`` trips the breaker to ``OPEN``.
-
-``OPEN`` rejects immediately, without touching the network. After
-``reset_timeout`` has elapsed, the next caller moves the breaker to
-``HALF_OPEN``.
-
-``HALF_OPEN`` lets a small number of trial calls through — one by default —
-while continuing to reject everyone else. If a trial succeeds the breaker
-closes; if it fails the breaker re-opens and the clock restarts. This is the
-part that distinguishes a breaker from a timer: recovery is *measured*, not
-assumed, and exactly one request pays the cost of measuring it.
-
-**Consecutive failures, not a failure rate.** A rate is the more sophisticated
-choice and it needs a companion it is easy to forget: a minimum call volume,
-without which one failed call out of one is a 100% failure rate and opens the
-circuit on a single blip. Consecutive counting encodes that volume requirement
-in its own definition — five consecutive failures cannot happen in fewer than
-five calls — which is why it is used here.
-
-**What counts as a failure** is narrower than "an exception happened", and
-getting it wrong is how a breaker takes a healthy upstream offline. See
-:func:`counts_as_failure`.
+``CLOSED`` counts consecutive failures and opens at ``failure_threshold``.
+``OPEN`` rejects without touching the network until ``reset_timeout``, then the
+next caller moves it to ``HALF_OPEN``, which admits ``half_open_max_calls`` probes:
+a success closes it, a failure re-opens it. Consecutive counting needs no minimum
+call volume. Only some exceptions count; see :func:`counts_as_failure`.
 """
 
 from __future__ import annotations
@@ -56,9 +28,7 @@ from acp.upstream.config import UpstreamConfig
 logger = logging.getLogger(__name__)
 
 Clock = Callable[[], float]
-"""Injected so tests can move time without spending it. Monotonic by default —
-a wall clock that steps backwards over an NTP correction would leave a breaker
-open for an arbitrarily long time."""
+"""Injectable for tests; monotonic by default so a wall-clock step cannot strand it open."""
 
 
 class BreakerState(StrEnum):
@@ -74,28 +44,18 @@ class BreakerPolicy:
     """How eagerly to open, and how patiently to recover."""
 
     failure_threshold: int = 5
-    """Consecutive failures that trip the breaker. Too low and a transient blip
-    takes the upstream out; too high and the breaker never protects anyone."""
+    """Consecutive failures that trip the breaker."""
 
     reset_timeout: float = 30.0
     """Seconds an open breaker waits before allowing a trial call."""
 
     half_open_max_calls: int = 1
-    """Concurrent trial calls permitted while half-open.
-
-    One is the right default. The upstream is, by hypothesis, still fragile —
-    sending a burst at the moment it comes back up is how a recovering service
-    is knocked over again.
-    """
+    """Concurrent trial calls permitted while half-open; one spares a fragile upstream."""
 
 
 @dataclass(frozen=True, slots=True)
 class BreakerSnapshot:
-    """A readable view of the breaker, for logs, metrics and health checks.
-
-    Returned as a value rather than exposing the breaker's mutable state, so a
-    caller cannot accidentally read a half-applied transition.
-    """
+    """An immutable view of the breaker, for logs, metrics and health checks."""
 
     upstream: str
     state: BreakerState
@@ -121,34 +81,11 @@ def breaker_policy_for(config: UpstreamConfig) -> BreakerPolicy:
 def counts_as_failure(exc: BaseException) -> bool:
     """Whether this exception is evidence that the upstream is unhealthy.
 
-    Four groups get excluded, each for its own reason.
-
-    *The gateway's own refusals* — an open circuit, a full bulkhead — never
-    reached the upstream. Counting them would make the breaker self-reinforcing:
-    it opens, its own rejections count as failures, and it can never close.
-
-    *Errors the upstream returned deliberately* — a malformed response, a
-    JSON-RPC rejection, an unknown tool. These prove the upstream is alive and
-    answering. Opening the circuit on them means an agent sending bad arguments
-    can take a perfectly healthy upstream offline for everybody, which is a
-    denial of service the gateway inflicts on itself.
-
-    *A credential that could not be minted*. The exchange happens
-    before a single byte is sent to the upstream, so a failure there says
-    nothing whatever about its health — and because an unreachable authorization
-    server is legitimately marked ``recoverable``, it would otherwise land in
-    the group below and open every upstream's circuit at once. One identity
-    outage would withdraw the entire estate's tools from every agent, and the
-    logs would blame five servers that were answering perfectly.
-
-    *Anything that is not an ``ACPError`` at all* is a bug in the gateway. It
-    should page a human, not condemn the upstream.
-
-    What remains is what the taxonomy already marks ``recoverable``: timeouts
-    and unreachability. That this predicate coincides with the retry layer's is
-    not an accident to be factored away — both are asking "was this the
-    upstream failing to respond?", and the ``recoverable`` flag is where that
-    is recorded once.
+    Only ``recoverable`` ``ACPError``s (timeouts, unreachability) count. Excluded:
+    the gateway's own refusals (else the breaker could never close), errors the
+    upstream returned deliberately (else bad arguments could take it offline),
+    ``CredentialExchangeError`` (raised before any byte is sent; else one identity
+    outage opens every circuit), and non-``ACPError`` gateway bugs.
     """
     if isinstance(exc, UpstreamCircuitOpenError | UpstreamOverloadedError):
         return False
@@ -160,19 +97,9 @@ def counts_as_failure(exc: BaseException) -> bool:
 class CircuitBreaker:
     """Tracks one upstream's health and refuses calls when it is failing.
 
-    **No lock, deliberately.** Both transitions — admit a call, record how it
-    went — read state, decide and write it back with no ``await`` in between,
-    so on a single event loop each is already atomic. An earlier version held
-    an ``anyio.Lock`` around them anyway, and the lock was the bug: acquiring
-    it is a cancellation point, so a half-open probe whose task was cancelled
-    (an agent disconnecting mid-call is routine) raised out of ``_leave``
-    before the probe was released. The breaker then sat half-open with a
-    phantom probe in flight and refused every caller, including the health
-    monitor, forever. The release path must not be able to fail, and the way to
-    guarantee that is for it to contain nothing that can.
-
-    If a transition ever needs to await something, that is the moment to bring
-    a lock back — and to shield the release from cancellation at the same time.
+    No lock: each transition has no ``await``, so it is atomic on one event loop,
+    and the release path has no cancellation point that could strand a probe. If a
+    transition ever awaits, add a lock and shield the release from cancellation.
     """
 
     def __init__(
@@ -190,21 +117,14 @@ class CircuitBreaker:
         self._opened_at: float | None = None
         self._probes_in_flight = 0
         self._epoch = 0
-        """Bumped on every transition. A call carries the epoch it was admitted
-        in, and only a call from the current epoch is information about the
-        current state (W11 of the external review): a call admitted while
-        closed that returns during half-open is not a probe, must not release
-        a probe slot, and must not decide recovery."""
+        """Bumped on every transition; only a call admitted in the current epoch
+        may release a probe slot or change state."""
 
     # -- observation -------------------------------------------------------
 
     @property
     def state(self) -> BreakerState:
-        """The current state.
-
-        For reporting only; callers never use it to decide whether a call may
-        proceed — that decision belongs to :meth:`guard`.
-        """
+        """The current state, for reporting only; :meth:`guard` decides admission."""
         return self._state
 
     def snapshot(self) -> BreakerSnapshot:
@@ -222,15 +142,8 @@ class CircuitBreaker:
     async def guard(self) -> AsyncIterator[None]:
         """Wrap one call: refuse it, or watch how it goes.
 
-        A context manager rather than ``before``/``record_success``/
-        ``record_failure`` methods, because those can be called in the wrong
-        order or forgotten on an exception path, and a half-open probe that is
-        never released leaves the breaker permanently refusing everyone.
-
-        The release runs in a ``finally`` and is synchronous, so there is no
-        exception path — cancellation included — on which a probe stays
-        counted as in flight. A cancelled call is recorded as neutral: it says
-        nothing about the upstream.
+        The release is synchronous and in ``finally``, so no exit path, cancellation
+        included, leaves a probe counted in flight. A cancelled call is neutral.
         """
         ticket = self._enter()
         outcome: BaseException | None = None
@@ -247,8 +160,7 @@ class CircuitBreaker:
         self._epoch += 1
 
     def _enter(self) -> tuple[int, bool]:
-        """Admit a call, or raise. Returns the call's ticket: the epoch it was
-        admitted in, and whether it holds a half-open probe slot."""
+        """Admit a call or raise; return its (epoch, holds-probe-slot) ticket."""
         if self._state is BreakerState.OPEN:
             remaining = self._seconds_until_reset() or 0.0
             if remaining > 0:
@@ -262,8 +174,7 @@ class CircuitBreaker:
             self._state is BreakerState.HALF_OPEN
             and self._probes_in_flight >= self._policy.half_open_max_calls
         ):
-            # Somebody else is already testing the water. Everyone else
-            # keeps failing fast until that probe reports back.
+            # A probe is already out; fail fast until it reports back.
             raise self._rejected(self._policy.reset_timeout)
 
         probe = self._state is BreakerState.HALF_OPEN
@@ -277,13 +188,8 @@ class CircuitBreaker:
             self._probes_in_flight = max(0, self._probes_in_flight - 1)
 
         if epoch != self._epoch:
-            # A straggler: admitted under an earlier state and returning under
-            # this one. Its outcome describes the upstream as it was when the
-            # call started, which is exactly what the transition since has
-            # already accounted for. A success must not close a half-open
-            # breaker without a probe; a failure must not re-open one, or
-            # restart an open breaker's timer; and neither may touch the probe
-            # count, which it never incremented.
+            # A straggler from an earlier epoch: its outcome must not close,
+            # re-open or restart the timer, nor touch the probe count.
             return
 
         if exc is None:
@@ -293,26 +199,14 @@ class CircuitBreaker:
                 self._transition(BreakerState.CLOSED)
             self._opened_at = None
             if recovered:
-                # Logged *after* the reset, so the line announcing recovery
-                # reports zero consecutive failures rather than the count
-                # that caused the outage. Logging it first read as though
-                # the upstream were still failing at the moment it
-                # recovered — how many failures preceded this is already on
-                # the `breaker.opened` line.
-                #
-                # Only transitions are logged, not every success: a line per
-                # healthy call would bury the three events that matter under
-                # the traffic they are meant to describe.
+                # Logged after the reset so it reports zero failures; only
+                # transitions are logged, never each success.
                 self._log("breaker.closed")
             return
 
         if not counts_as_failure(exc):
-            # Neutral. Notably this leaves a half-open breaker half-open
-            # rather than closing it: the upstream answering with an error
-            # proves it is alive, but the breaker tracks whether calls
-            # *succeed*, and a stream of bad-argument calls should not be
-            # able to hold the circuit closed over an upstream that never
-            # actually serves anything.
+            # Neutral: a half-open breaker stays half-open, so error replies
+            # cannot hold the circuit closed.
             return
 
         self._consecutive_failures += 1
@@ -321,10 +215,7 @@ class CircuitBreaker:
             self._state is BreakerState.HALF_OPEN
             or self._consecutive_failures >= self._policy.failure_threshold
         ):
-            # A failed probe re-opens immediately, without waiting to
-            # accumulate another full threshold. The threshold's job is to
-            # decide whether a *healthy* upstream has gone bad; a half-open
-            # breaker has already made that call.
+            # A failed probe re-opens immediately, without a full threshold.
             self._transition(BreakerState.OPEN)
             self._opened_at = self._clock()
             self._log("breaker.opened", level=logging.ERROR, error=type(exc).__name__)
@@ -332,13 +223,7 @@ class CircuitBreaker:
     # -- internals ---------------------------------------------------------
 
     def _log(self, event: str, *, level: int = logging.WARNING, **fields: object) -> None:
-        """One line per state change.
-
-        A breaker opening is the single most important thing this module can
-        say: it means a whole upstream has just left the gateway's catalogue as
-        far as callers are concerned. ERROR for that, WARNING for the recovery
-        steps, and nothing at all for the calls in between.
-        """
+        """Log and record one state change; ERROR for opening, WARNING otherwise."""
         metrics.observe_breaker(upstream=self._upstream, state=str(self._state))
         logger.log(
             level,

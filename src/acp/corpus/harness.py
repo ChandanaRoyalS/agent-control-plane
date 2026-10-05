@@ -1,40 +1,9 @@
-"""The evaluation harness: false-positive rate first, then recall, then precision.
+"""The evaluation harness: false-positive rate first, then recall, then precision (ADR 0046).
 
-The firewall and the corpora exist; this is the thing that says how well the
-firewall works, and says it in an order that reflects what actually gets a
-security control switched off.
-
-**The false-positive rate comes first, and that is not a presentation choice.**
-A firewall that withholds legitimate documents gets turned off, and once it is
-off its recall is zero. So the first number in this report is the rate at which
-the firewall does something to a document nobody should have been stopped from
-reading — and the first *table*, not a footnote after the flattering figures.
-
-**Recall and precision are sliced differently, and conflating them would be a
-lie.** They are indexed by two different things that happen to share names:
-
-- **Recall is sliced by what an attack *is*** — the family the corpus author
-  assigned. "Of the eight `exfiltration` attacks I wrote, how many did the
-  firewall notice?"
-- **Precision is sliced by what the firewall *said*** — the family the detector
-  reported. "Of everything the firewall called `exfiltration`, how much was
-  actually an attack?"
-
-Those are different denominators over different populations, and a single
-per-family table carrying both would silently invite a reader to divide one by
-the other. They are reported as two tables with the slicing named in each.
-
-**There is no aggregate detection rate**, and `Scoreboard` refuses to compute one
-for the reason ADR 0036 gives: an average over families that include
-`plain_assertion` (which nothing catches, by construction) and `obfuscation`
-(which is mostly withheld) is a number whose value is set by how many of each
-somebody chose to write. It measures the corpus, not the firewall.
-
-**The held-out split is named, counted, and not scored.** Its identity appears in
-this report precisely so that the seal is visible in the artifact rather than
-asserted in a document nobody opens — see `heldout_notice`. Scoring it requires
-reaching past a deliberate flag, because a number you can re-run while tuning has
-stopped being held out by about the third iteration (ADR 0041).
+Recall is sliced by the family the corpus assigned; precision by the family the
+firewall reported, over both corpora, as a separate table. Every rate carries a
+bootstrap interval. No aggregate detection rate (ADR 0036). The held-out split is
+named and counted in every report but scored only behind a flag (ADR 0041).
 """
 
 from __future__ import annotations
@@ -54,28 +23,10 @@ from acp.upstream.models import CallToolResult, ContentBlock
 
 @dataclass(frozen=True, slots=True)
 class Deployment:
-    """The one configuration both corpora are screened under.
+    """The single configuration both corpora are screened under.
 
-    **This has to be one deployment, and getting it wrong quietly breaks
-    precision.** The benign corpus was written for an organisation whose hosts
-    are `wiki.internal` and whose catalogue contains `crm__search`; the attack
-    corpus was written against `docs.corp` and `mock-a__search`. Screened under
-    their own settings — which is what the existing corpus tests do, correctly,
-    because each measures its own corpus — the two are being read by two
-    different firewalls.
-
-    A false-positive rate is fine that way; it is a statement about one corpus.
-    **Precision is not.** It divides attack hits by attack hits plus benign hits,
-    so a denominator assembled from two differently-configured firewalls is a
-    ratio between numbers that were never comparable. So the harness screens
-    everything under the union, and reports which union, because a number whose
-    configuration is not stated is not reproducible.
-
-    The union is also the honest direction. Adding the benign organisation's
-    hosts to the allow-list cannot help an attack that exfiltrates to a host in
-    neither corpus, and adding the attack corpus's tool names to the catalogue
-    can only make `tool_name_mention` fire *more* — on both sides. Neither change
-    flatters the firewall.
+    Precision mixes benign and attack hits, so both must see one firewall: the
+    union of each corpus's hosts and tools, which does not flatter the firewall.
     """
 
     allowed_hosts: frozenset[str]
@@ -108,9 +59,7 @@ DEFAULT_DEPLOYMENT: Final = Deployment(
             "crm__delete_record",
             "docs__read_document",
             "billing__issue_refund",
-            # Named by the tool-confusion attacks. Included deliberately: a
-            # catalogue those attacks cannot refer to is the flattering test,
-            # not the fair one.
+            # Named by the tool-confusion attacks; omitting them would flatter the firewall.
             "mock-a__search",
             "mock-a__create_ticket",
             "mock-b__delete_record",
@@ -121,10 +70,7 @@ DEFAULT_DEPLOYMENT: Final = Deployment(
 
 
 DEFAULT_SEED = 20260812
-"""Fixed, so two runs of an unchanged firewall report the same intervals.
-
-An interval that moves when nothing moved is one a reader learns to ignore.
-"""
+"""Fixed, so an unchanged firewall reports the same intervals every run."""
 
 
 # ---------------------------------------------------------------------------
@@ -138,27 +84,20 @@ class Screened:
 
     id: str
     families: frozenset[Family]
-    """The families the firewall *reported*, which is not the family the document
-    *has*. A `direct_override` attack caught by the base64 detector is reported
-    as `obfuscation`, and precision has to be counted on what was said."""
+    """Families the firewall reported (not the document's own); precision counts these."""
 
     withheld: bool
 
     @property
     def flagged(self) -> bool:
-        """The firewall produced any finding at all — the loosest possible bar,
-        and the right one for a false-positive rate. A benign document that
-        merely trips a detector has already cost somebody an investigation."""
+        """Any finding at all: the bar for the false-positive rate."""
         return bool(self.families)
 
 
 def _screen(firewall: Firewall, text: str, *, doc_id: str, tools: AbstractSet[str]) -> Screened:
     result = CallToolResult(content=[ContentBlock(type="text", text=text)], isError=False)
     inspection = firewall.inspect(result, tool="docs__read_document", tools=frozenset(tools))
-    # Findings and triggers together: the unexamined-tail trigger (ADR 0069)
-    # is not a detector's finding, but a document withheld for it was
-    # detected by any honest reading, and `withheld` must never exceed
-    # `detected`.
+    # Include triggers so a tail-withheld document (ADR 0069) counts as detected.
     flagged = (*inspection.screening.findings, *inspection.triggers)
     return Screened(
         id=doc_id,
@@ -174,48 +113,29 @@ def _screen(firewall: Firewall, text: str, *, doc_id: str, tools: AbstractSet[st
 
 @dataclass(frozen=True, slots=True)
 class RecallRow:
-    """One attack family: how much of it the firewall noticed.
-
-    Sliced by the family the *corpus* assigned.
-    """
+    """One attack family, as the corpus assigned it: how much the firewall noticed."""
 
     family: AttackFamily
     detected: Proportion
-    """Produced any finding. The loose bar."""
+    """Produced any finding."""
 
     withheld: Proportion
-    """Actually stopped. The bar that matters to a caller, and always the lower
-    of the two — a document can be flagged without being withheld, never the
-    reverse."""
+    """Actually withheld; never exceeds `detected`."""
 
     expected_undetected: int
-    """How many of these the corpus says nothing will ever catch.
-
-    Not a failure and not excluded from the denominator. Recall computed over
-    only the catchable attacks is a number about the corpus author's choices,
-    and the families this project cannot catch are exactly the ones a reader
-    should see in the same table as the ones it can (ADR 0040).
-    """
+    """Attacks expected `undetected`; still in the denominator (ADR 0040)."""
 
     mismatches: tuple[str, ...]
-    """Attacks whose outcome differed from the corpus's recorded expectation, in
-    either direction — an improvement nobody noticed is still a behaviour change
-    nobody acknowledged."""
+    """Attacks whose outcome differed from the expectation, in either direction."""
 
 
 @dataclass(frozen=True, slots=True)
 class PrecisionRow:
-    """One *reported* family: how much of what the firewall called this was real.
-
-    Sliced by what the detector said, not by what the document was.
-    """
+    """One reported family: how much of what the firewall called this was an attack."""
 
     family: Family
     precision: Proportion
-    """Of the documents the firewall flagged with this family, the share that
-    were attacks. The denominator spans both corpora, which is the only way a
-    precision figure means anything — precision computed over attacks alone is
-    structurally 100% and measures nothing."""
+    """Share of documents flagged with this family that were attacks (both corpora)."""
 
     benign_hits: int
     attack_hits: int
@@ -234,43 +154,28 @@ class Report:
     """Benign documents the firewall produced any finding for."""
 
     benign_withheld_rate: Proportion
-    """Benign documents the firewall actually stopped. The one that gets a
-    security control switched off, and the reason it is reported separately
-    rather than folded into the line above."""
+    """Benign documents the firewall actually withheld."""
 
     recall: tuple[RecallRow, ...]
     precision: tuple[PrecisionRow, ...]
 
     benign_flagged: tuple[str, ...]
-    """Which benign documents tripped a detector, by id.
-
-    A rate tells you how often; only the list tells you *what*, and the whole
-    result of the benign-corpus run (ADR 0039) came from reading the six
-    documents rather than the 5.7%.
-    """
+    """IDs of benign documents that tripped a detector (ADR 0039)."""
 
     heldout_notice: str
     """The sealed split, named and counted, in the report's own output."""
 
     detectors: tuple[str, ...]
-    """Which detectors were attached for this run, so a number produced with the
-    optional classifier on cannot be mistaken for one produced without it."""
+    """Detectors attached for this run (shows whether the classifier was on)."""
 
     deployment: str = ""
-    """The configuration every document here was screened under, in words.
-
-    Printed with the numbers rather than kept in a constant, because the
-    `disallowed_url` and `tool_name_mention` detectors are *entirely* a function
-    of it — the same corpus under a different allow-list produces a different
-    false-positive rate, and a rate quoted without its deployment is a rate
-    nobody can reproduce or dispute.
-    """
+    """The deployment screened under, in words; URL and tool-name results depend on it."""
 
     seed: int = DEFAULT_SEED
     resamples: int = DEFAULT_RESAMPLES
 
     scored_heldout: bool = False
-    """True only when somebody passed the flag that opens the seal."""
+    """True only when the held-out flag was passed."""
 
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
@@ -301,12 +206,7 @@ def evaluate_firewall(
     resamples: int = DEFAULT_RESAMPLES,
     scored_heldout: bool = False,
 ) -> Report:
-    """Screen both corpora and build the report.
-
-    Pure but for the firewall itself: given the same corpora and the same seed it
-    produces the same intervals, which is what makes a change in a number mean a
-    change in the firewall.
-    """
+    """Screen both corpora and build the report; deterministic for a given seed."""
     rng = random.Random(seed)  # noqa: S311 — reproducibility, not cryptography
 
     benign_screened = [
@@ -393,21 +293,14 @@ def _precision_rows(
     rng: random.Random,
     resamples: int,
 ) -> tuple[PrecisionRow, ...]:
-    """One row per family the firewall actually reported.
-
-    Families no detector produced are omitted rather than printed as 0/0: a row
-    saying "of the nothing I flagged, none was real" is not a precision figure,
-    and reporting it as one puts a meaningless zero next to meaningful ones.
-    """
+    """One row per family the firewall reported; 0/0 families are omitted."""
     reported = sorted(
         {family for screened in (*benign, *attacks) for family in screened.families},
         key=lambda f: f.value,
     )
     rows: list[PrecisionRow] = []
     for family in reported:
-        # `True` for a hit on an attack, `False` for a hit on a benign document.
-        # The bootstrap then runs over exactly the population the precision
-        # figure describes: the documents this detector spoke about.
+        # True per attack hit, False per benign hit: the population precision describes.
         outcomes = [True for screened in attacks if family in screened.families]
         attack_hits = len(outcomes)
         benign_hits = sum(1 for screened in benign if family in screened.families)
@@ -430,20 +323,13 @@ def _expectation_of(screened: Screened) -> Expectation:
 
 
 SMALL_SAMPLE = 10
-"""Below this, an interval is wide enough that the point estimate is decoration.
-
-Not a threshold anything is filtered by — every row is still reported. It is the
-size at which the harness says so out loud, because a reader scanning a table of
-percentages will not stop to check each denominator.
-"""
+"""Sample size below which a row gets a warning (rows are never filtered)."""
 
 
 def _warnings(recall: Sequence[RecallRow], precision: Sequence[PrecisionRow]) -> tuple[str, ...]:
-    """What a reader should be told before they quote a number from this report."""
+    """Caveats to print before anyone quotes a number from this report."""
     warnings: list[str] = []
-    # Collapsed into one line per table rather than one per row. Every family in
-    # this corpus is small, so a warning per row is a wall of text that reads as
-    # boilerplate — and a warning nobody reads is not a warning.
+    # One line per table, not per row, so the warnings stay readable.
     thin_recall = [row.family.value for row in recall if row.detected.total < SMALL_SAMPLE]
     if thin_recall:
         warnings.append(

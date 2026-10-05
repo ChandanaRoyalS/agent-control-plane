@@ -1,39 +1,9 @@
-"""The model classifier, scored on its own.
+"""The model classifier scored on its own, separately from the firewall harness.
 
-`acp.corpus.harness` scores the *firewall*, and with the classifier attached the
-firewall's numbers cannot say what the model contributed: a benign document the
-patterns already flagged is flagged either way, so the model's own false
-positives hide behind the patterns' ones. This module asks the model directly,
-document by document, and keeps everything the firewall throws away.
-
-**Five outcomes, not two.** The firewall reduces a model call to "finding" or
-"nothing", which is right on the request path and useless for measuring the
-model, because "nothing" covers four different events:
-
-- `CLEAN` — the model said "not an attack";
-- `DISCARDED` — the model said "attack" but named no family, or one the
-  firewall cannot report. Until ADR 0062 the prompt itself offered two such
-  families; now it offers exactly `Family`, so this counts the model inventing
-  one (it once answered `prompt-injection`). Right or wrong, the firewall never
-  heard it;
-- `MALFORMED` — the answer was not the JSON asked for;
-- `FAILED` — the call raised: timeout, connection refused.
-
-Only `FLAGGED` becomes a `Finding`, and `judge` decides it with
-`parse_verdict` itself, so the count here and the count in the firewall cannot
-disagree about what a finding is.
-
-**The text is prepared the way the screener prepares it** — bounded, then
-stripped of invisible characters, then bounded again to what the classifier
-sends — so the model is scored on what it would actually see in production.
-
-**Repeats measure agreement.** A model's answer to the same document can change
-between calls. Every rate below is computed from the *first* run, so it is
-comparable with a single-run firewall evaluation; the later runs only answer
-"would the same document get the same answer again?".
-
-Nothing here is a CI gate. The model is not installed in CI, and gating on its
-output would make a build fail for reasons nobody could reproduce (ADR 0047).
+Each call is FLAGGED (becomes a `Finding`, decided by `parse_verdict`), DISCARDED
+(said attack with no reportable family, ADR 0062), CLEAN, MALFORMED (not the JSON
+asked for) or FAILED (raised). Text is prepared as the screener would. Rates come
+from the first run only; later runs measure agreement. Not a CI gate (ADR 0047).
 """
 
 from __future__ import annotations
@@ -61,7 +31,7 @@ SMALL_SAMPLE: Final = 10
 
 
 class Outcome(StrEnum):
-    """What one model call amounted to. See the module docstring."""
+    """What one model call amounted to (see the module docstring)."""
 
     FLAGGED = "flagged"
     DISCARDED = "discarded"
@@ -81,8 +51,7 @@ class Call:
 
     outcome: Outcome
     family: str | None
-    """The family string the model named, verbatim — kept for `DISCARDED`, where
-    it is the reason the firewall dropped the answer."""
+    """The family the model named, verbatim (explains `DISCARDED`)."""
     seconds: float
 
 
@@ -117,9 +86,7 @@ def classify_once(
     try:
         raw = classify_fn(prepare(text))
     except Exception:
-        # Exactly what OllamaClassifier does with it — no finding — but counted,
-        # because "the model was down for a third of the corpus" changes what
-        # every rate below means.
+        # No finding, as in OllamaClassifier, but counted: outages change every rate.
         return Call(outcome=Outcome.FAILED, family=None, seconds=clock() - started)
     elapsed = clock() - started
     outcome, family = judge(raw)
@@ -128,8 +95,7 @@ def classify_once(
 
 @dataclass(frozen=True, slots=True)
 class Latency:
-    """Wall-clock per call, over every call including failures — a timeout is
-    the slowest answer there is, and leaving it out would flatter the model."""
+    """Wall-clock seconds per call, including failures and timeouts."""
 
     calls: int
     median: float
@@ -138,8 +104,7 @@ class Latency:
 
 
 def percentile(values: Sequence[float], q: float) -> float:
-    """Nearest-rank percentile. No interpolation: with a few hundred calls, the
-    reported number should be one that actually happened."""
+    """Nearest-rank percentile (no interpolation), or 0.0 for no values."""
     if not values:
         return 0.0
     ordered = sorted(values)

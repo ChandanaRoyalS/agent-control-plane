@@ -1,21 +1,9 @@
 """Configuration, loaded once at startup and never mutated.
 
-Three sources, in decreasing precedence: environment variables prefixed
-``ACP_``, a ``.env`` file for local development, and defaults declared here.
-Upstreams come from a separate YAML file because a list of servers with
-per-server timeouts does not fit comfortably in flat environment variables.
-
-**Everything here fails fast.** A malformed config, an unreadable upstreams
-file, two upstreams sharing a name — all of it raises ``ConfigurationError``
-before the server binds a port. That is deliberate: a gateway that starts with
-a broken policy or a missing credential and discovers it on the first request
-has already failed open, which for a security control is the worst possible
-outcome. Refusing to start is the safe direction.
-
-**No secrets in the YAML.** Secret-shaped values are read from a directory of
-files, the convention container runtimes actually use — Docker and Kubernetes
-both mount secrets as files rather than environment variables, because the
-environment of a process is readable by anything that can see ``/proc``.
+Precedence: ``ACP_`` environment variables, then ``.env``, then defaults here;
+upstreams and issuers come from YAML files. Every problem raises
+``ConfigurationError`` before a port is bound, so the gateway never starts open.
+Secrets are read from a mounted secrets directory, not YAML.
 """
 
 from __future__ import annotations
@@ -37,23 +25,14 @@ from acp.redis_url import check_redis_url
 from acp.upstream import UpstreamConfig
 
 DEFAULT_SECRETS_DIR = "/run/secrets"
-"""Where container runtimes mount secrets.
-
-Docker and Kubernetes both mount secrets as files rather than environment
-variables, because a process's environment is readable by anything that can see
-``/proc``.
-"""
+"""Where container runtimes mount secrets as files; the environment is readable via ``/proc``."""
 
 
 def _secrets_dir() -> str | None:
     """The secrets directory, or None when it does not exist.
 
-    Returning None rather than a missing path is deliberate: pydantic-settings
-    emits a ``UserWarning`` for a non-existent secrets directory, and this
-    project runs tests with warnings escalated to errors. A development machine
-    legitimately has no ``/run/secrets``, so warning about it is noise — but
-    silencing the warning globally would also hide a *misconfigured* secrets
-    path in production, which is exactly the case worth hearing about.
+    None avoids pydantic-settings' missing-directory warning on development
+    machines without silencing it globally.
     """
     path = Path(os.environ.get("ACP_SECRETS_DIR", DEFAULT_SECRETS_DIR))
     return str(path) if path.is_dir() else None
@@ -72,27 +51,17 @@ class GatewaySettings(BaseSettings):
     )
 
     host: str = "127.0.0.1"
-    """Interface to bind. Defaults to loopback: a gateway that binds every
-    interface by accident is exposed before anyone decides it should be."""
+    """Interface to bind; loopback so exposure is a deliberate choice."""
 
     port: int = Field(default=8080, gt=0, le=65535)
 
     log_level: str = "INFO"
 
     log_format: str = "auto"
-    """``json``, ``console``, or ``auto`` to pick by whether stderr is a
-    terminal. Production gets JSON without anyone having to remember to ask for
-    it, and a developer at a terminal gets something readable."""
+    """``json``, ``console``, or ``auto`` (console when stderr is a terminal, else JSON)."""
 
     admin_host: str = "127.0.0.1"
-    """Interface for the metrics and health listener.
-
-    Loopback by default, and deliberately a *separate* listener from the
-    gateway. A scrape endpoint publishes every upstream name, every tool name
-    and which dependencies are currently failing — a reconnaissance report for
-    anyone choosing what to attack. Exposing it beyond the host should be a
-    deliberate act, not the default.
-    """
+    """Interface for the admin listener; loopback, since metrics aid reconnaissance."""
 
     admin_port: int = Field(default=9090, gt=0, le=65535)
 
@@ -101,541 +70,265 @@ class GatewaySettings(BaseSettings):
     audit_file: Path | None = None
     """Where the hash-chained audit log is written.
 
-    Unset **refuses to start** while `audit_required` is true, which is the
-    default (ADR 0071) — the same treatment an unconfigured identity provider
-    gets under `auth_required`. A gateway whose job is to record who called
-    what does not start silently without the record. Presence-based like the
-    secret store and token exchange, and for the same reason: a boolean would
-    let a deployment believe it had an audit log because a flag said `true`,
-    while the path it needed was never configured.
-
-    Deliberately *not* defaulted to a path. An audit log that appears in a
-    developer's working directory the first time they run the gateway is one that
-    gets `.gitignore`d, then forgotten, then discovered half-committed. Writing
-    an evidentiary artifact should be a thing somebody chose.
+    Unset refuses to start while `audit_required` is true (ADR 0071). No default
+    path, so writing an audit log is always a deliberate choice.
     """
 
     audit_required: bool = True
-    """Refuse a call this gateway cannot record.
+    """Refuse a call this gateway cannot record, and refuse to start with no audit file.
 
-    On by default, and the escape hatch is loud. An audit log that stops
-    recording while the gateway keeps serving is worse than none, because the
-    record then *asserts by omission* that nothing happened during the window
-    somebody will eventually ask about.
-
-    `false` is a real mode — a deployment that would rather serve than record,
-    which is a legitimate choice for a gateway in front of nothing sensitive —
-    and it is logged at startup every time, the same treatment
-    `ACP_AUTH_REQUIRED=false` gets.
-
-    It also governs the case where no chain is configured at all (ADR 0071):
-    a gateway that cannot record *any* call refuses to start while this is
-    true, because it would otherwise serve every call it is required not to.
-    `ACP_AUDIT_REQUIRED=false` with no `ACP_AUDIT_FILE` runs without a record,
-    and says so at every start.
+    On by default (ADR 0071), since a silent gap in the log implies nothing
+    happened. `false` serves without a record and is logged at every start.
     """
 
     audit_fsync: bool = True
-    """`fsync` each entry before the call proceeds.
-
-    A record buffered in the kernel when the machine loses power describes a call
-    that really happened, and that is exactly the crash-adjacent window an
-    investigation cares about. The cost is real — it bounds write throughput to
-    the disk's sync rate — and the perf suite measures it rather than guessing.
-    """
+    """`fsync` each entry before the call proceeds, so a crash loses no record; costs throughput."""
 
     approval_operator_token: str = ""
-    """Credential for the approval channel on the admin listener.
+    """Shared-secret credential for the approval channel on the admin listener.
 
-    Empty means the channel does not exist — not that it exists and refuses.
-    Presence-based like token exchange and the secret store, for the reason
-    `build_token_exchanger` gives: a credential is not a thing you can forget to
-    supply and still have the feature appear to work.
-
-    It is a shared secret rather than a JWT because the party it authenticates
-    is a person or a small internal console on loopback, not a fleet of agents,
-    and standing up an issuer to answer a yes/no is a cost with no matching
-    benefit. It is compared with `compare_digest` and it is the one write on a
-    listener that is otherwise read-only, so a deployment that exposes the admin
-    port beyond loopback should treat this as a production credential and put it
-    in the secret store like any other.
+    Empty means the channel does not exist. Compared with `compare_digest`; if the
+    admin port leaves loopback, keep it in the secret store.
     """
 
     approval_operator_audience: str = ""
-    """Audience of an operator's JWT on the approval channel.
+    """Audience of an operator's JWT on the approval channel (ADR 0059).
 
-    Set it and an operator proves who they are the way an agent does: a token
-    from an authorization server in the issuer registry, verified with the same
-    validator, keys and issuer binding, minted for *this* audience rather than
-    the gateway's — so a token that may call tools cannot approve them and the
-    reverse. The verified subject is what the audit row records as the
-    operator, and the tenant stamped from the registration is what scopes
-    which calls that operator may answer (ADR 0059).
-
-    Requires authentication to be configured; an audience with no issuers to
-    check it against is refused at load. Empty leaves the channel on the shared
-    token alone, if one is set — a deployment that is a security control should
-    not leave it there.
+    Verified like an agent token but for a distinct audience, so tool tokens cannot
+    approve. The subject is audited and the tenant scopes what the operator may
+    answer. Requires authentication; empty leaves only the shared token.
     """
 
     approval_ttl_seconds: float = Field(default=DEFAULT_TTL_SECONDS, gt=0)
-    """How long a held call waits before expiry refuses it.
-
-    The expiry is the default-deny (ADR 0048), so this is a security setting
-    wearing the clothes of a timeout: raising it widens the window in which one
-    human's yes can still be spent.
-    """
+    """Seconds a held call waits before expiry denies it (ADR 0048); a security window."""
 
     approval_max_pending: int = Field(default=DEFAULT_MAX_PENDING, gt=0)
-    """Ceiling on held requests before the oldest is evicted.
-
-    A security limit before a memory one: an authenticated caller whose policy
-    gates a tool can start one request per call and is under no obligation to
-    retry, so the bound turns "fill the gateway's memory" into "somebody has to
-    ask again".
-    """
+    """Held requests kept before the oldest is evicted; bounds memory a caller can fill."""
 
     approval_store_url: str = ""
-    """Redis the held approvals live in, shared by every replica.
+    """Redis for held approvals, shared by every replica (ADR 0066).
 
-    Empty keeps them in this process's memory, which is correct for exactly one
-    gateway: a second replica refuses a retry the first one was told to wait
-    for, and a restart forgets every pending decision (ADR 0066). Set it —
-    ``redis://``, ``rediss://`` or ``unix://`` — and the record a caller is
-    handed on one replica is the record an operator decides on another and the
-    one the retry spends on a third. The gateway refuses to start if the Redis
-    is unreachable, because a store that is configured and absent would hold
-    every gated call with nothing to hold it in. The URL may carry a password;
-    put it in the secret store like any other credential.
-
-    With a shared store ``approval_max_pending`` does not apply: the bound is
-    time, enforced by Redis as a TTL on each record, rather than a count.
+    Empty keeps them in process memory, correct only for a single gateway.
+    Startup fails if the Redis is unreachable. The URL may hold a password, so use
+    the secret store. With Redis, a per-record TTL replaces ``approval_max_pending``.
     """
 
     health_probing_enabled: bool = True
-    """Background probing of upstream health.
-
-    Off means the gateway runs without the health monitor: every upstream is
-    attempted on every request, and a breaker recovers only when some agent's
-    request happens to become its trial call.
-    """
+    """Background upstream probing; off, open breakers recover only via live traffic."""
 
     health_probe_interval: float = Field(default=15.0, gt=0)
     """Seconds between probe rounds, before jitter."""
 
     schema_drift_detection_enabled: bool = True
-    """Compare each probed catalogue against the committed baseline.
-
-    Detection rides on the health prober, so this does nothing when
-    ``health_probing_enabled`` is off — see ``acp.schema.detector`` for why that
-    is the right place for it rather than the request path.
-    """
+    """Compare each probed catalogue against the baseline; needs health probing on."""
 
     schema_baseline_file: Path = Path("config/schema-baseline.json")
     """The acknowledged state of every upstream's catalogue.
 
-    A missing file is not an error: it means nothing has been baselined yet, and
-    the gateway says so once per upstream rather than refusing to start. A file
-    that exists and cannot be parsed is logged loudly and treated as absent —
-    deliberately unlike every other configuration failure in this module, which
-    are fatal. A drift detector is a monitor, and a monitor that can stop the
-    gateway from starting is a larger risk than the one it was added to reduce.
+    Missing means not yet baselined. Unparseable is logged and treated as absent,
+    unlike other config errors, because a monitor must not block startup.
     """
 
     upstreams_file: Path = Path("config/upstreams.yaml")
-    """Path to the upstream definitions, resolved relative to the process's
-    working directory."""
+    """Upstream definitions, relative to the working directory."""
 
     policy_file: Path = Path("config/policy.yaml")
+    """Policy rulebook (relative to cwd); missing or malformed is fatal (ADR 0025)."""
 
     tenant_policy_dir: Path | None = None
-    """Where per-tenant policy files live: ``<dir>/<tenant>.yaml``.
+    """Directory of per-tenant policies, ``<dir>/<tenant>.yaml``.
 
-    Required the moment any issuer registration declares a ``tenant`` label,
-    and every declared tenant must have a file — a missing one is a startup
-    failure naming the tenant, never a silent deny-all, because a tenant whose
-    every call answers "forbidden" with no explanation is an outage dressed as
-    a policy. Unset on a gateway with no tenant labels: the single-tenant
-    deployment does not know this setting exists.
+    Required once any issuer declares a ``tenant``; a missing tenant file fails
+    startup by name rather than silently denying everything.
     """
 
     rate_limit_enabled: bool = False
-    """Whether per-principal rate limiting is enforced. Off by default, opt-in
-    like policy: a gateway with no budget configured behaves exactly as before."""
+    """Enforce per-principal rate limiting; opt-in, so unconfigured behaviour is unchanged."""
 
     rate_limit_capacity: float = Field(default=60.0, gt=0)
-    """The burst ceiling: the most calls a principal may make back-to-back before
-    the sustained rate applies. Also the value the bucket refills toward."""
+    """Burst ceiling: back-to-back calls allowed, and the level the bucket refills to."""
 
     rate_limit_refill_per_second: float = Field(default=1.0, gt=0)
-    """The sustained rate, in calls per second, at which a principal's budget
-    refills once the burst is spent."""
+    """Sustained rate, in calls per second, at which a principal's bucket refills."""
 
     cost_file: Path | None = None
-    """Optional path to a per-tool cost table (``config/costs.yaml``). When set,
-    a call's budget draw is weighted by the tool's cost; unset, every call costs
-    one, exactly as rate limiting alone behaves."""
+    """Per-tool cost table (``config/costs.yaml``) weighting budget draws; unset, each call is 1."""
 
     cache_file: Path | None = None
-    """Optional path to the cacheable-tools table (``config/cache.yaml``).
+    """Cacheable-tools table (``config/cache.yaml``); unset caches nothing.
 
-    When set, results of the tools it names may be served from memory to the
-    *same principal* for the ttl it gives. Unset, nothing is cached and every
-    call reaches its upstream, exactly as before.
-
-    There is deliberately no ``cache_enabled`` boolean. Caching is on for the
-    tools the file names and off for everything else, so the file *is* the
-    switch — a boolean would be a second place for the answer to live, and the
-    failure mode of forgetting one is a tool cached that nobody meant to cache
-    (ADR 0035).
+    Named tools' results are served to the same principal for their ttl. The file
+    is the only switch, with no ``cache_enabled`` boolean (ADR 0035).
     """
 
     result_cache_max_entries: int = Field(default=512, gt=0)
-    """How many results to hold. A security limit before a memory one: an
-    authenticated caller chooses the keys, so an unbounded cache is a memory
-    target rather than a cache."""
+    """Cache size bound; callers choose the keys, so unbounded would be a memory target."""
 
     provenance_framing_enabled: bool = False
-    """Whether every tool result is fenced as retrieved data before the model
-    reads it (ADR 0037).
+    """Fence every tool result as retrieved data before the model reads it (ADR 0037).
 
-    Off by default because it is a visible change to the wire — a caller
-    receives two more content blocks than the upstream sent — and a deployment
-    should turn that on deliberately rather than discover it.
-
-    It is the half of the firewall with no false-positive rate: framing judges
-    nothing, so it cannot be wrong about a document. What it costs is two blocks
-    and a little of the model's context; what it buys is that a retrieved
-    paragraph no longer arrives looking like something the user said.
+    Off by default because it adds two content blocks to the wire.
     """
 
     firewall_mode: FirewallMode = FirewallMode.REPORT
-    """How much the injection firewall is allowed to do (ADR 0038).
+    """How much the injection firewall may do (ADR 0038).
 
-    ``off`` screens nothing. ``report`` screens every tool result, logs every
-    finding, and changes nothing the caller receives. ``enforce`` withholds
-    content that crosses the bar.
-
-    **Start at ``report``.** It is not a timid setting, it is the measuring
-    instrument: it evaluates the same bar enforcement would and logs a result it
-    *would* have withheld as ``would_refuse``, so a deployment learns what
-    enforcement would cost its own traffic before paying it. A firewall that
-    refuses honest documents does not get tuned, it gets set back to ``off``.
-
-    ``report`` is the default (ADR 0071). It was ``off``, on the argument that
-    screening is linear in the size of every result and a control that turns
-    itself on is a control nobody chose. That argument was right about cost and
-    wrong about consequence: a gateway whose own decision records say "a
-    control nobody runs does not exist" (ADR 0055) shipped with this one not
-    running. Report mode changes nothing a caller receives, so turning it on
-    by default costs time and buys the measurement; ``off`` is still a real
-    mode, and saying so at startup is the banner's job.
+    ``off`` screens nothing; ``report`` screens and logs, logging what enforcement
+    would withhold as ``would_refuse``, but changes nothing; ``enforce`` withholds.
+    ``report`` is the default so the control runs and is measured (ADR 0071,
+    ADR 0055).
     """
 
     firewall_allowed_hosts: list[str] = Field(default_factory=list)
-    """Hosts a tool result may legitimately link to or embed an image from.
+    """Hosts a tool result may link to or embed images from.
 
-    Empty is the *noisy* default on purpose (ADR 0036): with no hosts
-    configured every markdown image and every link is reported. That is visible
-    in the numbers, where the opposite default would look clean while detecting
-    less — and it is why ``external_image`` cannot withhold anything until this
-    list is set. Enforcing on the empty default would refuse a wiki page for
-    having a logo in it.
+    Empty is deliberately noisy: every link and image is reported, and
+    ``external_image`` cannot withhold until this is set (ADR 0036).
     """
 
     firewall_classifier_enabled: bool = False
-    """Whether the optional model-based detector runs (ADR 0042).
+    """Run the optional Ollama-based detector (ADR 0042).
 
-    Off by default: it needs a local Ollama, it is slower than every pattern, and
-    a firewall that silently depends on a model service is one that breaks in a
-    way nobody configured. When on, it adds findings at MEDIUM alongside the
-    patterns; when the model is absent or slow it adds nothing, so enabling it
-    cannot take screening offline — only make it quieter than intended."""
+    Off by default since it needs a local model. Adds MEDIUM findings; when the
+    model is absent or slow it adds nothing, so screening never goes offline.
+    """
 
     firewall_classifier_model: str = "llama3.2"
-    """The Ollama model the classifier asks. Only consulted when the classifier
-    is enabled."""
+    """The Ollama model the classifier asks, when enabled."""
 
     firewall_classifier_endpoint: str = "http://127.0.0.1:11434/api/generate"
-    """Where the local Ollama listens. Only consulted when the classifier is
-    enabled."""
+    """Where the local Ollama listens, when the classifier is enabled."""
 
     firewall_classifier_timeout_seconds: float = Field(default=5.0, gt=0)
-    """How long to wait for the model before treating it as absent. Tight on
-    purpose: a slow model must degrade to no-finding the same way a down one
-    does, rather than slowing every screened result."""
+    """Wait before treating the model as absent; tight so a slow model never slows results."""
 
     quota_enabled: bool = False
-    """Whether per-principal quotas are enforced. Off by default, opt-in like
-    rate limiting: a gateway with no quota configured behaves exactly as before."""
+    """Enforce per-principal quotas; opt-in, so unconfigured behaviour is unchanged."""
 
     quota_limit: float = Field(default=10000.0, gt=0)
-    """The most a principal may spend within one window, in the same cost units
-    as rate limiting (one per call unless a cost table weights it)."""
+    """Most a principal may spend per window, in rate-limit cost units."""
 
     quota_window_seconds: float = Field(default=86400.0, gt=0)
-    """The window length in seconds over which ``quota_limit`` applies; the tally
-    resets at each window boundary. Defaults to a day."""
+    """Quota window in seconds; the tally resets at each boundary. Defaults to a day."""
 
     budget_store_url: str = ""
-    """Redis the rate-limit buckets and quota tallies live in, shared by every
-    replica.
+    """Redis for rate-limit buckets and quota tallies, shared by every replica (ADR 0067).
 
-    Empty keeps them in this process's memory, which makes a replicated fleet
-    *more permissive* by the replica count: every limit is per process, so
-    three gateways behind one load balancer hand out three bursts and three
-    quotas (ADR 0067). Set it — ``redis://``, ``rediss://`` or ``unix://`` —
-    and one bucket and one tally per payer are charged from wherever the call
-    lands, in one atomic step that checks both budgets before debiting either.
-    The gateway refuses to start if the Redis is unreachable. Independent of
-    `approval_store_url` on purpose: shared approvals are a correctness fix,
-    shared budgets cost a Redis round trip on every call, and a deployment may
-    want one without the other. Both may name the same Redis.
+    Empty keeps them per process, so N replicas allow N times the budget. With
+    Redis both budgets are checked and debited atomically; startup fails if it is
+    unreachable. Independent of `approval_store_url`, though both may share a Redis.
     """
-    """Path to the policy rulebook, resolved relative to the
-    process's working directory.
-
-    Loaded and validated at startup. A missing or malformed policy is a
-    boot failure, unlike the schema-baseline file above — policy is the
-    control, not a monitor of one, so its absence is fatal rather than
-    tolerated. See ADR 0025."""
 
     allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
-    """Hosts the inbound server will accept, for DNS-rebinding protection.
+    """``Host`` values accepted, for DNS-rebinding protection.
 
-    Deployment behind a real hostname must set this — the defaults only cover
-    local development, and the SDK rejects any ``Host`` not listed. Discovered
-    the hard way: the SDK's own allow-list has no default at all, so an
-    unconfigured server rejects every request including from localhost.
+    Defaults cover local development only; set it behind a real hostname, since
+    the SDK rejects any unlisted ``Host``.
     """
 
     allowed_origins: list[str] = Field(default_factory=list)
     """Browser origins accepted. Empty is correct for non-browser clients."""
 
     # -- identity ----------------------------------------------------------
-    #
-    # There is deliberately no `ACP_AUTH_ENABLED`. Authentication is on when an
-    # identity provider is configured and off when one is not, because a boolean
-    # is a thing somebody forgets to set — and the failure mode of forgetting is
-    # a gateway that accepts every request while its configuration says it
-    # authenticates them. Presence of configuration cannot be forgotten in that
-    # direction: you cannot validate tokens without an issuer.
-    #
-    # Setting *some* of these and not the others is a startup failure. Half
-    # configured authentication that silently does nothing is the worst of the
-    # three possible states.
+    # No `ACP_AUTH_ENABLED`: authentication is on exactly when a provider is
+    # configured, so it cannot be forgotten open. Partial configuration fails startup.
 
     auth_issuer: str = ""
     """The authorization server's issuer URL. Must match the token's ``iss``."""
 
     auth_audience: str = ""
-    """This gateway's identifier, checked against the token's ``aud``.
-
-    Not optional when authentication is on. A token minted for another service
-    in the estate is correctly signed and unexpired, and accepting it would let
-    anything that can obtain *any* token act through this gateway.
-    """
+    """This gateway's identifier, checked against ``aud`` so other services' tokens fail."""
 
     auth_jwks_url: str = ""
-    """Where the authorization server publishes its signing keys.
+    """Signing-key URL; better left empty.
 
-    **Optional, and better left empty.** When absent it is discovered from the
-    issuer's metadata, and discovery is where the binding between an issuer and
-    its keys is *verified* rather than asserted: RFC 8414 §3.3 requires the
-    metadata to name the same issuer the document was fetched for. Setting this
-    by hand skips that check, which is exactly how a key set belonging to one
-    authorization server ends up trusted for another — a mix-up achieved by
-    copy-paste rather than by an attacker.
+    When empty it is discovered from issuer metadata, which verifies the
+    issuer-key binding (RFC 8414 §3.3); setting it by hand skips that check.
     """
 
     auth_issuers_file: Path | None = None
-    """Path to a YAML file registering several authorization servers.
-
-    A file rather than more environment variables, for the same reason the
-    upstreams are one: a list of servers each with its own audience, key set and
-    algorithms does not fit flat `KEY=value` pairs without inventing an indexing
-    convention nobody can read.
-
-    Mutually exclusive with the single-issuer settings above. Two sources
-    disagreeing about which servers are trusted is not a merge to be resolved.
-    """
+    """YAML file of several authorization servers; exclusive with the single-issuer settings."""
 
     auth_resource: str = ""
-    """This gateway's public resource identifier, published under RFC 9728.
+    """This gateway's public resource identifier (RFC 9728), e.g. ``https://gw.corp/mcp``.
 
-    The URL an agent actually reaches this gateway on — ``https://gw.corp/mcp``,
-    not the interface it binds — because it is a public identifier and the two
-    are only the same on a laptop. Setting it makes the gateway serve
-    ``/.well-known/oauth-protected-resource`` and add ``resource_metadata`` to
-    every 401, which together let a client that has never been configured for
-    this deployment find its way to a token.
-
-    **Optional, and its absence is a missing convenience rather than a missing
-    control.** Nothing about *validating* a token depends on this; a gateway
-    without it authenticates exactly as strictly, and clients simply have to be
-    told the authorization server by hand. So it is not part of the
-    all-or-nothing rule below — but startup does say when it is missing, because
-    "clients cannot discover us" should be a state somebody chose.
-
-    It should equal the audience tokens for this gateway carry: a client passes
-    this string as RFC 8707's ``resource`` parameter, the authorization server
-    copies it into ``aud``, and the token validator checks it. ``runtime`` warns
-    when the configured audiences do not include it, because that mismatch
-    produces a discovery chain where every step works and the last one fails.
+    Set, it serves ``/.well-known/oauth-protected-resource`` and adds
+    ``resource_metadata`` to every 401 so clients can discover the issuer. Optional:
+    validation does not depend on it, but startup reports its absence. It should
+    equal the audience (RFC 8707); ``runtime`` warns on a mismatch.
     """
 
     auth_client_id: str = ""
-    """The gateway's own client at the authorization server.
+    """The gateway's own OAuth client ID, used only for token exchange.
 
-    Two identities are in play once exchange exists and they are easy to
-    conflate. ``auth_audience`` is what the gateway is *called* by tokens
-    arriving at it — it is a resource server there. This is who the gateway
-    *is* when it asks for a credential, as an OAuth client. Only token exchange
-    needs the second, because a resource server never speaks to a token
-    endpoint.
-
-    Setting this and its secret is what turns exchange on. As everywhere else in
-    this module there is no boolean: presence of credentials is the switch,
-    because a credential is a thing you cannot forget to supply and still have
-    the feature appear to work.
+    Distinct from ``auth_audience``, which identifies the gateway as a resource
+    server. Setting this and the secret is what enables exchange.
     """
 
     auth_client_secret: str = ""
-    """The gateway's client secret.
-
-    Read from the secrets *directory* in any real deployment — a file at
-    ``/run/secrets/auth_client_secret`` — rather than the environment, for the
-    reason stated at the top of this module: a process's environment is readable
-    by anything that can see ``/proc``, and this is the one value here that is
-    genuinely a credential.
-    """
+    """The gateway's client secret; supply it via the secrets directory, not the environment."""
 
     auth_token_endpoint: str = ""
-    """Where to exchange tokens, when it cannot be discovered.
+    """Token-exchange endpoint; normally empty and taken from verified issuer metadata.
 
-    **Normally empty.** It comes from the issuer's metadata, which has already
-    been proved to belong to that issuer (RFC 8414 §3.3), so an endpoint read
-    from it inherits that proof. This exists only for the single-issuer case
-    where ``ACP_AUTH_JWKS_URL`` was set by hand and discovery therefore never
-    ran. With an issuers file, put ``token_endpoint`` on the entry that needs it.
+    Only for a single issuer whose ``ACP_AUTH_JWKS_URL`` was set by hand. With an
+    issuers file, set ``token_endpoint`` on the entry instead.
     """
 
     secrets_file: Path | None = None
-    """The encrypted secret store.
+    """Encrypted store for upstreams that cannot use token exchange (RFC 8693).
 
-    Holds credentials for upstreams that cannot take part in token exchange —
-    an API key issued out of band, an appliance that will never speak RFC 8693.
-    Everything that *can* exchange should, because a credential minted per call
-    and thrown away is not a secret anybody has to store.
-
-    Absent means no store, which is the right state for a deployment where every
-    upstream exchanges. An upstream referencing a secret with no store
-    configured is a startup failure.
+    Absent means no store; an upstream referencing a secret without one fails startup.
     """
 
     secret_key_file: Path | None = None
-    """The one key that opens ``secrets_file``.
+    """The key that opens ``secrets_file``, as a file from the runtime's secret mount.
 
-    Its own file, referenced by path, so it can come from wherever a runtime
-    puts secrets — a Kubernetes secret mount, a Docker secret, a tmpfs populated
-    at boot — rather than from somewhere a person edits. The store's honest
-    claim is that it turned many secrets into one; this is the one.
-
-    Refused at startup if readable beyond its owner — so a Kubernetes or Docker
-    secret mount needs its mode set (`defaultMode: 0400` / `mode: 0400`); both
-    default to a readable file.
+    Refused at startup if readable beyond its owner, so set the mount mode
+    (`defaultMode: 0400` / `mode: 0400`); Kubernetes and Docker default to readable.
     """
 
     auth_credential_cache_max_entries: int = Field(default=1024, gt=0)
     """Ceiling on cached exchanged credentials.
 
-    A security limit before it is a memory one. Unbounded, this grows with every
-    distinct (token, upstream) pair the gateway has seen — which an
-    authenticated caller with a token mint can drive in a loop. A bound turns
-    that into eviction of somebody else's entry, costing an exchange rather than
-    the process.
-
-    Set to a very small number to make caching effectively per-request; there is
-    deliberately no boolean to turn it off, because a cache that can be disabled
-    by configuration is one where "is it on?" becomes a question during an
-    incident.
+    Bounds memory a caller could fill with distinct tokens. No boolean disables
+    the cache; set a tiny value for effectively per-request caching.
     """
 
     auth_required: bool = True
-    """Refuse to start without an identity provider.
+    """Refuse to serve without an identity provider (fails closed).
 
-    Read the polarity carefully, because this is the boolean the identity
-    settings were designed to avoid and it is the opposite one.
-
-    ``ACP_AUTH_ENABLED=false`` would fail **open** when somebody forgot it: a
-    gateway serving every request while its configuration claimed it
-    authenticated them. This fails **closed**. It is not a switch that turns
-    authentication on — nothing here can do that, only configuring a provider
-    can. It is an *assertion* that one is configured, and the failure mode of
-    forgetting to set it is a gateway that refuses to start.
-
-    Default ``True``. Running unauthenticated with a warning was defensible
-    only while there was no identity provider to run against; Keycloak in
-    Compose removed that excuse. Development still gets the old behaviour by
-    saying so out loud with ``ACP_AUTH_REQUIRED=false``, which is a sentence
-    somebody has to write.
-
-    **Enforced where the gateway starts serving, not here.** The first version
-    of this checked in the settings validator, which made it impossible to
-    construct a ``GatewaySettings`` at all without an identity provider — and
-    that broke ``acp schemas capture``, a local command that reads upstream
-    catalogues and has nothing whatever to do with authentication. The claim
-    being made is "this gateway must not *serve* unauthenticated", so it belongs
-    in ``build_token_validator``, where serving is about to happen. A rule
-    enforced further out than its own scope stops being a security property and
-    starts being an obstacle, which is how fail-closed controls get switched off.
+    An assertion that a provider is configured, not a switch that enables auth.
+    ``ACP_AUTH_REQUIRED=false`` allows unauthenticated development. Enforced in
+    ``build_token_validator``, not here, so local commands like ``acp schemas
+    capture`` still load settings.
     """
 
     auth_insecure_issuer_hosts: list[str] = Field(default_factory=list)
-    """Hosts whose metadata and key sets may be fetched over plain HTTP.
+    """Non-loopback hosts whose metadata and keys may use plain HTTP (ADR 0018).
 
-    Empty by default. Loopback is already exempt without this — traffic that
-    never leaves the machine has no in-flight to be rewritten in — so this
-    exists for exactly one case: a development identity provider reachable from
-    another container by service name, where the URL is ``http://keycloak:8080``
-    and neither TLS nor loopback applies.
-
-    The escape hatch is here so that nobody builds a worse one. The alternatives
-    when Keycloak arrived were to add ``keycloak`` to the loopback set, which is
-    a lie that would ship to every deployment, or to disable certificate
-    verification, which is broader, quieter, and invisible in a config file.
-    This is narrow, it is a hostname somebody typed, and every start logs a
-    warning naming each entry. See ADR 0018.
+    For a development provider such as ``http://keycloak:8080``; each entry is
+    logged as a warning at every start. Loopback is already exempt.
     """
 
     auth_algorithms: list[str] = Field(
         default_factory=lambda: ["RS256", "RS384", "RS512", "ES256", "ES384", "PS256"]
     )
-    """Signature algorithms accepted, unless an entry in the issuers file
-    overrides them for one server. Asymmetric only — a symmetric algorithm here
-    is refused at startup, because a JWKS publishes *public* keys and an
-    attacker can sign HS256 with one."""
+    """Accepted signature algorithms, overridable per issuer.
+
+    Asymmetric only; symmetric ones are refused at startup because JWKS keys are public.
+    """
 
     auth_leeway: float = Field(default=60.0, ge=0)
     """Clock skew tolerated on ``exp``, ``nbf`` and ``iat``, in seconds."""
 
     auth_discovery_timeout: float = Field(default=5.0, gt=0)
-    """Seconds to wait for an authorization server's metadata at startup.
-
-    Short. This runs before the port is bound, so a hung identity provider
-    delays a deployment rather than a request — but a deploy that hangs
-    indefinitely on a DNS black hole is its own kind of outage.
-    """
+    """Seconds to wait for issuer metadata at startup; short so a deploy never hangs."""
 
     auth_jwks_cache_ttl: float = Field(default=600.0, gt=0)
 
     auth_jwks_min_refresh_interval: float = Field(default=30.0, ge=0)
-    """Floor between key-set fetches triggered by an unknown ``kid``.
-
-    A rate limit on attacker-triggered work: the ``kid`` comes from the token,
-    so refetching on every miss makes the gateway an amplifier pointed at its
-    own identity provider.
-    """
+    """Floor between refetches on an unknown ``kid``, so tokens cannot amplify load on the IdP."""
 
     @property
     def authentication_configured(self) -> bool:
@@ -672,15 +365,11 @@ class GatewaySettings(BaseSettings):
 
     @model_validator(mode="after")
     def _operator_channel_is_coherent(self) -> GatewaySettings:
-        """The two ways to authenticate an operator, each checked for sense.
+        """Check the operator credentials.
 
-        An operator audience needs issuers to verify it against and must not be the gateway's own
-        audience. A shared token that is set must be long enough to be one. Empty for both means "no
-        channel" and is fine. Anything else authorises a write that grants permissions, on a
-        listener the compose stack publishes, and a four-character value there is not a weak
-        credential but a guessable one. Sixteen characters is the floor `secrets.token_urlsafe(12)`
-        produces and well under what `acp secrets` would store; it exists to catch `changeme`, not
-        to grade entropy.
+        An operator audience needs issuers and must differ from the gateway's audience;
+        a set shared token must meet `MIN_OPERATOR_TOKEN_LENGTH`, to catch `changeme`.
+        Both empty means no channel.
         """
         if self.approval_operator_audience and not (self.auth_issuer or self.auth_issuers_file):
             msg = (
@@ -710,13 +399,7 @@ class GatewaySettings(BaseSettings):
 
     @model_validator(mode="after")
     def _identity_settings_are_coherent(self) -> GatewaySettings:
-        """Refuse anything that would authenticate differently than it reads.
-
-        Three separate ways to be wrong, and all of them fail *open* if allowed
-        through — the gateway would serve while its configuration described
-        something else. Configuration errors in this project are fatal for
-        exactly this reason.
-        """
+        """Refuse identity settings that would authenticate differently than they read."""
         single = {
             "ACP_AUTH_ISSUER": self.auth_issuer,
             "ACP_AUTH_AUDIENCE": self.auth_audience,
@@ -757,8 +440,7 @@ class GatewaySettings(BaseSettings):
         }
         absent = [name for name, value in pair.items() if not value]
         if absent and len(absent) != len(pair):
-            # Half of a client credential is not a weaker credential, it is a
-            # gateway that believes it mints per-upstream tokens and does not.
+            # Half a client credential would silently disable exchange.
             msg = (
                 "ACP_AUTH_CLIENT_ID and ACP_AUTH_CLIENT_SECRET are all-or-nothing; "
                 f"missing {', '.join(sorted(absent))}. Both together enable RFC 8693 "
@@ -796,10 +478,7 @@ class GatewaySettings(BaseSettings):
             raise ValueError(msg)
 
         if self.auth_resource and not self.authentication_configured:
-            # The document's only useful field would be `authorization_servers`,
-            # and there are none. Publishing it anyway would advertise a
-            # discovery path that dead-ends, which is a worse answer to "how do
-            # I authenticate here" than publishing nothing at all.
+            # With no authorization servers, the metadata would be a dead end.
             msg = (
                 "ACP_AUTH_RESOURCE names a resource no client can obtain a token for, "
                 "because no authorization server is configured. Set ACP_AUTH_ISSUER "
@@ -810,24 +489,14 @@ class GatewaySettings(BaseSettings):
 
 
 def allowed_hosts_for(hosts: list[str], port: int) -> list[str]:
-    """Expand an allow-list to cover the port-qualified form of each host.
+    """Add ``host:port`` for each bare host, since ``Host`` carries non-default ports.
 
-    The HTTP ``Host`` header carries the port for any non-default port, so a
-    client reaching ``http://127.0.0.1:8080/mcp`` sends ``Host: 127.0.0.1:8080``
-    — which does not match a bare ``127.0.0.1`` in the allow-list, and the SDK
-    answers 421 Misdirected Request.
-
-    This was missed by the entire test suite because those tests connect on the
-    default port, where the Host header has no port suffix at all. It surfaced
-    the first time a real MCP client connected on :8080. Entries that already
-    specify a port are left alone, so an explicit ``gateway.internal:443`` is
-    not mangled.
+    Without it the SDK answers 421. Entries that already have a port are kept as is.
     """
     expanded: list[str] = []
 
     def add(value: str) -> None:
-        # Order-preserving dedup, so applying this twice is a no-op. Duplicates
-        # in an allow-list are harmless but make a config dump confusing to read.
+        # Order-preserving dedup, so applying this twice is a no-op.
         if value not in expanded:
             expanded.append(value)
 
@@ -841,10 +510,8 @@ def allowed_hosts_for(hosts: list[str], port: int) -> list[str]:
 def load_upstreams(path: Path) -> list[UpstreamConfig]:
     """Read and validate the upstream definitions.
 
-    Every failure mode here is a startup failure with a message naming the file
-    and, where possible, the offending entry. Configuration errors are read by
-    a human at 3am; "validation error for UpstreamConfig" without a filename is
-    not good enough.
+    Raises:
+        ConfigurationError: Naming the file and, where possible, the entry.
     """
     try:
         raw = path.read_text(encoding="utf-8")
@@ -889,11 +556,7 @@ def load_upstreams(path: Path) -> list[UpstreamConfig]:
 
 
 def _reject_duplicate_names(configs: list[UpstreamConfig], path: Path) -> None:
-    """Two upstreams sharing a name would make qualified tool names ambiguous.
-
-    ``mock-a__search`` must identify exactly one server, or routing silently
-    sends calls to whichever happened to be registered last (ADR 0003).
-    """
+    """Reject duplicate upstream names, which make qualified tool names ambiguous (ADR 0003)."""
     seen: set[str] = set()
     for config in configs:
         if config.name in seen:
@@ -908,13 +571,10 @@ def _reject_duplicate_names(configs: list[UpstreamConfig], path: Path) -> None:
 def load_issuers(path: Path) -> list[dict[str, Any]]:
     """Read the authorization servers this gateway will accept tokens from.
 
-    Returns plain documents rather than built registrations, because a
-    registration may still need its `jwks_url` discovered — and discovery is
-    async, network-touching, and has no business inside a config parser.
+    Returns plain documents, since `jwks_url` discovery is async and happens later.
 
-    Same failure discipline as `load_upstreams`: every problem is a startup
-    failure naming the file and, where possible, the offending entry. This one
-    is read by whoever is trying to work out why nothing can authenticate.
+    Raises:
+        ConfigurationError: Naming the file and, where possible, the entry.
     """
     try:
         raw = path.read_text(encoding="utf-8")

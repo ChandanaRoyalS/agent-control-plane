@@ -1,32 +1,8 @@
-"""Prometheus metrics.
+"""Prometheus metrics, kept to bounded label cardinality.
 
-Traces answer "what happened in this one request". Metrics answer "what is
-happening across all of them" — how often, how slowly, and how much of it is
-failing. They are cheap to add now and are the thing you want the instant you
-load test (see ``perf/``).
-
-Everything here is deliberately small in cardinality, and that is the whole
-design problem. A Prometheus time series exists for every distinct combination
-of label values, and each one costs memory in the server forever. The failure
-mode is not a slow dashboard; it is an observability system that falls over
-because of what it was asked to observe.
-
-Three rules follow from that, and each is enforced below rather than left to
-whoever adds the next metric:
-
-**No label whose values come from a caller.** A tool name looks safe — a real
-catalogue has tens of them — but the name in a `tools/call` is chosen by the
-agent, not by us. An agent calling a hundred thousand nonexistent tools would
-mint a hundred thousand series. So the tool label is resolved against the tools
-actually known, and anything else becomes ``unknown``.
-
-**No arguments, ever.** Same reasoning as the span attributes in ``semconv``,
-one step more severe: a span with a high-cardinality attribute is merely large,
-a metric with one is unbounded.
-
-**Seconds, not milliseconds.** Prometheus convention is base units. The logs
-carry ``duration_ms`` because a human reads them; the histogram carries seconds
-because a query engine reads it.
+No label takes caller-chosen values (unknown tool names become ``unknown``), arguments are
+never labels, and durations are in seconds. Every recorder is a no-op when
+``prometheus_client`` is not installed.
 """
 
 from __future__ import annotations
@@ -40,12 +16,7 @@ logger = logging.getLogger(__name__)
 NAMESPACE: Final = "acp"
 
 UNKNOWN_TOOL: Final = "unknown"
-"""Stand-in for a tool name that is not in any upstream's catalogue.
-
-The cardinality guard. Without it, `tools/call` on a name nobody exposes is a
-free write into the metrics server's memory, repeatable as fast as an agent can
-issue requests.
-"""
+"""Label for a tool name not in any catalogue, so callers cannot mint series."""
 
 DURATION_BUCKETS: Final = (
     0.005,
@@ -62,22 +33,10 @@ DURATION_BUCKETS: Final = (
     30.0,
     60.0,
 )
-"""Chosen against this system's timeouts, not left at the library defaults.
-
-Prometheus' default buckets stop at 10 seconds. The default upstream read
-timeout is 30, so every timed-out call would land in the overflow bucket
-together — and a p99 computed from a bucket with no upper bound is not a number,
-it is a guess. The tail here is where the interesting failures live, so the tail
-is where the resolution has to be.
-"""
+"""Extends past the library's 10 s default to cover the 30 s default upstream read timeout."""
 
 BREAKER_STATES: Final = ("closed", "open", "half_open")
-"""Exported as a *state set*: one series per state, exactly one of them 1.
-
-The tempting alternative is a single gauge holding 0, 1 or 2. It is smaller and
-it is unreadable — nobody remembers whether 2 means open, and
-`max_over_time(breaker == 2)` is a query you have to decode rather than read.
-"""
+"""Exported as a state set: one series per state, exactly one of them 1."""
 
 try:  # pragma: no cover - depends on what the environment has installed
     from prometheus_client import (
@@ -116,14 +75,7 @@ class _Collectors:
 
 
 def _build() -> _Collectors | None:
-    """Construct the collectors against a registry of our own.
-
-    A private ``CollectorRegistry`` rather than the library's global one. The
-    global registry raises on duplicate registration, which makes it impossible
-    to build the metrics twice in one process — and a module-level global that
-    survives between tests is exactly the mistake that made a tracing test leak
-    an exporter into every test after it.
-    """
+    """Build the collectors on a private registry (the global one rejects re-registration)."""
     if not METRICS_AVAILABLE:
         return None
 
@@ -140,9 +92,7 @@ def _build() -> _Collectors | None:
         upstream_duration=Histogram(
             "upstream_call_duration_seconds",
             "Wall time of one upstream request, measured at the socket.",
-            # Deliberately no `tool` label: buckets multiply, and
-            # upstreams x tools x buckets is how a histogram becomes the
-            # largest thing in your metrics server.
+            # No `tool` label: upstreams x tools x buckets would explode.
             ["upstream", "method"],
             namespace=NAMESPACE,
             registry=registry,
@@ -179,10 +129,7 @@ def _build() -> _Collectors | None:
         schema_drift=Counter(
             "schema_drift_events_total",
             "Catalogue changes detected against the committed baseline, by kind.",
-            # Both labels are closed sets: upstream names come from the config
-            # file and `kind` is a StrEnum. Deliberately *not* labelled by tool
-            # — a hostile upstream chooses its own tool names, and a label value
-            # chosen by the thing being monitored is unbounded by construction.
+            # Closed sets only; not by tool, since an upstream chooses its own tool names.
             ["upstream", "kind"],
             namespace=NAMESPACE,
             registry=registry,
@@ -190,11 +137,7 @@ def _build() -> _Collectors | None:
         result_cache=Counter(
             "result_cache_total",
             "Tool-result cache lookups, by outcome.",
-            # `outcome` only. The principal is unbounded by construction, and it
-            # is also a disclosure: a per-principal hit-rate series on a scrape
-            # endpoint is a record of who asked for what and when. The tool name
-            # is bounded but omitted for the same reason — hit rate per tool is a
-            # tuning question, and this counter answers a correctness one.
+            # `outcome` only: a principal label is unbounded and discloses who asked what.
             ["outcome"],
             namespace=NAMESPACE,
             registry=registry,
@@ -202,13 +145,7 @@ def _build() -> _Collectors | None:
         credential_cache=Counter(
             "credential_cache_total",
             "Exchanged-credential cache lookups, by outcome.",
-            # `outcome` only, and emphatically not the principal. Subjects are
-            # unbounded by construction — one label value per human the gateway
-            # has ever served — and a metric that grows with your user base is a
-            # metric that eventually takes the scrape endpoint down. The
-            # audience is bounded but omitted too: hit rate per upstream is a
-            # tuning question, and this counter exists to answer a correctness
-            # one, which is whether the thing caches at all.
+            # `outcome` only: subjects are unbounded.
             ["outcome"],
             namespace=NAMESPACE,
             registry=registry,
@@ -216,15 +153,7 @@ def _build() -> _Collectors | None:
         audit_writes=Counter(
             "audit_writes_total",
             "Audit chain entries, by whether they reached the sink.",
-            # Two series: written, failed. The denominator is here for the same
-            # reason the firewall's is — a failure count with no traffic beside
-            # it cannot be turned into "how much of the record is missing", and
-            # that is the only question anybody asks of this counter.
-            #
-            # This is also the ONLY signal for a failure the audit log itself
-            # cannot record. A scrape that shows `failed` climbing is how an
-            # operator learns the chain has holes, because the place that would
-            # normally say so is the thing that broke.
+            # written/failed: the only signal for failures the audit log cannot record.
             ["outcome"],
             namespace=NAMESPACE,
             registry=registry,
@@ -232,13 +161,8 @@ def _build() -> _Collectors | None:
         firewall_decisions=Counter(
             "firewall_decisions_total",
             "Tool results screened by the injection firewall, by decision.",
-            # A closed set of five decisions (clean, reported, would_refuse,
-            # refused, withheld) over two surfaces (a tool's result, or the
-            # catalogue's description of it). The denominator is here on
-            # purpose — `clean` is counted even though it is deliberately not
-            # logged, because a detection count without the traffic it was
-            # drawn from is not a rate, and the false-positive rate is the
-            # number this whole phase is judged on.
+            # Five decisions x two surfaces (result, catalogue); `clean` is counted (not
+            # logged) so detections have a denominator.
             ["decision", "surface"],
             namespace=NAMESPACE,
             registry=registry,
@@ -246,14 +170,7 @@ def _build() -> _Collectors | None:
         firewall_findings=Counter(
             "firewall_findings_total",
             "Individual detector findings, by attack family and confidence.",
-            # Both labels are StrEnums: six families, three confidences,
-            # eighteen series, fixed forever. Deliberately not labelled by
-            # detector *or* tool — the first would grow with the codebase and
-            # the second is chosen by the caller.
-            #
-            # The *value* is attacker-influenced: a document with two hundred
-            # zero-width characters adds two hundred. That is correct for a
-            # count, and cardinality is what costs a metrics server memory.
+            # StrEnum labels only (fixed series); not by detector or caller-chosen tool.
             ["family", "confidence"],
             namespace=NAMESPACE,
             registry=registry,
@@ -277,15 +194,9 @@ _C = _build()
 
 
 def tool_label(tool: str | None, known: frozenset[str] | set[str] | None = None) -> str:
-    """Reduce a tool name to something safe to use as a label value.
+    """A bounded label value: ``none`` for no tool, ``unknown`` for a name not in ``known``.
 
-    ``None`` means the operation has no tool, which is a legitimate and bounded
-    value. A name that is not in ``known`` becomes ``unknown`` — because the
-    name in a request is chosen by the caller, and a label value chosen by a
-    caller is an unbounded write into someone else's memory.
-
-    Passing ``known=None`` skips the check, and is only correct where the name
-    has already been resolved against a catalogue.
+    ``known=None`` skips the check; use it only for names already resolved against a catalogue.
     """
     if tool is None:
         return "none"
@@ -310,22 +221,14 @@ def record_upstream_call(
 
 
 def record_retry(*, upstream: str, method: str) -> None:
-    """One attempt beyond the first.
-
-    Worth its own counter rather than being inferred from the call counter: a
-    rising retry rate against a flat error rate is an upstream that is degrading
-    but still succeeding, which is the earliest useful warning this system
-    produces.
-    """
+    """One attempt beyond the first; rising retries with flat errors means a degrading upstream."""
     if _C is None:
         return
     _C.upstream_retries.labels(upstream, method).inc()
 
 
 def observe_breaker(*, upstream: str, state: str) -> None:
-    """Publish a breaker transition. Pushed, not scraped, because transitions
-    are rare and the alternative is threading a metrics dependency through the
-    registry to reach the guard at scrape time."""
+    """Publish a breaker transition (pushed, since transitions are rare)."""
     if _C is None:
         return
     for candidate in BREAKER_STATES:
@@ -333,9 +236,7 @@ def observe_breaker(*, upstream: str, state: str) -> None:
 
 
 def observe_bulkhead(*, upstream: str, in_flight: int, capacity: int) -> None:
-    """Publish concurrency. Capacity is exported alongside the count so
-    saturation is `in_flight / capacity` rather than a number a reader has to
-    already know the limit to interpret."""
+    """Publish in-flight count and capacity, so saturation is a ratio."""
     if _C is None:
         return
     _C.bulkhead_in_flight.labels(upstream).set(in_flight)
@@ -343,27 +244,17 @@ def observe_bulkhead(*, upstream: str, in_flight: int, capacity: int) -> None:
 
 
 def record_result_cache(*, outcome: str) -> None:
-    """One tool-result cache lookup.
-
-    The interesting failure is silent in both directions. A key too *specific*
-    still returns correct results and simply never hits, so the estate serves
-    every call and nobody notices. A key too *broad* is a data breach whose only
-    artefact is its absence. Neither shows up in an error rate; the hit ratio is
-    the only place either becomes visible.
-    """
+    """One tool-result cache lookup; the hit ratio is the only signal of a mis-scoped key."""
     if _C is None:
         return
     _C.result_cache.labels(outcome).inc()
 
 
 def record_audit_write(*, outcome: str) -> None:
-    """One audit chain entry, written or not.
+    """One audit write, ``written`` or ``failed``.
 
-    ``failed`` climbing is the one alarm that cannot come from the audit log, so
-    it has to come from here. Alert on it: with `ACP_AUDIT_REQUIRED` on it means
-    calls are being refused, and with it off it means the record has holes
-    nobody will otherwise notice until they go looking for the entry that is not
-    there.
+    Alert on ``failed``: with `ACP_AUDIT_REQUIRED` on, calls are being refused; off, the
+    record has holes.
     """
     if _C is None:
         return
@@ -371,68 +262,35 @@ def record_audit_write(*, outcome: str) -> None:
 
 
 def record_firewall_decision(*, decision: str, surface: str = "result") -> None:
-    """One screened tool result, by what the gateway did about it.
-
-    The interesting series is the ratio between ``would_refuse`` and everything
-    else while a deployment runs in report mode, because that is the estimate of
-    what enforcement would cost it — measured on its own traffic rather than on
-    the project's corpus, which is the only place a deployment's own
-    false-positive rate can honestly come from.
-    """
+    """One screened tool result; in report mode ``would_refuse`` estimates enforcement's cost."""
     if _C is None:
         return
     _C.firewall_decisions.labels(decision, surface).inc()
 
 
 def record_firewall_finding(*, family: str, confidence: str) -> None:
-    """One detector finding, sliced the way the corpus is sliced.
-
-    By family, because a single detection rate over mixed traffic is unreadable:
-    the same number can be even coverage of everything or perfect coverage of
-    the easy families and nothing at all on encoding attacks. By confidence,
-    because that is what decides whether a finding can ever refuse.
-    """
+    """One detector finding, by attack family and confidence (as the corpus is sliced)."""
     if _C is None:
         return
     _C.firewall_findings.labels(family, confidence).inc()
 
 
 def record_credential_cache(*, outcome: str) -> None:
-    """One exchanged-credential cache lookup.
-
-    Worth a counter rather than a log line because the interesting number is a
-    *ratio* over time, and the interesting failure is silent: a cache whose key
-    is too specific still works, still returns correct credentials, and simply
-    never hits. Nothing breaks, the authorization server takes every request,
-    and the only symptom is a miss rate that nobody is looking at.
-    """
+    """One exchanged-credential cache lookup; a key that never hits shows only here."""
     if _C is None:
         return
     _C.credential_cache.labels(outcome).inc()
 
 
 def record_schema_drift(*, upstream: str, kind: str) -> None:
-    """One newly observed catalogue change.
-
-    A counter rather than only a gauge, because the two answer different
-    questions. The gauge says how much is outstanding right now; the counter
-    says how often this upstream changes at all — and an upstream whose
-    catalogue moves several times a week is a different kind of dependency from
-    one that has not moved in a year, regardless of whether anything is
-    outstanding at the moment you look.
-    """
+    """One newly observed catalogue change (how often an upstream changes, beside the gauge)."""
     if _C is None:
         return
     _C.schema_drift.labels(upstream, kind).inc()
 
 
 def observe_schema_drift(*, upstream: str, outstanding: int) -> None:
-    """How far this upstream currently sits from the acknowledged baseline.
-
-    Zero is written explicitly for clean upstreams. A gauge only ever set when
-    something is wrong holds its last bad value forever, which is how a
-    dashboard ends up displaying an incident that ended yesterday.
-    """
+    """Outstanding drift for this upstream; zero is set explicitly so stale values clear."""
     if _C is None:
         return
     _C.schema_drift_outstanding.labels(upstream).set(outstanding)
@@ -444,12 +302,7 @@ def observe_schema_drift(*, upstream: str, outstanding: int) -> None:
 
 
 def render() -> tuple[bytes, str]:
-    """The scrape payload and its content type.
-
-    Returns an empty body rather than raising when the library is absent, so
-    `/metrics` answers honestly instead of returning a 500 that looks like the
-    gateway is broken.
-    """
+    """The scrape payload and content type; an empty body if the library is absent."""
     if _C is None:
         return b"", CONTENT_TYPE_LATEST
     payload: bytes = generate_latest(_C.registry)

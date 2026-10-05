@@ -1,18 +1,7 @@
-"""The policy schema: what a rulebook is allowed to say.
+"""The policy schema, loaded and validated at startup; nothing here decides a request.
 
-This is the rulebook, not the engine. These models load and validate a policy
-document at startup; nothing here decides a request. What they guarantee is that
-the policy the evaluator (``acp.policy.evaluate``) reads is well-formed and its
-default is *deny* — a policy cannot be written, by omission or by typo, that
-lets an unmatched request through.
-
-Deny-by-default is structural rather than configurable on purpose. A boolean
-`default_allow` somewhere is a boolean somebody flips for a demo and forgets, and
-the failure it produces is the quiet kind: every request permitted, no error, no
-log line that looks wrong. So the document's default is fixed at deny and the
-only thing a rule can do is carve an *allow* out of it. There is no way to spell
-"allow everything" except by writing a rule that says so, in the file, in the
-diff.
+Deny-by-default is structural, not a setting: no ``default_allow`` exists to flip, so
+allowing anything takes an explicit rule in the file (ADR 0025).
 """
 
 from __future__ import annotations
@@ -23,27 +12,17 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# A rule name is a label for humans and for the audit log (a later task): which rule
-# allowed this call. Constrained to the same shape as an upstream name so it is
-# safe to put in a log field, a metric label, or a span attribute without
-# quoting — lowercase alphanumeric with single hyphens.
+# Lowercase alphanumeric with single hyphens: safe unquoted in logs, metric labels, spans.
 _RULE_NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 MAX_RULE_NAME_LENGTH = 48
-"""Long enough to be descriptive (`allow-search-for-support-agents`), short
-enough to stay readable in a log line or a metric label."""
+"""Descriptive yet readable in a log line or metric label."""
 
 
 def canonical(value: object) -> str | None:
-    """The one string form a JSON scalar compares as; ``None`` for a non-scalar.
+    """Return the JSON-spelled string a scalar compares as; ``None`` for a non-scalar.
 
-    A policy file holds YAML scalars, a tool argument arrives as whatever JSON
-    the client sent, and "exact match" has to mean the same thing on both
-    sides. Booleans are ``true``/``false`` as JSON spells them, not ``True`` as
-    Python prints them; numbers are JSON's rendering; a string is itself.
-    Lists, objects and ``null`` have no scalar form: a constraint on an
-    argument that is one of those cannot be satisfied — nor, for a
-    restriction, escaped (ADR 0068).
+    A non-scalar can neither satisfy a grant nor escape a restriction (ADR 0068).
     """
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -67,27 +46,9 @@ def _canonical_value(value: object, name: str) -> str:
 class Effect(StrEnum):
     """What a matching rule does.
 
-    Both effects exist even though the document default is already deny, because
-    an explicit `deny` rule is not redundant with the default: it lets a narrow
-    denial sit *in front of* a broad allow. "Support agents may call any tool on
-    the CRM, except delete-record" is one allow and one deny, and without an
-    explicit deny effect it could only be written as an allow-list of every tool
-    but one — which silently grows a hole every time the CRM adds a tool.
-
-    A str-valued enum so it round-trips through YAML as the word `allow` or
-    `deny` rather than an integer nobody can read in a diff.
-
-    **`require_approval` is the third, and it is a policy effect rather than a
-    separate config file on purpose.** "Support agents may delete records, but a
-    delete against a production dataset needs a human" is a statement about *who*
-    may do *what to which argument* — which is precisely what this language
-    already expresses, down to the argument (ADR 0031). A tool-level
-    `approvals.yaml` could only ever say "this tool needs approval for
-    everybody", and the interesting approvals are never that coarse.
-
-    It sits in first-match-wins order like everything else, so a narrow
-    `require_approval` in front of a broad `allow` reads exactly the way an
-    operator means it.
+    An explicit ``deny`` lets a narrow denial sit ahead of a broad allow.
+    ``require_approval`` is an effect so approvals can be scoped by subject, tool and
+    argument (ADR 0031, ADR 0048).
     """
 
     ALLOW = "allow"
@@ -96,85 +57,43 @@ class Effect(StrEnum):
 
 
 RESTRICTIVE = frozenset({Effect.DENY, Effect.REQUIRE_APPROVAL})
-"""The effects a caller wants to get past rather than to earn. Argument
-constraints on these read fail-closed the other way round from ``allow`` (ADR
-0068): the call must prove its value is outside the set, not inside it."""
+"""Effects whose argument constraints a call clears only by a value outside the set (ADR 0068)."""
 
 
 class Rule(BaseModel):
-    """One rule: whom it matches, what it matches, and what it then does.
+    """One rule: whom and what it matches, and its effect.
 
-    Every match field defaults to "matches anything", so an empty-bodied rule
-    matches every request — which is exactly why the *default effect has no
-    default* and must be written. A rule that matches everything and forgot to
-    say allow-or-deny is the most dangerous line in the file, so the schema
-    refuses to guess.
-
-    Matching semantics (which the evaluator implements, and which the shape here
-    commits to): a field set to a list matches when the request's value is in
-    that list; a field left unset matches anything. All set fields must match —
-    the fields are ANDed. This is deliberately the simplest thing that can
-    express real rules; a richer matcher (globs, argument predicates) is a later
-    task and would extend, not replace, this.
+    A list field matches when the request's value is in it; an empty field matches
+    anything; set fields are ANDed. ``effect`` has no default because an empty rule
+    matches everything.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     name: str = Field(max_length=MAX_RULE_NAME_LENGTH)
-    """A label, unique within the document. Names the rule that allowed or
-    denied a call in the audit log — an anonymous rule is a decision nobody can
-    explain after the fact."""
+    """Unique label naming the deciding rule in the audit log."""
 
     effect: Effect
-    """Allow or deny. No default: see the class docstring. A rule that matches
-    everything and omits this would be catastrophic, so the omission is an
-    error, not a guess."""
+    """Required: omitting it on a match-everything rule must be an error, not a guess."""
 
     subjects: tuple[str, ...] = ()
-    """Which human principals this rule matches. Empty means any subject.
-
-    Matched against `Principal.subject`. "Any subject" is a real and common
-    case — a rule about a tool that everyone may use — so empty is a legitimate
-    value here, unlike `effect`. The safety comes from the document default
-    being deny, not from forcing every rule to name subjects.
-    """
+    """Human principals matched against `Principal.subject`; empty means any."""
 
     actors: tuple[str, ...] = ()
-    """Which agents (workloads) this rule matches. Empty means any actor.
-
-    Matched against the principal's actor identity. Separate from `subjects`
-    because "which human may read this" and "which agent may act at all" are
-    different questions (ADR 0015) — a compromised agent is denied here even
-    when the human it acts for is allowed by `subjects`.
-    """
+    """Agents matched against the actor identity; empty means any (ADR 0015)."""
 
     tools: tuple[str, ...] = ()
-    """Which qualified tool names (`upstream__tool`, ADR 0003) this rule
-    matches. Empty means any tool."""
+    """Qualified tool names (`upstream__tool`, ADR 0003); empty means any."""
 
     args: dict[str, tuple[str, ...]] = Field(default_factory=dict)
-    """Argument constraints, by argument name. Each entry maps an argument to a
-    set of values. An unset ``args`` (the empty default) constrains nothing, so
-    a rule keeps matching every call the way it did before this field existed —
-    the same "unset means anything" semantics as `subjects` and `tools`, one
-    level deeper.
+    """Argument name to set of values, checked at call time; empty constrains nothing.
 
-    What a constraint means depends on the effect (ADR 0068). On an ``allow``
-    it is the values that *earn* the grant: the call must supply the argument
-    as a scalar exactly in the set. On a ``deny`` or ``require_approval`` it is
-    the values that *keep* the restriction: the call is cleared of it only by
-    supplying the argument as a scalar whose folded form (case, whitespace,
-    Unicode compatibility) is outside the set. A missing argument matches a
-    restriction and not a grant, so that the doubtful case always costs the
-    caller.
-
-    Values may be written as YAML strings, numbers or booleans; each is kept in
-    the canonical form a JSON argument compares as (``10``, ``true``), so
-    ``limit: [10]`` matches the integer ten a client sends. This is membership,
-    not a condition language — no operators, globs or ranges — and it is
-    checked at *call* time, where the arguments exist; `tools/list` has no
-    arguments, so a rule with `args` still makes its tool *visible* (see
-    `visible_tools` and `enforce_call`)."""
+    On an ``allow`` the call must supply the argument as a scalar exactly in the set;
+    on a ``deny`` or ``require_approval`` only a scalar whose folded form is outside the
+    set clears it, so a missing argument matches a restriction, not a grant (ADR 0068).
+    YAML values are stored in canonical JSON form, so ``limit: [10]`` matches integer
+    10. Plain membership: no operators, globs or ranges. `tools/list` has no
+    arguments, so `args` does not hide a tool (see `visible_tools`)."""
 
     @field_validator("args", mode="before")
     @classmethod
@@ -202,34 +121,21 @@ class Rule(BaseModel):
 
 
 class Policy(BaseModel):
-    """A whole policy document: an ordered list of rules over a deny default.
+    """An ordered list of rules over a fixed deny default.
 
-    The default is not a field. It is the fixed behaviour of the evaluator — a
-    request matching no rule is denied — and it is stated here in
-    the type so that no future edit can turn it into configuration. The only way
-    the document expresses "allow" is a rule whose effect is allow.
-
-    Order matters, and the model preserves it: the evaluator reads rules top to
-    bottom and the first match wins, which is what lets a narrow `deny` sit
-    ahead of a broad `allow`. That evaluation order is a decision recorded in
-    the ADR, not an accident of list iteration.
+    The default is deliberately not a field. Order is preserved because the first
+    match wins (ADR 0026).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     rules: tuple[Rule, ...] = ()
-    """The rules, in evaluation order. Empty is valid and means deny everything:
-    a gateway with an empty policy refuses every call rather than failing to
-    start. That is the safe direction — a policy file that got truncated should
-    lock the doors, not open them."""
+    """Rules in evaluation order; empty is valid and denies every call."""
 
     @field_validator("rules")
     @classmethod
     def _unique_names(cls, value: tuple[Rule, ...]) -> tuple[Rule, ...]:
-        """Rule names must be unique, because the audit log identifies a
-        decision by the name of the rule that made it. Two rules called
-        `allow-search` make "allowed by allow-search" ambiguous — and the
-        ambiguity surfaces in an incident review, which is the worst time."""
+        """Reject duplicate names, which would make audit attributions ambiguous."""
         seen: set[str] = set()
         for rule in value:
             if rule.name in seen:
@@ -245,16 +151,6 @@ class Policy(BaseModel):
     def gates_calls(self) -> bool:
         """Whether any rule holds a call for a person (ADR 0048).
 
-        Asked at startup, so that a deployment whose policy can hold a call gets
-        the store and the operator channel that make holding one answerable —
-        and one whose policy cannot gets neither. Presence-based like every other
-        switch in `runtime`: the configuration that uses the feature is what
-        turns it on, rather than a second flag somebody has to remember to set
-        alongside the rule they just wrote.
-
-        The alternative was building a store unconditionally. It is nearly free,
-        and it is still wrong: an operator reading `approval.store_enabled` in
-        the startup log would learn nothing about whether this gateway can
-        actually hold anything.
+        Read at startup: only then are the approval store and operator channel built.
         """
         return any(rule.effect is Effect.REQUIRE_APPROVAL for rule in self.rules)

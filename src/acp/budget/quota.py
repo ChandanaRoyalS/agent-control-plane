@@ -1,17 +1,7 @@
-"""A fixed-window quota, per principal, with time injected.
+"""A fixed-window quota per principal, bounding total spend where rate limits bound speed.
 
-Rate limiting bounds the *rate* — how fast a principal may call. A
-quota bounds the *total* over a longer window — how many calls in an hour, a day.
-The two are complementary: a slow drip that never trips the rate limit can still
-run up unbounded spend over a day, and a quota is what stops it.
-
-The window is clock-aligned, not anchored to first use: the window containing
-``now`` is ``floor(now / window_seconds)``, so a daily quota resets at the same
-absolute boundary for everyone rather than 24 hours after each principal's first
-call. That is what a deployer means by "1000 a day" — a calendar day, the same
-for all — and it makes the reset time answerable without remembering when anyone
-started. Time is injected, never read from a clock inside, so the whole thing is
-pure and tested by advancing ``now`` across boundaries by hand.
+Windows are clock-aligned (``floor(now / window_seconds)``), so everyone resets at the
+same absolute boundary. Time is injected, never read, keeping it pure.
 """
 
 from __future__ import annotations
@@ -27,19 +17,14 @@ from acp.budget.ratelimit import DEFAULT_MAX_PRINCIPALS
 class QuotaCounter:
     """Per-principal spend within the current fixed window.
 
-    ``limit`` is the most a principal may spend in a window of
-    ``window_seconds``; the window is clock-aligned, so it resets at absolute
-    boundaries and the count starts again from zero. In-memory and per-process,
-    like the rate limiter, and for the same reason — correct for a single
-    gateway, with a shared store across replicas left as a later extension.
+    ``limit`` is the most a principal may spend per window. In-memory and per-process,
+    like the rate limiter.
     """
 
     limit: float
     window_seconds: float
     max_principals: int = DEFAULT_MAX_PRINCIPALS
-    # Per principal: (window index that the tally belongs to, amount spent in it).
-    # Insertion-ordered, bounded; see `RateLimiter._bucket` for why a budget's
-    # per-principal state must not grow without limit.
+    # Per principal: (window index, amount spent). Bounded LRU; see `RateLimiter._bucket`.
     _spent: OrderedDict[str, tuple[int, float]] = field(default_factory=OrderedDict)
 
     def __post_init__(self) -> None:
@@ -54,8 +39,7 @@ class QuotaCounter:
         return math.floor(now / self.window_seconds)
 
     def _used(self, principal: str, now: float) -> float:
-        """Spend recorded for ``principal`` in the window containing ``now`` —
-        zero if their last spend was in an earlier window (it has since reset)."""
+        """Return spend in the window containing ``now``; zero if last spent earlier."""
         entry = self._spent.get(principal)
         if entry is None or entry[0] != self._window_index(now):
             return 0.0
@@ -64,8 +48,7 @@ class QuotaCounter:
     def check(self, principal: str, now: float, cost: float = 1.0) -> bool:
         """Spend ``cost`` of ``principal``'s quota in the current window.
 
-        Returns ``True`` and records the spend when it fits within the limit,
-        ``False`` and records nothing when it would exceed it.
+        Returns ``True`` and records it if it fits, else ``False`` and records nothing.
         """
         if not self.affords(principal, now, cost):
             return False

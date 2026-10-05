@@ -1,11 +1,7 @@
-"""Result caching: repeat an answer to the person who asked for it, and nobody else.
+"""Result caching: repeat an answer only to the caller who asked for it.
 
-The last budget control. Rate limits, costs and quotas bound how much an agent
-may spend; this bounds how often the estate is asked the same question. A read
-the same caller makes twice within a few seconds should not cost two upstream
-round trips, two credential exchanges and two budget draws.
-
-The whole risk is in one function — `cache.key_for`. See ADR 0035.
+Saves upstream round trips for repeated reads. The whole risk is in `cache.key_for`
+(ADR 0035).
 """
 
 from acp.results.cache import KEY_VERSION, ResultCache, ResultKey, key_for

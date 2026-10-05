@@ -1,38 +1,10 @@
-"""Caching an upstream's catalogue, for exactly as long as it says to.
+"""Caching an upstream's catalogue, for exactly as long as it says to (ADR 0012).
 
-The obvious benefit is the small one: a `tools/list` served from memory instead
-of a round trip, once per upstream rather than once per agent request.
-
-The benefit that actually matters is one layer further out. An agent's prompt
-contains its tool list. If that list changes — even in field ordering — the
-model provider's prompt cache misses, and the whole prompt is billed and
-processed at full price again. A catalogue that is stable for five minutes is
-not merely a latency improvement; it is the difference between paying for those
-tokens once and paying for them on every single turn. Cache stability here is a
-cost decision that happens to look like a performance one.
-
-**The upstream decides, within limits we set.** ``ttlMs`` and ``cacheScope``
-come from the upstream, and both default to the conservative answer — zero and
-``private`` — so caching is opted into rather than assumed. But a hint is input
-from a system the gateway does not control, so it is clamped: an upstream
-advertising a day-long TTL, by bug or by design, would otherwise freeze its
-catalogue for a day and the gateway would keep serving tools that no longer
-exist.
-
-**``private`` is an authorization boundary, not a performance hint.** The MCP
-SDK's own client cache states the rule plainly: only ``public`` entries may be
-shared across authorization contexts. A ``private`` catalogue is one the
-upstream computed *for a particular caller*, and holding it in a cache shared
-between callers would hand one principal the tool list belonging to another.
-This cache is keyed per upstream, not per principal, so there is exactly one
-thing it can do safely, and it does that: cache ``public`` only. A ``private``
-catalogue is never held here. (Per-principal caching of *results* lives in
-``acp.results``, keyed on tenant, subject and actor — ADR 0035.)
-
-**No stale-on-error.** Serving a cached catalogue for an upstream that has since
-died would have the agent calling tools that cannot work — precisely what
-health-driven withdrawal (ADR 0011) exists to prevent. A cache entry is a claim about
-freshness, not a consolation prize.
+A stable catalogue also keeps the model provider's prompt cache warm. The
+upstream's ``ttlMs`` hint is clamped. The cache is keyed per upstream, so only
+``public`` catalogues are held: ``private`` is an authorization boundary
+(per-principal result caching is ``acp.results``, ADR 0035). No stale-on-error, so a
+dead upstream's tools are not served (ADR 0011).
 """
 
 from __future__ import annotations
@@ -51,12 +23,7 @@ from acp.upstream.protocol import Upstream
 logger = logging.getLogger(__name__)
 
 MAX_TTL_MS = 24 * 60 * 60 * 1000
-"""Twenty-four hours, matching the ceiling the MCP SDK's own client applies.
-
-Pinned to the SDK's value by a conformance test rather than chosen
-independently: two caches in one system disagreeing about the maximum lifetime
-of the same response is a difference nobody would find until it mattered.
-"""
+"""Twenty-four hours, pinned to the MCP SDK client's ceiling by a conformance test."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,26 +36,14 @@ class CachePolicy:
     """Ceiling applied to whatever the upstream asked for."""
 
     default_ttl_ms: int = 0
-    """Used when a response carries no hint at all.
-
-    Zero — do not cache — matching the SDK's default. An upstream that says
-    nothing has not agreed to anything, and inferring consent from silence is
-    how a gateway ends up serving a catalogue its owner never sanctioned.
-    """
+    """Used when a response carries no hint; zero (do not cache), as in the SDK."""
 
     def ttl_seconds_for(self, result: ListToolsResult) -> float:
-        """How long this response may be held, in seconds. Zero means not at all.
-
-        Returns zero for anything ``private``, which is the authorization rule
-        rather than a tuning choice — see the module docstring.
-        """
+        """Seconds this response may be held; zero for disabled or ``private``."""
         if not self.enabled or result.cache_scope != "public":
             return 0.0
-        # An explicit `ttlMs: 0` is an instruction, not an absence — the SDK's
-        # own cache makes the same distinction, in its words "an explicit
-        # ttlMs: 0 stays 0". Letting a configured default override it would
-        # mean caching a catalogue whose owner said, in as many words, not to.
-        # Pydantic's `model_fields_set` is what tells the two apart.
+        # An explicit `ttlMs: 0` stays 0, as in the SDK; the default applies only
+        # when the field is absent (`model_fields_set`).
         ttl_ms = result.ttl_ms if "ttl_ms" in result.model_fields_set else self.default_ttl_ms
         return min(ttl_ms, self.max_ttl_ms) / 1000.0
 
@@ -110,16 +65,9 @@ def policy_for(config: UpstreamConfig) -> CachePolicy:
 class CachingUpstreamClient:
     """Holds one upstream's catalogue for as long as that upstream permits.
 
-    Outermost in the stack (see ``acp.upstream.factory``), so a hit costs
-    nothing at all — no retry bookkeeping, no breaker check, no bulkhead slot.
-    A cached answer is one the gateway already has; making it walk through three
-    layers of failure handling to be handed back would be theatre.
-
-    Only ``tools/list`` is cached. A tool *call* is an action with effects, and
-    a cache that returned yesterday's answer to `create_ticket` would be a bug
-    with consequences rather than a stale read. Result caching for genuinely
-    idempotent tools lives in `acp.results.cache`, and it needs the
-    per-principal key this layer deliberately does not have.
+    Outermost in the stack, so a hit skips every other layer. Only ``tools/list``
+    is cached; result caching needs a per-principal key and lives in
+    `acp.results.cache`.
     """
 
     def __init__(
@@ -140,12 +88,7 @@ class CachingUpstreamClient:
 
     @property
     def cached_until(self) -> float | None:
-        """When the held entry expires, or ``None`` when nothing is held.
-
-        Exposed for the readiness payload and for tests; a cache whose state
-        cannot be observed is one whose behaviour has to be inferred from
-        timing.
-        """
+        """When the held entry expires, or ``None`` when nothing is held."""
         return self._entry.expires_at if self._entry else None
 
     # -- lifecycle ---------------------------------------------------------
@@ -171,10 +114,7 @@ class CachingUpstreamClient:
         if entry is not None and self._clock() < entry.expires_at:
             return entry.result
 
-        # Deliberately dropped *before* the fetch rather than after it. If the
-        # fetch raises, the expired entry must not survive to be served later —
-        # an upstream that has started failing is exactly the one whose old
-        # catalogue is least trustworthy.
+        # Dropped before the fetch, so a failed fetch leaves no stale entry.
         self._entry = None
         result = await self._inner.list_tools()
         self._store(result)
@@ -187,12 +127,7 @@ class CachingUpstreamClient:
         return await self._inner.call_tool(name, arguments)
 
     async def invalidate(self) -> None:
-        """Forget the entry, and tell the layers below to do the same.
-
-        Called by the health monitor before every probe. A probe served from
-        cache would report on a conversation that happened minutes ago, which is
-        the one thing a liveness check must never do.
-        """
+        """Forget the entry here and below; the health monitor calls it before each probe."""
         self._entry = None
         await self._inner.invalidate()
 

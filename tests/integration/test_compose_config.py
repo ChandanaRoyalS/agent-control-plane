@@ -195,6 +195,11 @@ DELIBERATELY_OFF = {
         "would demonstrate the loading code and nothing about the control."
     ),
     "ACP_SECRET_KEY_FILE": ("no secrets store, so no key to decrypt it with — see above."),
+    "ACP_AUDIT_SIGNING_KEY_FILE": (
+        "a signing key is a secret the operator creates (ADR 0078). Committing one, "
+        "even for development, teaches the wrong thing, and generating one inside "
+        "the stack would leave the key on the same host as the log it protects."
+    ),
 }
 
 

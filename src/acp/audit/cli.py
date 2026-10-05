@@ -1,14 +1,14 @@
-"""`acp audit verify` and `acp audit checkpoint`.
+"""`acp audit verify`, `acp audit checkpoint` and `acp audit keygen`.
 
 `verify` reports every break; `checkpoint` writes the anchor that lets `verify` detect
-truncation and rewrite. Kept out of `acp.cli` (as `acp.secrets.cli` is) so it imports no
-MCP SDK and stays testable.
+truncation and rewrite; `keygen` makes the key pair that signs entries (ADR 0078). Kept
+out of `acp.cli` (as `acp.secrets.cli` is) so it imports no MCP SDK and stays testable.
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Final
@@ -16,6 +16,11 @@ from typing import Final
 from acp.audit.chain import verify
 from acp.audit.checkpoint import Checkpoint, check
 from acp.audit.checkpoint import load as load_checkpoint
+from acp.audit.signing import generate, load_verifier
+
+DEFAULT_PUBLIC_KEY_PATH: Final = Path("config/audit-signing.pub")
+"""Committed beside the checkpoint: a public key is safe to publish, and committing it is
+what lets a verifier require signatures (ADR 0078)."""
 
 OK: Final = 0
 BROKEN: Final = 1
@@ -36,22 +41,29 @@ def verify_command(
     log_path: Path,
     *,
     checkpoint_path: Path | None = None,
+    public_keys: Sequence[Path] = (),
     out: Callable[[str], None] = print,
 ) -> int:
-    """Verify the chain and its anchor, always printing both results (even with no anchor)."""
+    """Verify the chain, its signatures and its anchor, always printing every result.
+
+    With ``public_keys``, every entry must carry a valid signature by one of them.
+    """
     if not log_path.exists():
         out(f"no audit log at {log_path}")
         return MISSING
 
     anchor = load_checkpoint(checkpoint_path) if checkpoint_path is not None else None
+    verifier = load_verifier(public_keys) if public_keys else None
 
     with _lines(log_path) as stream:
-        result = verify(stream, anchor_seq=anchor.seq if anchor else None)
+        result = verify(stream, anchor_seq=anchor.seq if anchor else None, verifier=verifier)
 
     anchoring = check(anchor, entries=result.entries, anchor_hash=result.anchor_hash)
 
     out(f"chain:  {result.describe()}")
     out(f"anchor: {anchoring.reason}")
+    if verifier is not None:
+        out(f"keys:   {', '.join(sorted(verifier.keys))}")
 
     if not result.intact:
         out("")
@@ -115,5 +127,26 @@ def checkpoint_command(
         "Commit it. An anchor stored where the log's writer can reach it proves "
         "nothing, because whoever rewrites one rewrites the other — its value is "
         "exactly the distance between it and the log."
+    )
+    return OK
+
+
+def keygen_command(
+    *,
+    private_path: Path,
+    public_path: Path,
+    out: Callable[[str], None] = print,
+) -> int:
+    """Write a new signing key pair; refuses to overwrite either file."""
+    kid = generate(private_path, public_path)
+    out(f"key {kid}")
+    out(f"  private: {private_path} (mode 0600)")
+    out(f"  public:  {public_path}")
+    out("")
+    out(
+        "Give the gateway the private key as a mounted secret "
+        "(ACP_AUDIT_SIGNING_KEY_FILE), never in config/ or the image. Commit the "
+        "public key: `acp audit verify` uses it to require a valid signature on "
+        "every entry. One key signs one chain file; a new key means a new file."
     )
     return OK

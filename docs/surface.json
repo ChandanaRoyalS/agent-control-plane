@@ -67,6 +67,11 @@
       "default": "True"
     },
     {
+      "variable": "ACP_AUDIT_SIGNING_KEY_FILE",
+      "type": "Path | None",
+      "default": "None"
+    },
+    {
       "variable": "ACP_AUTH_ALGORITHMS",
       "type": "list[str]",
       "default": "['RS256', 'RS384', 'RS512', 'ES256', 'ES384', 'PS256']"
@@ -321,10 +326,18 @@
       ]
     },
     {
+      "path": "acp audit keygen",
+      "options": [
+        "--private-key",
+        "--public-key"
+      ]
+    },
+    {
       "path": "acp audit verify",
       "options": [
         "--checkpoint",
-        "--log-file"
+        "--log-file",
+        "--public-key"
       ]
     },
     {

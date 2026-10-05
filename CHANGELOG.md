@@ -15,6 +15,16 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+### Added
+
+- Signed audit entries (ADR 0078). `ACP_AUDIT_SIGNING_KEY_FILE` names an
+  Ed25519 private key; each entry then carries `sig` and `kid`, and
+  `acp audit verify --public-key` (default `config/audit-signing.pub`, when it
+  exists) requires a valid signature on every entry, all from one key.
+  `acp audit keygen` makes the pair. A gateway refuses to continue a file
+  under a different signing state, so enabling signing or rotating the key
+  starts a new audit file. Unsigned chains are unchanged.
+
 ### Changed
 
 - CI and the release workflow use the current major version of every action

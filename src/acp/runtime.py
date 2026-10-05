@@ -20,6 +20,7 @@ from acp.approvals import DEFAULT_TTL_SECONDS, ApprovalStore, InMemoryApprovalSt
 from acp.approvals.redis_store import RedisApprovalStore
 from acp.audit import AuditLog, FileAuditSink
 from acp.audit.chain import Entry
+from acp.audit.signing import load_signer
 from acp.budget import CostTable, QuotaCounter, RateLimiter, load_costs
 from acp.budget.account import parties
 from acp.budget.charge import Budgets
@@ -255,6 +256,11 @@ def control_states(settings: GatewaySettings) -> dict[str, str]:
     return {
         "authentication": "on" if settings.authentication_configured else "off",
         "audit": "on" if settings.audit_file is not None else "off",
+        "audit_signing": (
+            "on"
+            if settings.audit_file is not None and settings.audit_signing_key_file is not None
+            else "off"
+        ),
         "firewall": settings.firewall_mode.value,
         "firewall_learned": (
             settings.firewall_learned.value
@@ -315,7 +321,12 @@ def build_audit_log(settings: GatewaySettings, console: TraceHub | None = None) 
         )
         return None
 
-    sink = FileAuditSink(settings.audit_file, fsync=settings.audit_fsync)
+    signer = (
+        load_signer(settings.audit_signing_key_file)
+        if settings.audit_signing_key_file is not None
+        else None
+    )
+    sink = FileAuditSink(settings.audit_file, fsync=settings.audit_fsync, signer=signer)
 
     if not settings.audit_required:
         logger.warning(
@@ -338,6 +349,7 @@ def build_audit_log(settings: GatewaySettings, console: TraceHub | None = None) 
             "head": sink.head[:16],
             "required": settings.audit_required,
             "fsync": settings.audit_fsync,
+            "signing_key": signer.kid if signer is not None else None,
         },
     )
     published = None

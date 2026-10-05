@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from acp import __version__
+from acp.audit.record import AuditRecord, Category
+from acp.audit.sink import FileAuditSink
 from acp.cli import build_parser, main
 
 
@@ -182,3 +185,27 @@ def test_check_output_survives_being_merged_into_one_stream(
     assert exit_code == 1
     assert "drift detected" in captured.out
     assert "acp schemas capture" in captured.err
+
+
+def test_audit_keygen_and_a_committed_public_key_make_verify_require_signatures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`config/audit-signing.pub`, when present, is the default verify key (ADR 0078),
+    so an unsigned chain stops passing once a deployment commits one."""
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / "audit.jsonl"
+    sink = FileAuditSink(log, fsync=False)
+    sink.append(AuditRecord(category=Category.TOOL_CALL, event="tool.called", at=1.0, subject="a"))
+    sink.close()
+    assert main(["audit", "verify", "--log-file", str(log)]) == 0
+
+    assert main(["audit", "keygen", "--private-key", str(tmp_path / "key.pem")]) == 0
+    assert (tmp_path / "config" / "audit-signing.pub").exists()
+    assert main(["audit", "verify", "--log-file", str(log)]) == 1
+
+
+def test_audit_keygen_refuses_to_overwrite(tmp_path: Path) -> None:
+    key = tmp_path / "key.pem"
+    args = ["audit", "keygen", "--private-key", str(key), "--public-key", str(tmp_path / "k.pub")]
+    assert main(args) == 0
+    assert main(args) == 2

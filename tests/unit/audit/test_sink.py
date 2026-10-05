@@ -104,7 +104,8 @@ def test_a_restart_continues_the_chain(tmp_path: Path) -> None:
 
 
 def test_an_absent_file_starts_at_genesis(tmp_path: Path) -> None:
-    assert recover(tmp_path / "nothing.jsonl") == (GENESIS, 0)
+    found = recover(tmp_path / "nothing.jsonl")
+    assert (found.head, found.seq, found.entries) == (GENESIS, 0, False)
 
 
 def test_blank_lines_do_not_advance_the_chain(tmp_path: Path) -> None:
@@ -114,10 +115,10 @@ def test_blank_lines_do_not_advance_the_chain(tmp_path: Path) -> None:
     sink.close()
     path.write_text(path.read_text() + "\n\n")
 
-    head, seq = recover(path)
+    found = recover(path)
 
-    assert seq == 1
-    assert head != GENESIS
+    assert found.seq == 1
+    assert found.head != GENESIS
 
 
 # ---------------------------------------------------------------------------

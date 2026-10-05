@@ -12,14 +12,18 @@ import json
 import logging
 import os
 import threading
+from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Protocol
+from typing import IO, TYPE_CHECKING, Protocol
 
 import fcntl  # POSIX only, like the deployment target (a Linux container)
 
 from acp.audit.chain import GENESIS, SEQ_START, Chain, Entry
 from acp.audit.record import AuditRecord
 from acp.exceptions import ConfigurationError
+
+if TYPE_CHECKING:
+    from acp.audit.signing import Signer
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +64,8 @@ class AuditSink(Protocol):
 class MemoryAuditSink:
     """A real chain held in a list, for tests and `--dry-run`."""
 
-    def __init__(self) -> None:
-        self._chain = Chain()
+    def __init__(self, *, signer: Signer | None = None) -> None:
+        self._chain = Chain(signer=signer)
         self.entries: list[Entry] = []
 
     blocking = False
@@ -92,16 +96,29 @@ class MemoryAuditSink:
         return [json.dumps(entry.as_dict(), separators=(",", ":")) for entry in self.entries]
 
 
-def recover(path: Path) -> tuple[str, int]:
-    """The head and sequence to continue from, found by streaming the whole file (O(n)).
+@dataclass(frozen=True, slots=True)
+class Recovered:
+    """Where an existing chain file ends."""
+
+    head: str = GENESIS
+    seq: int = SEQ_START - 1
+    signed_by: str | None = None
+    """The last entry's key id, or ``None`` if it was unsigned or there is none."""
+
+    entries: bool = False
+
+
+def recover(path: Path) -> Recovered:
+    """Where to continue from, found by streaming the whole file (O(n)).
 
     Raises:
         ConfigurationError: A line is not an audit entry; refusing beats truncating.
     """
     if not path.exists():
-        return GENESIS, SEQ_START - 1
+        return Recovered()
 
     head, seq, number, last_line = GENESIS, SEQ_START - 1, 0, 0
+    kid: str | None = None
     with path.open("r", encoding="utf-8") as handle:
         for number, raw in enumerate(handle, start=1):
             stripped = raw.strip()
@@ -126,15 +143,53 @@ def recover(path: Path) -> tuple[str, int]:
                 )
                 raise ConfigurationError(msg)
             head, last_line = parsed["hash"], number
+            recorded_kid = parsed.get("kid")
+            kid = recorded_kid if isinstance(recorded_kid, str) else None
             recorded = parsed.get("seq")
             seq = recorded if isinstance(recorded, int) and not isinstance(recorded, bool) else seq
 
     if last_line:
         logger.info(
             "audit.resumed",
-            extra={"path": str(path), "entries": seq, "head": head[:16]},
+            extra={"path": str(path), "entries": seq, "head": head[:16], "kid": kid},
         )
-    return head, seq
+    return Recovered(head=head, seq=seq, signed_by=kid, entries=bool(last_line))
+
+
+def _check_signing(path: Path, found: Recovered, signer: Signer | None) -> None:
+    """Refuse to continue a chain under a different signing state (ADR 0078).
+
+    One key signs one file. Adding signatures midway would leave an unsigned prefix a
+    verifier must reject; dropping them (a missing key setting) would be a silent downgrade.
+
+    Raises:
+        ConfigurationError: The file's last entry and this gateway disagree.
+    """
+    if not found.entries:
+        return
+    wanted = signer.kid if signer is not None else None
+    if found.signed_by == wanted:
+        return
+    if wanted is None:
+        msg = (
+            f"{path} is signed with key {found.signed_by}, and this gateway has no signing "
+            f"key. Writing unsigned entries after signed ones is a downgrade a verifier "
+            f"must reject. Set ACP_AUDIT_SIGNING_KEY_FILE, or archive this file and start "
+            f"a new one."
+        )
+    elif found.signed_by is None:
+        msg = (
+            f"{path} holds unsigned entries, and this gateway signs. One key signs one "
+            f"file from its first entry, so archive this file (checkpoint it first) and "
+            f"start a new one."
+        )
+    else:
+        msg = (
+            f"{path} is signed with key {found.signed_by}, and this gateway's key is "
+            f"{wanted}. Rotating a key starts a new file: archive this one (checkpoint "
+            f"it first) and point ACP_AUDIT_FILE at a new path."
+        )
+    raise ConfigurationError(msg)
 
 
 class FileAuditSink:
@@ -145,14 +200,16 @@ class FileAuditSink:
     `flock` makes a second process on the same path refuse to start.
     """
 
-    def __init__(self, path: Path, *, fsync: bool = True) -> None:
-        head, seq = recover(path)
+    def __init__(self, path: Path, *, fsync: bool = True, signer: Signer | None = None) -> None:
+        found = recover(path)
+        _check_signing(path, found, signer)
         path.parent.mkdir(parents=True, exist_ok=True)
         # Line buffered: a crash loses at most the entry being written.
         self._handle = path.open("a", encoding="utf-8", buffering=1)
         _claim(self._handle, path)
         self._path = path
-        self._chain = Chain(head=head, seq=seq)
+        self._signer = signer
+        self._chain = Chain(head=found.head, seq=found.seq, signer=signer)
         self._fsync = fsync
         self._lock = threading.Lock()
 
@@ -183,7 +240,7 @@ class FileAuditSink:
             except OSError:
                 # Rewind so the next attempt reuses this seq; `acp.audit.writer` decides
                 # whether the call is refused.
-                self._chain = Chain(head=entry.prev, seq=entry.seq - 1)
+                self._chain = Chain(head=entry.prev, seq=entry.seq - 1, signer=self._signer)
                 raise
             return entry
 

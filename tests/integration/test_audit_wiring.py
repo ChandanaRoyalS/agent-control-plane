@@ -289,3 +289,35 @@ def test_a_call_that_cannot_be_recorded_is_refused(keypair: Keypair, tmp_path: P
 
     assert payload["error"]["code"] == AuditUnavailableError.code
     assert "audit" not in json.dumps(payload).lower()
+
+
+def test_a_configured_signing_key_signs_the_chain(tmp_path: Path) -> None:
+    """ADR 0078's setting, end to end: the key file reaches the sink, and the
+    public key verifies what it wrote."""
+    from acp.audit.record import Category, Outcome  # noqa: PLC0415
+    from acp.audit.signing import generate, load_verifier  # noqa: PLC0415
+
+    private, public = tmp_path / "audit.pem", tmp_path / "audit.pub"
+    generate(private, public)
+    path = tmp_path / "audit.jsonl"
+    audit = build_audit_log(
+        settings_for(audit_file=path, audit_fsync=False, audit_signing_key_file=private)
+    )
+    assert audit is not None
+    audit.record(Category.TOOL_CALL, "tool.called", subject=ALICE, outcome=Outcome.COMPLETED)
+    audit.close()
+
+    result = verify(path.read_text().splitlines(), verifier=load_verifier([public]))
+    assert result.intact
+    assert result.signed == 1
+
+
+def test_an_unreadable_signing_key_refuses_to_start(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="signing key"):
+        build_audit_log(
+            settings_for(
+                audit_file=tmp_path / "audit.jsonl",
+                audit_fsync=False,
+                audit_signing_key_file=tmp_path / "missing.pem",
+            )
+        )

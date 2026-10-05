@@ -20,7 +20,12 @@ import anyio
 from acp import __version__
 from acp.admin import build_admin_app
 from acp.audit.checkpoint import DEFAULT_CHECKPOINT_PATH
-from acp.audit.cli import checkpoint_command, verify_command
+from acp.audit.cli import (
+    DEFAULT_PUBLIC_KEY_PATH,
+    checkpoint_command,
+    keygen_command,
+    verify_command,
+)
 from acp.config import load_settings, load_upstreams
 from acp.exceptions import ACPError
 from acp.identity.principal import Actor, Principal
@@ -252,7 +257,7 @@ def _add_schemas_commands(subparsers: Any) -> None:
 
 
 def _add_audit_commands(subparsers: Any) -> None:
-    """``acp audit verify | checkpoint``; wiring only, logic lives in ``acp.audit.cli``."""
+    """``acp audit verify | checkpoint | keygen``; wiring only, logic lives in ``acp.audit.cli``."""
     audit = subparsers.add_parser(
         "audit", help="verify the tamper-evident audit chain, and anchor it"
     )
@@ -275,6 +280,28 @@ def _add_audit_commands(subparsers: Any) -> None:
             default=DEFAULT_CHECKPOINT_PATH,
             help="the committed anchor (default: %(default)s)",
         )
+        if verb == "verify":
+            sub.add_argument(
+                "--public-key",
+                type=Path,
+                action="append",
+                default=None,
+                help=(
+                    "require every entry to be signed by this key; repeatable "
+                    f"(default: {DEFAULT_PUBLIC_KEY_PATH}, if it exists)"
+                ),
+            )
+
+    keygen = verbs.add_parser("keygen", help="make an Ed25519 key pair for signing entries")
+    keygen.add_argument(
+        "--private-key", type=Path, required=True, help="where to write the private key"
+    )
+    keygen.add_argument(
+        "--public-key",
+        type=Path,
+        default=DEFAULT_PUBLIC_KEY_PATH,
+        help="where to write the public key (default: %(default)s)",
+    )
 
 
 def _audit_command(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
@@ -286,22 +313,21 @@ def _audit_command(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         parser.parse_args(["audit", "--help"])
         return USAGE_ERROR  # pragma: no cover — argparse exits inside --help
 
-    log_file = args.log_file
-    if log_file is None:
-        try:
-            log_file = load_settings().audit_file
-        except ACPError as exc:
-            return _usage_error(exc.message)
-    if log_file is None:
-        return _usage_error(
-            "no audit log configured. Pass --log-file, or set ACP_AUDIT_FILE to "
-            "the path this gateway writes its chain to."
-        )
-
     try:
+        if args.audit_command == "keygen":
+            return keygen_command(private_path=args.private_key, public_path=args.public_key)
+        log_file = args.log_file or load_settings().audit_file
+        if log_file is None:
+            return _usage_error(
+                "no audit log configured. Pass --log-file, or set ACP_AUDIT_FILE to "
+                "the path this gateway writes its chain to."
+            )
         if args.audit_command == "checkpoint":
             return checkpoint_command(log_file, checkpoint_path=args.checkpoint)
-        return verify_command(log_file, checkpoint_path=args.checkpoint)
+        keys = args.public_key
+        if keys is None:
+            keys = [DEFAULT_PUBLIC_KEY_PATH] if DEFAULT_PUBLIC_KEY_PATH.exists() else []
+        return verify_command(log_file, checkpoint_path=args.checkpoint, public_keys=keys)
     except ACPError as exc:
         return _usage_error(exc.message)
 

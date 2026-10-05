@@ -350,8 +350,12 @@ environment). So today the truncation defence is exercised by tests and by hand,
 **not by CI**. A real deployment must anchor somewhere the gateway cannot reach;
 this repository cannot do that on its behalf.
 
-Also: **no signature.** The chain proves internal consistency, not authorship.
-Anyone who can write the file can write a chain.
+Signatures are opt-in (ADR 0078). With `ACP_AUDIT_SIGNING_KEY_FILE` set, every
+entry is signed with Ed25519, and someone who can write the file but does not
+hold the key can no longer rewrite it consistently. Without it, the chain proves
+internal consistency, not authorship: anyone who can write the file can write a
+chain. Either way the key holder, which includes the running gateway, can
+rewrite anything it signed, and truncation still needs a checkpoint.
 
 And: **clean screenings are not chained**, only findings. The chain is a record
 of findings, not of screenings.

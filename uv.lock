@@ -13,6 +13,7 @@ version = "2.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
+    { name = "cryptography" },
     { name = "httpx" },
     { name = "mcp" },
     { name = "opentelemetry-api" },
@@ -51,6 +52,7 @@ train = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.14.2" },
+    { name = "cryptography", specifier = ">=44" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "mcp", specifier = ">=2.0.0" },
     { name = "opentelemetry-api", specifier = ">=1.30" },

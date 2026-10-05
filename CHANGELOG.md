@@ -15,6 +15,14 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+### Changed
+
+- CI and the release workflow use the current major version of every action
+  (`actions/checkout@v7`, `astral-sh/setup-uv@v7`, `actions/upload-artifact@v7`,
+  `docker/build-push-action@v7` and `login`, `setup-buildx`, `setup-qemu` at
+  `@v4`). The old ones targeted Node.js 20, which GitHub has deprecated. No
+  input this repository passes changed meaning.
+
 ## [2.2.1] - 2026-10-05
 
 The image now runs natively on arm64 (Apple silicon, Graviton), and item 2 of

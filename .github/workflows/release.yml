@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Name the image, in lowercase
         run: |
@@ -42,7 +42,7 @@ jobs:
           echo "IMAGE=$image" >> "$GITHUB_ENV"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -125,12 +125,12 @@ jobs:
         # arm64 is built and checked under emulation on this amd64 runner, so
         # one job builds, checks and publishes both. The image installs wheels
         # only (nothing compiles), which keeps the emulated build to minutes.
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # One build per platform, each loaded so it can be run. The docker
       # exporter cannot load a manifest list, and buildx attaches a provenance
@@ -138,7 +138,7 @@ jobs:
       # so `load: true` produces a single image the checks can run.
 
       - name: Build the gateway image (amd64)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -149,7 +149,7 @@ jobs:
           tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}-amd64
 
       - name: Build the gateway image (arm64)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/arm64
@@ -199,7 +199,7 @@ jobs:
         # Deliberately after every check. A login before them would mean a
         # failed check leaves a session open to a registry for the rest of the
         # job.
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

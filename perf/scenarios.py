@@ -238,11 +238,11 @@ def classify(status: int, body: str) -> Outcome:
 
     ``status`` is the HTTP status; ``body`` the raw response text. Both,
     because the two layers answer differently and both answers are real: a
-    pre-dispatch refusal is an **HTTP 403 with no JSON-RPC body at all**
-    (ADR 0043), while a refusal that got as far as the handler is a 200 with an
-    error object inside. A classifier that only read one of them would report
-    the same deployment differently depending on which layer refused — and the
-    fast path is the one a real client hits most.
+    pre-dispatch refusal is an **HTTP 403** (ADR 0043), carrying a JSON-RPC
+    error with a null id since ADR 0072, while a refusal that got as far as
+    the handler is a 200 with an error object inside. A classifier that only
+    read one of them would report the same deployment differently depending on
+    which layer refused — and the fast path is the one a real client hits most.
     """
     from_status = _from_status(status)
     if from_status is not None:

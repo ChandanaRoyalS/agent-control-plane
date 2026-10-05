@@ -37,6 +37,7 @@ import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Final
 
 from acp.identity.principal import Principal
 from acp.policy.schema import RESTRICTIVE, Effect, Policy, Rule, canonical
@@ -224,3 +225,65 @@ def decision_for(rule: Rule) -> Decision:
         rule=rule.name,
         requires_approval=rule.effect is Effect.REQUIRE_APPROVAL,
     )
+
+
+PERMISSIBLE: Final = frozenset({Effect.ALLOW, Effect.REQUIRE_APPROVAL})
+"""Effects under which a call may still proceed, so the fast path must not
+refuse it. Named rather than inlined, because the next effect added here is the
+one somebody forgets — and forgetting produces a silent false denial rather
+than an error."""
+
+
+def could_ever_allow(policy: Policy, principal: Principal, tool: str) -> bool:
+    """Could any argument mapping make this call permitted?
+
+    The conservative half of the evaluator, and the only question that can be
+    answered honestly before a body is read. ``False`` means *no* arguments
+    could rescue this call, so refusing now is refusing something the full check
+    would refuse too. ``True`` means "not provably refused", which is not a
+    permission — it hands the call on to the authoritative check.
+
+    Walking the rules in document order, because first match wins (ADR 0026):
+
+    - **An allow that matches on identity and tool** — whether or not it also
+      constrains arguments — means some call could be permitted. Stop, and do
+      not refuse. An allow with argument constraints is precisely the case a
+      naive implementation gets wrong.
+    - **So does a `require_approval` rule** (ADR 0048), and forgetting this
+      would be a false refusal of exactly the kind this module exists to avoid:
+      a call a human was about to approve, refused at the header before anyone
+      was asked, with no rule an operator could point at to explain it.
+    - **A deny with no argument constraints** matches every call to this tool by
+      this principal, so it decides all of them. Stop, and refuse.
+    - **A deny that constrains arguments** decides only the calls whose
+      arguments match it; the others fall through to later rules. Keep walking.
+
+    Falling off the end is the deny default (ADR 0025) — nothing matched, so
+    nothing ever will, and refusing is right.
+
+    Two callers ask it (ADR 0072): the pre-dispatch check (ADR 0043), before a
+    body is read, and catalogue filtering, where `tools/list` has no arguments
+    at all. Both need the same answer — "could this tool ever be called" — and
+    the catalogue used to ask the evaluator with an empty argument mapping
+    instead, which hid every tool whose only grant was argument-scoped, and
+    after ADR 0068 every tool with an argument-scoped restriction in front of a
+    broad allow.
+
+    The identity-and-tool half of the match comes from
+    ``matches_without_arguments``, shared with the real evaluator, so the two
+    cannot disagree about who a rule applies to. The argument half is handled by
+    the branches above, because "might match" is not a question a matcher
+    returning a bool can answer.
+    """
+    actor = principal.actor.subject if principal.actor else None
+    for rule in policy.rules:
+        # Arguments are deliberately excluded from this question: a rule that
+        # constrains them still *applies* to this tool, and whether it fires
+        # depends on a body nobody has read.
+        if not matches_without_arguments(rule, principal.subject, actor, tool):
+            continue
+        if rule.effect in PERMISSIBLE:
+            return True
+        if not rule.args:
+            return False
+    return False

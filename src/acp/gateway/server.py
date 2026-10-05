@@ -15,7 +15,7 @@ import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
-from typing import Any
+from typing import Any, Final
 
 from mcp import types
 from mcp.server import Server, ServerRequestContext
@@ -30,7 +30,7 @@ from acp.audit import Category as AuditCategory
 from acp.audit import Outcome as AuditOutcome
 from acp.budget import CostTable, QuotaCounter, RateLimiter, account
 from acp.budget.charge import Budgets, LocalBudgets
-from acp.exceptions import ACPError, PolicyDeniedError
+from acp.exceptions import ACPError, ApprovalUnsupportedError, PolicyDeniedError
 from acp.firewall import Firewall, Inspection, frame
 from acp.firewall.catalogue import CatalogueInspection
 from acp.gateway.converters import to_input_required, to_mcp_call_tool_result, to_mcp_tool
@@ -384,6 +384,21 @@ async def _audit_call(
     )
 
 
+MRTR_VERSION: Final = "2026-07-28"
+"""The first protocol revision with `input_required`, the only way this gateway
+can tell a caller to wait for a person. Revisions are dates, so they order as
+strings."""
+
+
+def can_wait(protocol_version: str | None) -> bool:
+    """Whether a client on this revision can be held for an approval (ADR 0072).
+
+    An unknown version is treated as one that cannot: holding a call for a
+    client that will never come back creates an approval nobody can resume.
+    """
+    return protocol_version is not None and protocol_version >= MRTR_VERSION
+
+
 async def _await_approval(
     store: ApprovalStore | None,
     principal: Principal,
@@ -448,6 +463,70 @@ async def _await_approval(
             expires_in=(outcome.expires_at or 0.0) - time.time(),
         )
     raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
+
+
+async def _authorize(
+    policies: PolicySet,
+    principal: Principal | None,
+    params: types.CallToolRequestParams,
+    *,
+    protocol_version: str | None,
+    audit: AuditLog | None,
+    approvals: ApprovalStore | None,
+    approval_ttl: float,
+) -> types.InputRequiredResult | None:
+    """Decide a call under a loaded policy: raise, hold, or ``None`` to proceed.
+
+    Everything before budget, cache and upstream, in the order the security
+    argument needs: the decision, its record, and the approval it may start.
+    """
+    # Fail-closed: a loaded policy means authorization is
+    # expected. A missing principal here is a misconfiguration
+    # (policy set, auth not), and must deny rather than permit.
+    if principal is None:
+        raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
+    try:
+        decision = enforce_call(
+            policies.policy_for(principal.tenant),
+            principal,
+            params.name,
+            params.arguments or {},
+        )
+    except ACPError as exc:
+        # Recorded before the refusal is raised, so a denial reaches the
+        # chain even though the caller never gets a result. An audit log
+        # that only contains the calls which succeeded answers the wrong
+        # question — the interesting row is always the one that stopped.
+        await _audit_decision(audit, principal, params, allowed=False, rule=None)
+        raise to_mcp_error(exc) from exc
+
+    # A held call from a client that cannot wait is refused, and the
+    # chain says refused: recording it as held would describe an
+    # approval nobody created (ADR 0072).
+    unwaitable = decision.requires_approval and not can_wait(protocol_version)
+    await _audit_decision(
+        audit,
+        principal,
+        params,
+        allowed=decision.allowed and not unwaitable,
+        rule=decision.rule,
+        held=decision.requires_approval and not unwaitable,
+    )
+    if unwaitable:
+        raise to_mcp_error(
+            ApprovalUnsupportedError(
+                "this call needs a person's approval; connect with "
+                f"MCP {MRTR_VERSION} or later to wait for it"
+            )
+        )
+
+    if decision.requires_approval:
+        # Held for a person (ADR 0048). Returns before budget is
+        # charged, before the cache is consulted and before anything
+        # reaches an upstream — a call that has not happened must not
+        # spend, must not be answered from memory, and must not run.
+        return await _await_approval(approvals, principal, params, decision.rule, approval_ttl)
+    return None
 
 
 def build_server(
@@ -554,50 +633,22 @@ def build_server(
         )
 
     async def on_call_tool(
-        _ctx: ServerRequestContext[None, Any],
+        ctx: ServerRequestContext[None, Any],
         params: types.CallToolRequestParams,
     ) -> types.CallToolResult | types.InputRequiredResult:
         principal = current_principal()
         if policies is not None:
-            # Fail-closed: a loaded policy means authorization is
-            # expected. A missing principal here is a misconfiguration
-            # (policy set, auth not), and must deny rather than permit.
-            if principal is None:
-                raise to_mcp_error(PolicyDeniedError("this call was not permitted"))
-            try:
-                decision = enforce_call(
-                    policies.policy_for(principal.tenant),
-                    principal,
-                    params.name,
-                    params.arguments or {},
-                )
-            except ACPError as exc:
-                # Recorded before the refusal is raised, so a denial reaches the
-                # chain even though the caller never gets a result. An audit log
-                # that only contains the calls which succeeded answers the wrong
-                # question — the interesting row is always the one that stopped.
-                await _audit_decision(audit, principal, params, allowed=False, rule=None)
-                raise to_mcp_error(exc) from exc
-
-            await _audit_decision(
-                audit,
+            awaiting = await _authorize(
+                policies,
                 principal,
                 params,
-                allowed=decision.allowed,
-                rule=decision.rule,
-                held=decision.requires_approval,
+                protocol_version=ctx.protocol_version,
+                audit=audit,
+                approvals=approvals,
+                approval_ttl=approval_ttl,
             )
-
-            if decision.requires_approval:
-                # Held for a person (ADR 0048). Returns before budget is
-                # charged, before the cache is consulted and before anything
-                # reaches an upstream — a call that has not happened must not
-                # spend, must not be answered from memory, and must not run.
-                awaiting = await _await_approval(
-                    approvals, principal, params, decision.rule, approval_ttl
-                )
-                if awaiting is not None:
-                    return awaiting
+            if awaiting is not None:
+                return awaiting
 
         # After authorization: a denied call must not spend budget, and charging
         # a call we would refuse anyway is wasted work.

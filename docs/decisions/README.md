@@ -112,6 +112,7 @@ If you have ten minutes and want the ones that carry the most weight:
 | [0069](0069-the-unexamined-tail-is-the-trigger.md) | a screening that did not read the whole document withholds it in enforce mode; the 256 KB window stays, what it means once crossed changes; closes the W3 bypass |
 | [0070](0070-the-fleet-release-made-true.md) | four findings from the same review closed: an operator audience is checked against every issuer, two unlabelled issuers are refused, the audit chain has one writer by lock, and the Redis clients have timeouts and turn their failures into one typed fail-closed refusal |
 | [0071](0071-the-safe-defaults.md) | a bare start refuses without an audit file unless told otherwise, the firewall defaults to report, and every start logs which controls are on and warns about the safety ones that are off |
+| [0072](0072-a-real-client-reads-the-refusal.md) | the official MCP client drives the gateway in the suite; the fast-path 403 carries the handler's JSON-RPC error, a held call from a pre-2026-07-28 client is refused legibly, and the catalogue shows a tool some call could reach |
 
 ## Approvals, audit, tenancy
 

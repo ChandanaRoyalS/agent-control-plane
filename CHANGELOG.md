@@ -15,6 +15,38 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+The official MCP Python client now drives the gateway in the test suite
+(item 5 of the external review), and its first run found three defects that
+2,212 tests had not ([ADR 0072](docs/decisions/0072-a-real-client-reads-the-refusal.md)).
+
+### Added
+
+- `tests/integration/test_official_client.py`: the gateway driven by
+  `mcp.client.Client` over the SDK's own streamable-HTTP transport, with
+  nothing from this project's test helpers on the wire. It covers discovery,
+  the catalogue, both refusal layers, re-spelled restrictions, the SDK's
+  `input_required` loop, an agent that waits for an approval, a handshake-era
+  client and the audit chain.
+- `ApprovalUnsupportedError` (`-32041`, not recoverable).
+
+### Fixed
+
+- A policy denial decided on the routing headers (ADR 0043) answered
+  `403 {"error": "forbidden"}`, which the official client reported as
+  `-32603 Server returned an error response`: an internal error, which agents
+  retry. The 403 now carries the handler's own JSON-RPC error (`-32040`,
+  `recoverable: false`, `id: null`), so both layers give a client the same
+  refusal.
+- A `require_approval` call from a client on the initialize handshake failed
+  with `-32603 Handler returned an invalid result` after creating an approval
+  nobody could resume. It is now refused with `-32041` before anything is held,
+  and the chain records it as denied.
+- A tool whose grant or restriction is argument-scoped was missing from
+  `tools/list`, including the README's example (`deny` on one dataset in
+  front of an `allow`). Calls to it were still served; agents could not find
+  it. Visibility now asks the same "could any arguments permit this"
+  question as the pre-dispatch check.
+
 ## [2.0.0] - 2026-10-05
 
 The safe defaults (ADR 0071), and the rest of the October review's

@@ -344,6 +344,26 @@ class PolicyDeniedError(ACPError):
     recoverable = False
 
 
+class ApprovalUnsupportedError(ACPError):
+    """The call needs a person's approval and this client cannot wait for one.
+
+    Holding a call is an `input_required` answer (ADR 0048), which exists from
+    MCP 2026-07-28. A client that connected with the older initialize
+    handshake has no `requestState` to come back with, so the result cannot
+    even be serialised to it: the SDK reported ``-32603 Handler returned an
+    invalid result``, an internal error, for what was a policy decision (ADR
+    0072). Refused before an approval is created, so an operator is never asked
+    about a call nobody can resume.
+
+    ``recoverable`` is **false**: retrying the same call from the same client
+    is refused identically. Disclosing that the call is held is not a new
+    oracle — a 2026-07-28 client is told exactly that by `input_required`.
+    """
+
+    code = -32041
+    recoverable = False
+
+
 class RateLimitExceededError(ACPError):
     """The caller has made too many requests and must slow down.
 

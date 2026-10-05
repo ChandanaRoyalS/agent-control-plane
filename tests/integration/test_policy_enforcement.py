@@ -17,7 +17,8 @@ abstained every time — every assertion below landed on `enforce_call`, the
 backstop. Sending valid requests changed which layer answers, and the deny tests
 started failing with `TypeError: string indices must be integers`: the refusal
 was no longer a JSON-RPC error object but an HTTP 403 with `{"error":
-"forbidden"}`, exactly as `_refuse` is written to answer.
+"forbidden"}`, exactly as `_refuse` was then written to answer. (It now carries
+the handler's JSON-RPC error inside the 403; ADR 0072.)
 
 **That was the tests being wrong, not the gateway** — and it is the finding, not
 the inconvenience. A real client sending a valid request is refused at the
@@ -130,7 +131,7 @@ def test_a_denied_tool_call_is_refused_before_its_body_is_read(keypair: Keypair)
     response = post_tool(policy, keypair, keypair.sign(claims()), TOOL)
 
     assert response.status_code == 403
-    assert response.json() == {"error": "forbidden"}
+    assert response.json()["error"]["code"] == -32040
 
 
 def test_deny_by_default_is_refused_at_the_header_too(keypair: Keypair) -> None:

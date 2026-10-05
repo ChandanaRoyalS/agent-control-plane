@@ -9,10 +9,19 @@ anyway from somewhere else. Filtering is defence by construction; enforcement is
 the guarantee that makes hiding safe rather than merely tidy.
 
 Pure, like ``enforce_call``: it decides which tools survive and returns them,
-with the one call site in ``server.on_list_tools``. It reuses the same
-``evaluate`` the enforcer does, so a tool is visible under exactly the condition
-it is callable — the list can never advertise a tool the call would refuse, or
-hide one the call would allow.
+with the one call site in ``server.on_list_tools``.
+
+**A listing has no arguments, so the question is "could this ever be called",
+not "is this call allowed".** The first version asked the evaluator with an
+empty argument mapping and called the answer visibility. That hid a tool whose
+only grant was argument-scoped ("alice may read the `public` dataset" made the
+read tool vanish), and once ADR 0068 made a restriction catch a call that omits
+its argument, it hid every tool with an argument-scoped `deny` in front of a
+broad `allow` — the README's own example policy. Calls to those tools still
+succeeded; an agent could just never find them. The official MCP client's
+first run found it (ADR 0072). Visibility now asks `could_ever_allow`, the
+same conservative question the pre-dispatch check asks of the routing headers,
+so the catalogue and the fast path cannot disagree either.
 """
 
 from __future__ import annotations
@@ -20,7 +29,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from acp.identity.principal import Principal
-from acp.policy.evaluate import Verdict, evaluate
+from acp.policy.evaluate import could_ever_allow
 from acp.policy.schema import Policy
 from acp.upstream.models import ToolDefinition
 
@@ -28,24 +37,23 @@ from acp.upstream.models import ToolDefinition
 def visible_tools(
     policy: Policy, principal: Principal, tools: Sequence[ToolDefinition]
 ) -> list[ToolDefinition]:
-    """Return only the tools ``principal`` is allowed to call under ``policy``.
+    """Return the tools ``principal`` could call under ``policy``, for some arguments.
 
-    A tool survives iff ``evaluate`` does not *deny* the principal calling it by
-    its qualified name (``<upstream>__<tool>``, ADR 0003) — the same name the
-    merged catalogue already carries and the same the enforcer matches, so
-    visibility and callability cannot drift apart. Order is preserved: the
-    catalogue's ordering is a prompt-cache decision (see ``on_list_tools``), and
-    filtering must not disturb it.
+    A tool survives iff `could_ever_allow` says some call to it, by its
+    qualified name (``<upstream>__<tool>``, ADR 0003), could be permitted — the
+    same name the merged catalogue already carries and the same the enforcer
+    matches. Order is preserved: the catalogue's ordering is a prompt-cache
+    decision (see ``on_list_tools``), and filtering must not disturb it.
 
-    **"Not denied" rather than "allowed", and the difference is approvals.** A
-    tool held for human approval (ADR 0048) is one the agent is *supposed* to
-    ask for — that is the entire point of the flow. Hiding it would mean the
-    agent never names it, never triggers the approval, and the operator is never
-    asked; the feature would be unreachable from the only client that could use
-    it. So the catalogue shows it, the call starts the approval, and the human
-    decides. This is the one place where the old rule "visible iff callable"
-    needed restating as "visible iff not forbidden".
+    **"Could be permitted" includes approvals.** A tool held for human
+    approval (ADR 0048) is one the agent is *supposed* to ask for — that is the
+    entire point of the flow. Hiding it would mean the agent never names it,
+    never triggers the approval, and the operator is never asked.
+
+    **And it includes argument-scoped grants.** Visible is not callable with
+    any arguments: a tool readable only for some documents is shown, and the
+    call with the wrong document is refused by `enforce_call`, which has the
+    arguments. Hiding the tool would refuse the right document too, silently,
+    by never letting the agent ask.
     """
-    return [
-        tool for tool in tools if evaluate(policy, principal, tool.name).verdict is not Verdict.DENY
-    ]
+    return [tool for tool in tools if could_ever_allow(policy, principal, tool.name)]

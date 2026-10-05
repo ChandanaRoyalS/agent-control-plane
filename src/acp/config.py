@@ -20,6 +20,7 @@ from acp.approvals.operator import MIN_OPERATOR_TOKEN_LENGTH
 from acp.approvals.record import DEFAULT_TTL_SECONDS
 from acp.approvals.store import DEFAULT_MAX_PENDING
 from acp.exceptions import ConfigurationError
+from acp.firewall.decision import LearnedMode
 from acp.firewall.decision import Mode as FirewallMode
 from acp.redis_url import check_redis_url
 from acp.upstream import UpstreamConfig
@@ -184,6 +185,16 @@ class GatewaySettings(BaseSettings):
 
     Empty is deliberately noisy: every link and image is reported, and
     ``external_image`` cannot withhold until this is set (ADR 0036).
+    """
+
+    firewall_learned: LearnedMode = LearnedMode.REPORT
+    """What the learned injection classifier may do (ADR 0075, ADR 0076).
+
+    ``report`` (the default) scores every result and logs a finding, HIGH where
+    ``enforce`` would withhold. ``enforce`` lets that HIGH finding withhold, and
+    only when ``firewall_mode`` is also ``enforce``: it withheld 2% of clean
+    BIPIA test documents, so it is never on by default. ``off`` skips the cost
+    (about a millisecond per thousand characters).
     """
 
     firewall_classifier_enabled: bool = False

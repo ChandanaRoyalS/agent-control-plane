@@ -27,6 +27,7 @@ STRIDE: Final = 1200
 """Windows overlap by 300 characters, so an instruction shorter than that is whole in one."""
 
 CHAR_NGRAMS: Final = (3, 4, 5)
+DETECTOR_NAME: Final = "learned_classifier"
 MODEL_PATH: Final = Path(__file__).with_name("learned_model.json")
 
 _SPACE = re.compile(r"\s+")

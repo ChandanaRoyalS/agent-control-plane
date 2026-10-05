@@ -7,7 +7,7 @@ evidence comes from `acp.corpus`.
 """
 
 from acp.firewall.classifier import OllamaClassifier
-from acp.firewall.decision import Firewall, Inspection, Mode, firewall_for
+from acp.firewall.decision import Firewall, Inspection, LearnedMode, Mode, firewall_for
 from acp.firewall.findings import Confidence, Family, Finding
 from acp.firewall.ollama import ollama_classify
 from acp.firewall.provenance import Fence, fence_for, frame
@@ -20,6 +20,7 @@ __all__ = [
     "Finding",
     "Firewall",
     "Inspection",
+    "LearnedMode",
     "Mode",
     "OllamaClassifier",
     "ScreenPolicy",

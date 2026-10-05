@@ -7,7 +7,7 @@ calls for a human, and records every decision in a hash-chained log.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~2,300 tests · 95% branch coverage · 75 decision records ·
+**~2,300 tests · 95% branch coverage · 76 decision records ·
 20 hand-picked breakages, each caught by the test meant to catch it**
 
 ## Why
@@ -34,8 +34,7 @@ in 17 user tasks ([ADR 0064](docs/decisions/0064-held-out-v2-scored-once.md)).
 | screening, the same 35 attacks without the prefix | 0 / 595 caught | Nothing here recognises a politely worded instruction; nor did two model-based detectors ([ADR 0063](docs/decisions/0063-the-control-that-stops-the-polite-injection-is-the-policy.md)). |
 | policy: least privilege, or writes held for a person | 35 / 35 chains blocked or held; 17 / 17 user tools allowed | Reads still run under the looser policy: 27 of 94 attacker steps are reads. |
 
-A learned classifier, trained here and not yet on the request path, was scored
-once on [BIPIA](https://github.com/microsoft/BIPIA)'s held-out split: emails,
+A learned classifier, trained here, was scored once on [BIPIA](https://github.com/microsoft/BIPIA)'s held-out split: emails,
 tables and code answers with 125 attacker instructions no one here wrote
 ([ADR 0075](docs/decisions/0075-a-learned-classifier-measured-once.md)).
 
@@ -47,7 +46,9 @@ tables and code answers with 125 attacker instructions no one here wrote
 
 It catches polite injections the patterns miss, at a false-positive rate above
 the 0% it showed on validation, and homoglyphs, spacing, leetspeak and base64
-defeat it.
+defeat it. It runs in report mode by default and withholds only when
+`ACP_FIREWALL_LEARNED=enforce` and `ACP_FIREWALL_MODE=enforce` are both set
+([ADR 0076](docs/decisions/0076-the-learned-classifier-withholds-only-by-choice.md)).
 
 ## Quickstart
 
@@ -213,13 +214,13 @@ The full threat model is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
   in a released version; both are fixed, and there will be more.
 - **The firewall does not stop polite or reworded injections.** It withholds
   only a bidirectional override, a base64 run that decodes to an instruction,
-  and a result too long to screen whole. The learned classifier that would
-  catch most polite ones is measured but not yet wired in, and character-level
-  disguises defeat both (evasion corpus v1, ADR 0075).
+  and a result too long to screen whole, unless you opt into the learned
+  classifier, which withholds most polite ones and about 2% of benign
+  documents. Character-level disguises defeat both (evasion corpus v1, ADR 0075).
 - **Attacks split across two documents** pass: screening sees one result at a
   time.
-- **No model is on the enforcement path yet.** The learned classifier is a
-  linear model over character n-grams; a transformer is the next step. The
+- **The only model that can withhold is linear**, over character n-grams, and
+  only when you turn it on; a transformer is the next step. The
   model demo measures two small local models on one task.
 - **An argument-level `deny` checks spelling, not meaning**: `prod-eu` is not
   `production` to it ([ADR 0068](docs/decisions/0068-a-restriction-is-cleared-only-by-a-value-it-can-read.md)).
@@ -230,7 +231,7 @@ The full threat model is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 ## What I would do with another month
 
-1. **Wire the learned classifier into the firewall**, withholding only above the threshold measured on benign data, and train a small transformer against the same splits.
+1. **Train a small transformer against the same splits**, and measure whether it lowers the 2% of benign documents the linear classifier withholds.
 2. **Grow the evasion corpus** with paraphrase and translation, which need a model to generate.
 3. **Record the model demo on more models and tasks.**
 4. **Sign the audit chain**, which is a key-management decision before it is code.

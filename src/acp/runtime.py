@@ -29,8 +29,9 @@ from acp.console.events import from_entry, observed
 from acp.console.hub import TraceHub
 from acp.exceptions import ConfigurationError
 from acp.firewall import Firewall, OllamaClassifier, firewall_for, ollama_classify
-from acp.firewall.decision import ENFORCEABLE
+from acp.firewall.decision import ENFORCEABLE, LearnedMode
 from acp.firewall.decision import Mode as FirewallMode
+from acp.firewall.learned import load_model
 from acp.gateway import UpstreamRegistry, build_app
 from acp.health import DEFAULT_INTERVAL, HealthMonitor, HealthRecord, UpstreamHealth
 from acp.identity import (
@@ -255,6 +256,11 @@ def control_states(settings: GatewaySettings) -> dict[str, str]:
         "authentication": "on" if settings.authentication_configured else "off",
         "audit": "on" if settings.audit_file is not None else "off",
         "firewall": settings.firewall_mode.value,
+        "firewall_learned": (
+            settings.firewall_learned.value
+            if settings.firewall_mode is not FirewallMode.OFF
+            else "off"
+        ),
         "provenance_framing": "on" if settings.provenance_framing_enabled else "off",
         "rate_limit": "on" if settings.rate_limit_enabled else "off",
         "quota": "on" if settings.quota_enabled else "off",
@@ -483,20 +489,33 @@ def build_firewall(settings: GatewaySettings) -> Firewall | None:
         )
 
     classifier = _build_classifier(settings)
+    # Loaded here, so a missing or corrupt model fails at startup, not on a call.
+    learned = None if settings.firewall_learned is LearnedMode.OFF else load_model()
+    enforceable = sorted(ENFORCEABLE)
+    if settings.firewall_learned is LearnedMode.ENFORCE:
+        enforceable.append("learned_classifier")
 
     logger.info(
         "firewall.enabled",
         extra={
             "mode": str(settings.firewall_mode),
             "allowed_hosts": list(settings.firewall_allowed_hosts),
-            "enforceable_detectors": sorted(ENFORCEABLE),
+            "enforceable_detectors": enforceable,
             "classifier": settings.firewall_classifier_enabled,
+            "learned": str(settings.firewall_learned),
+            "learned_thresholds": (
+                {"report": learned.threshold, "enforce": learned.enforce_threshold}
+                if learned is not None
+                else None
+            ),
         },
     )
     return firewall_for(
         settings.firewall_mode,
         allowed_hosts=frozenset(settings.firewall_allowed_hosts),
         classifier=classifier,
+        learned=learned,
+        learned_mode=settings.firewall_learned,
     )
 
 

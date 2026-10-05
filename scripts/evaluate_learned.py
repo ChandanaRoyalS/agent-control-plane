@@ -15,12 +15,10 @@ import hashlib
 import json
 import logging
 import sys
-from pathlib import Path
 
-from acp.corpus.bipia import load_bipia
-from acp.corpus.learned_eval import Row, as_json, compare
+from acp.corpus.learned_eval import Row, as_json, open_sets, score_sets, sealed_sets
 from acp.corpus.loader import default_root
-from acp.corpus.training import Example, assemble
+from acp.corpus.training import assemble
 from acp.firewall.learned import MODEL_PATH, load_model
 
 RESULTS = default_root() / "learned" / "results.json"
@@ -38,13 +36,6 @@ def show(rows: list[Row]) -> None:
         )
 
 
-def by_source(name: str, examples: tuple[Example, ...]) -> dict[str, list[Example]]:
-    out: dict[str, list[Example]] = {}
-    for e in examples:
-        out.setdefault(f"{name}/{e.source}", []).append(e)
-    return out
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__ and __doc__.splitlines()[0])
     parser.add_argument("--unseal", action="store_true", help="score the sealed sets, once")
@@ -60,11 +51,7 @@ def main() -> int:
         raise SystemExit(msg)
 
     data = assemble(unseal=args.unseal)
-    rows: list[Row] = []
-    for name, members in by_source("validation", data.validation).items():
-        rows += compare(name, members, model)
-    for name, members in data.report.items():
-        rows += compare(name, members, model)
+    rows = score_sets(open_sets(data), model)
     show(rows)
     result: dict[str, object] = {
         "model": dict(model.meta),
@@ -76,17 +63,7 @@ def main() -> int:
     }
 
     if args.unseal:
-        sealed: list[Row] = []
-        for name, members in data.sealed.items():
-            sealed += compare(name, members, model)
-        evasion_dir = Path(default_root()) / "external" / "evasion"
-        by_transform: dict[str, list[Example]] = {}
-        for d in load_bipia(evasion_dir):
-            by_transform.setdefault(d.category, []).append(
-                Example(d.id, d.text, 1, d.group, "evasion", d.planted)
-            )
-        for transform, members in sorted(by_transform.items()):
-            sealed += compare(f"evasion_v1/{transform}", members, model)
+        sealed = score_sets(sealed_sets(data), model)
         print("\nSEALED, scored once:")
         show(sealed)
         result["sealed"] = as_json(sealed)

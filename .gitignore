@@ -51,3 +51,6 @@ audit/
 *.swp
 .DS_Store
 config/audit-checkpoint.json
+
+# Fine-tuned transformer weights (ADR 0077): hundreds of megabytes, recorded by hash
+models/

@@ -15,7 +15,6 @@ and is left out otherwise.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import sys
@@ -26,7 +25,8 @@ import sklearn
 from scipy.sparse import csr_matrix
 from sklearn.linear_model import LogisticRegression
 
-from acp.corpus.training import Example, assemble
+from acp.corpus.learned_eval import TARGET_FPR, operating_points
+from acp.corpus.training import Example, assemble, data_digest, labelled_windows
 from acp.firewall.learned import (
     MODEL_PATH,
     STRIDE,
@@ -34,50 +34,12 @@ from acp.firewall.learned import (
     LearnedModel,
     features,
     from_json,
-    normalise,
-    windows,
 )
 
 GRID = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
-TARGET_FPR = 0.01
 MIN_DF = 2
 SEED = 0
 TOLERANCE = 1e-6
-
-
-def labelled_windows(
-    examples: list[Example],
-) -> tuple[list[set[str]], list[int], list[float], Counter[str]]:
-    rows: list[set[str]] = []
-    labels: list[int] = []
-    weights: list[float] = []
-    notes: Counter[str] = Counter()
-    for e in examples:
-        text = normalise(e.text)
-        span: tuple[int, int] | None = None
-        if e.label == 1:
-            planted = normalise(e.planted)
-            start = text.find(planted) if planted else -1
-            if start < 0:
-                notes["attack without a locatable instruction, skipped"] += 1
-                continue
-            span = (start, start + len(planted))
-        for start, window in windows(text):
-            if span is None:
-                label = 0
-            else:
-                overlap = max(0, min(span[1], start + len(window)) - max(span[0], start))
-                if overlap >= (span[1] - span[0]) / 2:
-                    label = 1
-                elif overlap == 0:
-                    label = 0
-                else:
-                    notes["window with part of an instruction, skipped"] += 1
-                    continue
-            rows.append(features(window))
-            labels.append(label)
-            weights.append(1.0)
-    return rows, labels, weights, notes
 
 
 def fit(rows: list[set[str]], labels: list[int], weights: list[float], c: float) -> LearnedModel:
@@ -105,33 +67,31 @@ def fit(rows: list[set[str]], labels: list[int], weights: list[float], c: float)
     return LearnedModel(weights, round(float(model.intercept_[0]), 8), 0.5, 0.5, {})
 
 
-def choose_threshold(model: LearnedModel, validation: list[Example]) -> tuple[float, float, float]:
-    """The lowest threshold whose validation false-positive rate is at most TARGET_FPR."""
-    benign = sorted(model.score(e.text) for e in validation if e.label == 0)
+def validation_scores(
+    model: LearnedModel, validation: list[Example]
+) -> tuple[list[float], list[float]]:
+    """Benign and attack document scores on validation."""
+    benign = [model.score(e.text) for e in validation if e.label == 0]
     attacks = [model.score(e.text) for e in validation if e.label == 1]
-    allowed = math.floor(TARGET_FPR * len(benign))
-    threshold = benign[-(allowed + 1)] + 1e-9 if benign else 0.5
-    fpr = sum(s >= threshold for s in benign) / len(benign)
-    recall = sum(s >= threshold for s in attacks) / len(attacks)
-    return threshold, fpr, recall
-
-
-def data_digest(examples: list[Example]) -> str:
-    h = hashlib.sha256()
-    for e in sorted(examples, key=lambda e: e.id):
-        h.update(f"{e.id}\0{e.label}\0{e.text}\0".encode())
-    return h.hexdigest()
+    return benign, attacks
 
 
 def train() -> dict[str, object]:
     data = assemble()
     train_set, validation = list(data.train), list(data.validation)
-    rows, labels, weights, notes = labelled_windows(train_set)
-    print(f"{len(rows)} training windows ({sum(labels)} positive); {dict(notes)}", file=sys.stderr)
+    labelled = labelled_windows(train_set)
+    rows = [features(t) for t in labelled.texts]
+    labels = labelled.labels
+    weights = [1.0] * len(rows)
+    print(
+        f"{len(rows)} training windows ({sum(labels)} positive); skipped {dict(labelled.skipped)}",
+        file=sys.stderr,
+    )
     best: tuple[float, float, LearnedModel, float, float] | None = None
     for c in GRID:
         model = fit(rows, labels, weights, c)
-        threshold, fpr, recall = choose_threshold(model, validation)
+        points = operating_points(*validation_scores(model, validation))
+        threshold, fpr, recall = points.threshold, points.fpr, points.recall
         print(
             f"C={c:<5} features={len(model.weights):>6} threshold={threshold:.3f} "
             f"validation recall={recall:.1%} fpr={fpr:.1%}",
@@ -147,10 +107,8 @@ def train() -> dict[str, object]:
         msg = "the grid is empty"
         raise SystemExit(msg)
     recall, c, model, threshold, fpr = best
-    benign = [model.score(e.text) for e in validation if e.label == 0]
-    attacks = [model.score(e.text) for e in validation if e.label == 1]
-    enforce = max(benign) + 1e-6
-    enforce_recall = sum(s >= enforce for s in attacks) / len(attacks)
+    points = operating_points(*validation_scores(model, validation))
+    enforce, enforce_recall = points.enforce_threshold, points.enforce_recall
     print(
         f"enforce threshold {enforce:.3f}: validation recall {enforce_recall:.1%}, fpr 0%",
         file=sys.stderr,

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install check fmt lint types test cov clean image up down logs smoke \
-        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check eval-descriptions eval-external eval-actions eval-hf-detector eval-classifier train eval-learned load-record \
+        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check eval-descriptions eval-external eval-actions eval-hf-detector eval-classifier train eval-learned train-transformer eval-transformer load-record \
         attack-demo attack-demo-enforce model-demo model-demo-record
 
 help:  ## Show this help
@@ -214,6 +214,14 @@ train:  ## Refit the learned classifier from the committed corpora (ADR 0075)
 
 eval-learned:  ## The learned classifier beside the patterns, on validation and report-only sets
 	uv run python scripts/evaluate_learned.py
+
+TRANSFORMER := uv run --with 'torch>=2.5' --with 'transformers>=4.46' python scripts/transformer.py
+
+train-transformer:  ## Fine-tune the transformer on the same splits (ADR 0077; needs ~2 GB)
+	$(TRANSFORMER) train
+
+eval-transformer:  ## Score the transformer; ARGS=--unseal for the sealed sets, once
+	$(TRANSFORMER) evaluate $(ARGS)
 
 eval-descriptions:  ## Screen 1,102 benign tool descriptions nobody here wrote (ADR 0065)
 	uv run python scripts/evaluate_descriptions.py

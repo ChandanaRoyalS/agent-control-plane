@@ -8,7 +8,7 @@ calls for a human, and records every decision in a hash-chained log.
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
 **~2,200 tests (about 1,700 on the gateway itself) · 95% branch coverage ·
-72 decision records · 20 hand-picked breakages, each caught by the test meant to
+73 decision records · 20 hand-picked breakages, each caught by the test meant to
 catch it**
 
 ## Why
@@ -78,6 +78,16 @@ allowed to block on that detector: promoting it would also block about one
 benign document in five. The run prints all of that rather than asserting a
 pass — [transcript](docs/demo/attack.txt) ·
 [ADR 0057](docs/decisions/0057-the-demo-reports-what-happened-it-does-not-assert-it.md).
+
+That agent is a parser, which makes the demo reproducible and says nothing
+about whether a model would obey the runbook. `make model-demo-record` asks
+that: a local model served by Ollama decides every call, on each path, over
+seeded trials, and every transcript is committed
+([ADR 0073](docs/decisions/0073-a-model-decides-the-calls.md)).
+
+<!-- model:begin -->
+No model-driven run has been recorded yet: `make up`, start Ollama, then `make model-demo-record`.
+<!-- model:end -->
 
 ## Architecture
 
@@ -253,9 +263,10 @@ somebody looking for gaps.
   homoglyph, spaced-out letters, base64 split across a line, or the same
   sentence in another language all pass them. There is no evasion corpus yet,
   so this is stated, not measured.
-- **There is no model anywhere in the request path or the demo.** The demo
-  "agent" is a parser that follows the instructions it reads, by design, and
-  nothing tests whether a real model honours the provenance fence.
+- **There is no model in the request path.** The published demo transcript
+  is a parser that follows the instructions it reads, by design. The
+  model-driven demo (ADR 0073) measures one small local model on one task,
+  and nothing isolates whether a model honours the provenance fence.
 - **Enforce mode withholds on two detectors and one condition**: a
   bidirectional override, a base64 run that decodes to an instruction, or a
   result too long to have been screened whole ([ADR 0069](docs/decisions/0069-the-unexamined-tail-is-the-trigger.md)).
@@ -287,10 +298,12 @@ In this order, because the first one changes what the project is evidence of:
    the model does not.
 2. **Build the evasion corpus** from the phrasings above, and report it beside
    the other numbers.
-3. **Drive the gateway with a real model.** The official Python SDK client
-   now drives it in the suite, and its first run found three defects nothing
-   else had ([ADR 0072](docs/decisions/0072-a-real-client-reads-the-refusal.md)).
-   The demo agent is still a parser, not a small local model.
+3. **Record the model-driven demo on more than one model.** The official
+   client drives the gateway in the suite
+   ([ADR 0072](docs/decisions/0072-a-real-client-reads-the-refusal.md)) and a
+   local model can drive the demo
+   ([ADR 0073](docs/decisions/0073-a-model-decides-the-calls.md)); one small
+   model on one task is one data point.
 4. **Sign the audit chain** — HMAC per entry or signed checkpoints, which is a
    key-management decision before it is code.
 

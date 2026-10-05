@@ -15,9 +15,10 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
-The official MCP Python client now drives the gateway in the test suite
-(item 5 of the external review), and its first run found three defects that
+Item 5 of the external review. The official MCP Python client now drives
+the gateway in the test suite, and its first run found three defects that
 2,212 tests had not ([ADR 0072](docs/decisions/0072-a-real-client-reads-the-refusal.md)).
+And a local model can now be the demo's agent instead of a parser.
 
 ### Added
 
@@ -28,6 +29,12 @@ The official MCP Python client now drives the gateway in the test suite
   `input_required` loop, an agent that waits for an approval, a handshake-era
   client and the audit chain.
 - `ApprovalUnsupportedError` (`-32041`, not recoverable).
+- A model-driven demo ([ADR 0073](docs/decisions/0073-a-model-decides-the-calls.md)):
+  a local model served by Ollama decides every call, directly and through the
+  gateway via the official client. `make model-demo` runs one trial per path;
+  `make model-demo-record` runs ten seeded trials each, commits every
+  transcript under `docs/demo/model/`, and regenerates the README rows from
+  it. A run in which the model never called a tool is refused.
 
 ### Fixed
 

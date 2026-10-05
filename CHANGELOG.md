@@ -15,6 +15,14 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+### Added
+
+- `make load-record` runs the load harness at 20 and 50 concurrent agents,
+  commits locust's raw CSVs and a per-outcome summary under `perf/results/`,
+  and regenerates the README's concurrent-load rows from the newest summary;
+  a test fails when they disagree. Item 8 of the external review: the only
+  concurrent figures were prose from a run nobody kept.
+
 ### Security
 
 - **Tool-level `deny` and `require_approval` rules match re-spelled tool

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help install check fmt lint types test cov clean image up down logs smoke \
-        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check eval-descriptions eval-external eval-actions eval-hf-detector eval-classifier
+        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check eval-descriptions eval-external eval-actions eval-hf-detector eval-classifier load-record
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -116,6 +116,10 @@ load-nofsync:  ## The same load test with the audit sink's fsync off (ADR 0050 Â
 	-$(MAKE) load
 	@echo "Restoring the default (fsync on) ..."
 	docker compose up -d --wait gateway
+
+load-record:  ## Load-test at 20 and 50 agents, commit-ready: raw CSVs and a summary in perf/results/, README rows regenerated
+	@echo "Two 30s runs. About a minute and a half. Do not use the machine."
+	uv run python scripts/record_load.py
 
 load:  ## Load-test the composed stack for 30s and report latency by outcome
 	uv run locust -f perf/locustfile.py --host http://127.0.0.1:8080 \

@@ -399,3 +399,38 @@ def test_the_file_sink_declares_blocking_exactly_when_it_syncs(tmp_path: Any) ->
 
 def test_a_memory_sink_never_blocks() -> None:
     assert MemoryAuditSink().blocking is False
+
+
+# ---------------------------------------------------------------------------
+# Caller-supplied tool names (W11 of the external review)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["x" * 10_000, "mock-a__search\nforged: entry", "mock-a__search\x1b[2J"],
+    ids=["long", "newline", "escape"],
+)
+def test_a_tool_name_no_upstream_could_have_is_not_written_verbatim(name: str) -> None:
+    """A refused call's tool name is caller input, and a refusal is recorded
+    whether or not the call could exist. Verbatim, any authenticated caller
+    could write arbitrary text into the chain."""
+    sink = MemoryAuditSink()
+    AuditLog(sink).record(
+        Category.AUTHORIZATION, "policy.denied", tool=name, outcome=Outcome.DENIED
+    )
+
+    [record] = written(sink)
+
+    assert record["tool"].startswith("<unrecognised tool name: ")
+    assert f"{len(name)} chars" in record["tool"]
+    assert "forged" not in record["tool"]
+
+
+def test_a_real_tool_name_is_written_as_it_is() -> None:
+    sink = MemoryAuditSink()
+    AuditLog(sink).record(Category.TOOL_CALL, "tool.called", tool="mock-a__search")
+
+    [record] = written(sink)
+
+    assert record["tool"] == "mock-a__search"

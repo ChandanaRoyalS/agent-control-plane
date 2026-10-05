@@ -28,6 +28,7 @@ to have a Python that can do all three, where it is not guaranteed to have jq.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -158,7 +159,13 @@ def _decode(payload: str) -> dict[str, Any]:
     return decoded
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    # No options; `--help` is here so that asking does not start a run against
+    # whatever happens to be listening (W11 of the external review).
+    argparse.ArgumentParser(
+        description=__doc__.splitlines()[0] if __doc__ else None,
+        epilog="Run against a stack brought up with `docker compose up -d --wait`.",
+    ).parse_args(argv)
     print("waiting for the stack...")
     if not wait_for(f"{ADMIN}/healthz"):
         report(False, "gateway answers at all", f"{ADMIN}/healthz never responded")

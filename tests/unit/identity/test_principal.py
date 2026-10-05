@@ -41,7 +41,6 @@ def test_the_subject_and_the_actor_are_kept_apart() -> None:
 
     assert principal.subject == "alice"
     assert principal.actor == Actor(subject="agent-7", issuer="https://workloads.test")
-    assert principal.is_delegated is True
 
 
 def test_a_token_with_no_actor_is_not_delegated() -> None:
@@ -51,7 +50,6 @@ def test_a_token_with_no_actor_is_not_delegated() -> None:
     principal = from_claims(base())
 
     assert principal.actor is None
-    assert principal.is_delegated is False
     assert principal.label == "alice"
 
 
@@ -137,13 +135,6 @@ def test_absent_optional_claims_do_not_invent_values() -> None:
 
     assert principal.scopes == frozenset()
     assert principal.client_id is None
-    assert principal.expires_at is None
-
-
-def test_a_boolean_is_not_an_expiry() -> None:
-    """`isinstance(True, int)` is True in Python, so a naive check accepts
-    `exp: true` and produces an expiry of 1 — the epoch plus one second."""
-    assert from_claims(base(exp=True)).expires_at is None
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +148,12 @@ def test_log_fields_carry_identifiers_and_nothing_else() -> None:
     copies an email onto every log line has made that decision for whoever
     operates it."""
     principal = from_claims(
-        base(act={"sub": "agent-7"}, email="alice@example.test", name="Alice Example")
+        base(
+            act={"sub": "agent-7", "act": {"sub": "scheduler"}},
+            scope="tools:read",
+            email="alice@example.test",
+            name="Alice Example",
+        )
     )
 
     fields = principal.as_log_fields()
@@ -166,18 +162,29 @@ def test_log_fields_carry_identifiers_and_nothing_else() -> None:
         "principal": "alice",
         "principal_issuer": "https://idp.test",
         "actor": "agent-7",
+        "delegation_chain": ["agent-7", "scheduler"],
         "client_id": None,
+        "scopes": ["tools:read"],
         "tenant": None,
     }
     assert "alice@example.test" not in str(fields)
     assert "Alice Example" not in str(fields)
 
 
-def test_scopes_are_queryable() -> None:
-    principal = from_claims(base(scope="tools:read"))
+def test_every_parsed_field_is_consumed_somewhere() -> None:
+    """W11 of the external review: fields parsed from the token and read by
+    nothing. What is parsed now either decides something (subject, actor,
+    tenant) or reaches the request log; a field that does neither should not
+    be here."""
+    from dataclasses import fields as dataclass_fields  # noqa: PLC0415
 
-    assert principal.has_scope("tools:read")
-    assert not principal.has_scope("tools:write")
+    logged = set(from_claims(base()).as_log_fields())
+    decided = {"subject", "issuer", "actor", "tenant"}
+    renamed = {"subject": "principal", "issuer": "principal_issuer"}
+
+    for field in dataclass_fields(Principal):
+        name = renamed.get(field.name, field.name)
+        assert field.name in decided or name in logged, f"{field.name} is parsed and unused"
 
 
 # ---------------------------------------------------------------------------

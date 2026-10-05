@@ -42,7 +42,6 @@ CLIENT_ID_CLAIM = "client_id"
 """RFC 9068 §2.2 — the OAuth client that obtained the token."""
 
 SCOPE_CLAIM = "scope"
-EXPIRY_CLAIM = "exp"
 
 MAX_DELEGATION_DEPTH = 8
 """How far down an ``act`` chain this will walk before giving up.
@@ -79,7 +78,12 @@ class Principal:
     actor: Actor | None = None
     client_id: str | None = None
     scopes: frozenset[str] = field(default_factory=frozenset)
-    expires_at: int | None = None
+    """The token's OAuth scopes, parsed and written to the request log.
+    **Not** consulted by policy: rules match subject, actor, tool and
+    arguments. Scope-based rules are a feature this does not have yet, and the
+    field says so rather than looking like one it does (W11 of the external
+    review)."""
+
     tenant: str | None = None
     """Which tenant this principal belongs to.
 
@@ -93,11 +97,9 @@ class Principal:
     delegation_chain: tuple[str, ...] = ()
     """Every actor from the immediate one outward, when the token carries a
     chain. Kept because "the CFO's token, via an agent, via a scheduler nobody
-    authorized" is a sentence that should be answerable from an audit log."""
-
-    @property
-    def is_delegated(self) -> bool:
-        return self.actor is not None
+    authorized" is a sentence that should be answerable from the request log,
+    which is where it goes (`as_log_fields`). Policy decides on the immediate
+    actor only."""
 
     @property
     def label(self) -> str:
@@ -109,9 +111,6 @@ class Principal:
         after an incident.
         """
         return f"{self.subject} via {self.actor}" if self.actor else self.subject
-
-    def has_scope(self, scope: str) -> bool:
-        return scope in self.scopes
 
     def as_log_fields(self) -> dict[str, Any]:
         """Fields safe to attach to every log line for this request.
@@ -125,7 +124,9 @@ class Principal:
             "principal": self.subject,
             "principal_issuer": self.issuer,
             "actor": self.actor.subject if self.actor else None,
+            "delegation_chain": list(self.delegation_chain),
             "client_id": self.client_id,
+            "scopes": sorted(self.scopes),
             "tenant": self.tenant,
         }
 
@@ -148,7 +149,6 @@ def from_claims(claims: Mapping[str, Any]) -> Principal:
         actor=actor,
         client_id=_optional_str(claims.get(CLIENT_ID_CLAIM)),
         scopes=_scopes(claims.get(SCOPE_CLAIM)),
-        expires_at=_optional_int(claims.get(EXPIRY_CLAIM)),
         delegation_chain=chain,
     )
 
@@ -208,10 +208,6 @@ def _require_str(claims: Mapping[str, Any], name: str) -> str:
 
 def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
-
-
-def _optional_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 # ---------------------------------------------------------------------------

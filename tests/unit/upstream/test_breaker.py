@@ -7,6 +7,7 @@ and the timing rules are the part most worth testing carefully.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -243,6 +244,69 @@ def test_a_straggler_succeeding_after_it_opened_does_not_close_the_circuit() -> 
 
     assert run(_run) is BreakerState.OPEN, "a straggler's success is not a probe's success"
     assert cb.snapshot().seconds_until_reset == pytest.approx(25.0)
+
+
+def _straggling_across_half_open(*, succeeds: bool) -> tuple[BreakerState, int]:
+    """A call admitted while closed, held while the breaker trips and its
+    timeout elapses, then released while a real probe is in flight. Returns the
+    state after the straggler lands, and how many probe slots are counted."""
+    clock = FakeClock()
+    cb = breaker(clock, failure_threshold=1, reset_timeout=30.0)
+
+    async def _run() -> tuple[BreakerState, int]:
+        straggler_in = anyio.Event()
+        release_straggler = anyio.Event()
+        probe_in = anyio.Event()
+        release_probe = anyio.Event()
+        seen: list[tuple[BreakerState, int]] = []
+
+        async def straggler() -> None:
+            with contextlib.suppress(UpstreamTimeoutError):
+                async with cb.guard():
+                    straggler_in.set()
+                    await release_straggler.wait()
+                    if not succeeds:
+                        raise timeout()
+
+        async def probe() -> None:
+            async with cb.guard():
+                probe_in.set()
+                await release_probe.wait()
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(straggler)
+            await straggler_in.wait()
+            await fail(cb)  # trips
+            clock.advance(31.0)
+            tg.start_soon(probe)  # the real probe, half-open
+            await probe_in.wait()
+            release_straggler.set()
+            await anyio.lowlevel.checkpoint()
+            await anyio.lowlevel.checkpoint()
+            seen.append((cb.state, cb._probes_in_flight))
+            release_probe.set()
+
+        return seen[0]
+
+    result: tuple[BreakerState, int] = run(_run)
+    return result
+
+
+def test_a_straggler_succeeding_during_half_open_does_not_close_the_circuit() -> None:
+    """W11 of the external review. Admitted while closed, it is not a probe;
+    its success says the upstream worked before it broke, not that it has
+    recovered, and the real probe is still out."""
+    state, probes = _straggling_across_half_open(succeeds=True)
+
+    assert state is BreakerState.HALF_OPEN
+    assert probes == 1, "the straggler released a slot it never held"
+
+
+def test_a_straggler_failing_during_half_open_does_not_reopen_the_circuit() -> None:
+    state, probes = _straggling_across_half_open(succeeds=False)
+
+    assert state is BreakerState.HALF_OPEN
+    assert probes == 1
 
 
 # ---------------------------------------------------------------------------

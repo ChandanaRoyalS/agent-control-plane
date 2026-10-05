@@ -90,8 +90,13 @@ def call_tool(policy: Policy, keypair: Keypair, token: str, tool: str) -> dict[s
 
 
 def test_an_allowed_tool_call_reaches_the_upstream(keypair: Keypair) -> None:
-    """A subject the policy allows for this tool is not refused by policy — the
-    response carries no policy-denied error."""
+    """A subject the policy allows for this tool gets the upstream's result.
+
+    This used to assert only that any error present was not the policy-denied
+    code, so it passed for every other failure too — an upstream down, a
+    gateway error, a broken routing — which is to say it did not show the call
+    reached anything (W11 of the external review). It now asserts the result.
+    """
     policy = Policy(
         rules=(
             Rule(
@@ -104,8 +109,10 @@ def test_an_allowed_tool_call_reaches_the_upstream(keypair: Keypair) -> None:
     )
     token = keypair.sign(claims())
     result = call_tool(policy, keypair, token, "mock-a__search")
-    if "error" in result:
-        assert result["error"]["code"] != -32040, result
+
+    assert "error" not in result, result
+    assert result["result"]["isError"] is False, result
+    assert result["result"]["content"], "the upstream answered with nothing"
 
 
 def test_a_denied_tool_call_is_refused_before_its_body_is_read(keypair: Keypair) -> None:

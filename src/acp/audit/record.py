@@ -29,6 +29,7 @@ worse than no verifier at all.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -208,3 +209,29 @@ def canonical(payload: Mapping[str, Any]) -> str:
         ensure_ascii=False,
         allow_nan=False,
     )
+
+
+MAX_RECORDED_TOOL_CHARS: Final = 64
+"""The longest tool name a record carries verbatim — `acp.gateway.naming`'s
+qualified-name ceiling, restated here so the audit package does not import the
+gateway's."""
+
+
+def recordable_tool(tool: str | None) -> str | None:
+    """The tool name as the chain should carry it.
+
+    A tool name reaches a record from caller input — a routing header on the
+    pre-dispatch path, a request body otherwise — and is written for calls the
+    gateway refused, including calls that never existed. Verbatim, that let any
+    authenticated caller write arbitrary text of any length into a durable,
+    append-only, evidentiary file (W11 of the external review). Every real tool
+    name fits the qualified-name ceiling and is printable, so a name that does
+    not is recorded as its length and a hash prefix: enough to correlate
+    repeats, nothing to read.
+    """
+    if tool is None:
+        return None
+    if len(tool) <= MAX_RECORDED_TOOL_CHARS and tool.isprintable():
+        return tool
+    digest = hashlib.sha256(tool.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+    return f"<unrecognised tool name: {len(tool)} chars, sha256 {digest}>"

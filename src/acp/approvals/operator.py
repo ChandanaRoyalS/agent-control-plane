@@ -217,7 +217,7 @@ class OperatorAuthenticator:
         scheme, _, presented = header.partition(" ")
         if scheme.lower() != "bearer" or not presented:
             return None
-        if self.credential and _matches(presented, self.credential):
+        if self.credential and matches_credential(presented, self.credential):
             return Operator(subject=SHARED_OPERATOR_NAME)
         if self.validator is None:
             return None
@@ -228,8 +228,12 @@ class OperatorAuthenticator:
         return Operator(subject=principal.subject, tenant=principal.tenant, issuer=principal.issuer)
 
 
-def _matches(presented: str, credential: str) -> bool:
+def matches_credential(presented: str, credential: str) -> bool:
     """Constant-time equality against the shared token.
+
+    Public because the trace console checks the same credential on the same
+    listener, and a second copy is how the console kept the bug this one had
+    already fixed (W11 of the external review).
 
     ``compare_digest`` rather than ``==``: the comparison is against a secret,
     and a short-circuiting comparison over a value an attacker controls leaks its

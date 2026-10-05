@@ -48,6 +48,7 @@ from redis.asyncio import Redis, WatchError
 
 from acp.approvals.record import ApprovalRequest, State
 from acp.exceptions import ConfigurationError
+from acp.redis_url import REDIS_SCHEMES
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ GRACE_SECONDS: Final = 300.0
 late operator sees "expired" and not "no such request" (ADR 0048 says why the
 distinction matters); short enough that a flood is forgotten in minutes."""
 MAX_CAS_ATTEMPTS: Final = 5
-APPROVAL_STORE_SCHEMES: Final = ("redis://", "rediss://", "unix://")
+APPROVAL_STORE_SCHEMES: Final = REDIS_SCHEMES
 
 
 def encode(request: ApprovalRequest) -> str:

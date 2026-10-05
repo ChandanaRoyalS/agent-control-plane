@@ -382,8 +382,14 @@ of findings, not of screenings.
   said was missing, so budgets are now *isolated* per tenant — but every tenant still
   draws from the same capacity and refill numbers. Isolation, not
   differentiation.
-- **Rate-limit state is in memory**, so a replicated fleet multiplies every
-  limit by the number of processes.
+- **Rate-limit and quota state are in memory by default**, so a replicated
+  fleet multiplies every limit by the number of processes. Setting
+  `ACP_BUDGET_STORE_URL` closes it (ADR 0067): one bucket and one tally per
+  payer in Redis, charged in one server-side step that checks both budgets
+  before debiting either, and the gateway refuses to start if the store is
+  unreachable. What remains is the default, a Redis round trip on every
+  charged call, and the Redis itself as trust base — whoever can write to it
+  can refill a bucket.
 
 ### 6.7 A cached result outliving an entitlement change
 

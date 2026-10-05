@@ -147,6 +147,11 @@
       "default": "''"
     },
     {
+      "variable": "ACP_BUDGET_STORE_URL",
+      "type": "str",
+      "default": "''"
+    },
+    {
       "variable": "ACP_CACHE_FILE",
       "type": "Path | None",
       "default": "None"

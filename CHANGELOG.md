@@ -17,6 +17,14 @@ without somebody accepting the change.
 
 ### Added
 
+- `ACP_BUDGET_STORE_URL` (ADR 0067). Set it to a Redis URL and rate-limit
+  buckets and quota tallies live there, one per payer for the whole fleet,
+  charged in a single server-side step that checks both budgets before
+  debiting either. Without it every replica enforces its own copy of every
+  limit. The gateway refuses to start if the store is unreachable; empty
+  keeps the in-memory budgets, which remain the default. Independent of
+  `ACP_APPROVAL_STORE_URL`; both may name the same Redis.
+
 - `ACP_APPROVAL_STORE_URL` (ADR 0066). Set it to a Redis URL and held
   approvals live there, shared by every replica: a caller told to wait by one
   gateway may retry against another, an operator may answer from a third, and
@@ -41,6 +49,10 @@ without somebody accepting the change.
 
 ### Changed
 
+- The shared budget keeper refills the rate bucket on the wall clock the
+  caller passes, since replicas share no monotonic clock; the in-memory
+  limiter still refills on a monotonic one. A wall-clock step on one replica
+  misgrants or withholds at most one burst, once (ADR 0067).
 - An approved token is spent exactly once, however many retries carry it at
   the same moment: `consume` moves only an `APPROVED` record and reports
   whether this call did, and a retry that read `APPROVED` but lost that race

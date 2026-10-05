@@ -30,10 +30,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from acp.approvals.operator import MIN_OPERATOR_TOKEN_LENGTH
 from acp.approvals.record import DEFAULT_TTL_SECONDS
-from acp.approvals.redis_store import APPROVAL_STORE_SCHEMES
 from acp.approvals.store import DEFAULT_MAX_PENDING
 from acp.exceptions import ConfigurationError
 from acp.firewall.decision import Mode as FirewallMode
+from acp.redis_url import check_redis_url
 from acp.upstream import UpstreamConfig
 
 DEFAULT_SECRETS_DIR = "/run/secrets"
@@ -365,6 +365,22 @@ class GatewaySettings(BaseSettings):
     quota_window_seconds: float = Field(default=86400.0, gt=0)
     """The window length in seconds over which ``quota_limit`` applies; the tally
     resets at each window boundary. Defaults to a day."""
+
+    budget_store_url: str = ""
+    """Redis the rate-limit buckets and quota tallies live in, shared by every
+    replica.
+
+    Empty keeps them in this process's memory, which makes a replicated fleet
+    *more permissive* by the replica count: every limit is per process, so
+    three gateways behind one load balancer hand out three bursts and three
+    quotas (ADR 0067). Set it — ``redis://``, ``rediss://`` or ``unix://`` —
+    and one bucket and one tally per payer are charged from wherever the call
+    lands, in one atomic step that checks both budgets before debiting either.
+    The gateway refuses to start if the Redis is unreachable. Independent of
+    `approval_store_url` on purpose: shared approvals are a correctness fix,
+    shared budgets cost a Redis round trip on every call, and a deployment may
+    want one without the other. Both may name the same Redis.
+    """
     """Path to the policy rulebook, resolved relative to the
     process's working directory.
 
@@ -615,6 +631,11 @@ class GatewaySettings(BaseSettings):
         return bool(self.auth_issuers_file or (self.auth_issuer and self.auth_audience))
 
     @property
+    def budget_store_shared(self) -> bool:
+        """Whether budgets are charged against a store every replica can reach."""
+        return bool(self.budget_store_url)
+
+    @property
     def approval_store_shared(self) -> bool:
         """Whether held approvals live in a store every replica can reach."""
         return bool(self.approval_store_url)
@@ -622,11 +643,12 @@ class GatewaySettings(BaseSettings):
     @field_validator("approval_store_url")
     @classmethod
     def _approval_store_url_is_redis(cls, value: str) -> str:
-        if value and not value.startswith(APPROVAL_STORE_SCHEMES):
-            schemes = ", ".join(APPROVAL_STORE_SCHEMES)
-            msg = f"ACP_APPROVAL_STORE_URL must start with one of {schemes}"
-            raise ValueError(msg)
-        return value
+        return check_redis_url("ACP_APPROVAL_STORE_URL", value)
+
+    @field_validator("budget_store_url")
+    @classmethod
+    def _budget_store_url_is_redis(cls, value: str) -> str:
+        return check_redis_url("ACP_BUDGET_STORE_URL", value)
 
     @property
     def secret_store_configured(self) -> bool:

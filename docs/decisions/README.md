@@ -107,6 +107,7 @@ If you have ten minutes and want the ones that carry the most weight:
 | [0064](0064-held-out-v2-scored-once.md) | held-out v2 scored once and spent: polite form 0/595, announced 595/595, nothing withheld; policies block or hold 35/35 attack chains at no cost to the tasks |
 | [0065](0065-the-catalogue-is-screened-too.md) | tool descriptions are screened with the result bar and withheld in enforce mode; 0 of 1,102 external descriptions flagged, and the polite one still passes |
 | [0066](0066-an-approval-is-a-fact-about-the-fleet.md) | held approvals move to Redis behind `ACP_APPROVAL_STORE_URL`, shared by every replica; `consume` is compare-and-set so an approved token is spent exactly once; in-memory stays the default |
+| [0067](0067-a-limit-is-a-limit-on-the-fleet.md) | rate-limit buckets and quota tallies move to Redis behind `ACP_BUDGET_STORE_URL`, charged in one Lua step that checks both before debiting either; the budgets' keeper is named (`Budgets`) and the in-memory one stays the default |
 
 ## Approvals, audit, tenancy
 

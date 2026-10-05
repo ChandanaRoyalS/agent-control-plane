@@ -30,6 +30,8 @@ from acp.audit import AuditLog, FileAuditSink
 from acp.audit.chain import Entry
 from acp.budget import CostTable, QuotaCounter, RateLimiter, load_costs
 from acp.budget.account import parties
+from acp.budget.charge import Budgets
+from acp.budget.redis_store import RedisBudgets
 from acp.config import GatewaySettings, allowed_hosts_for, load_issuers, load_upstreams
 from acp.console.events import from_entry, observed
 from acp.console.hub import TraceHub
@@ -107,6 +109,7 @@ async def gateway_from_configs(
     limiter: RateLimiter | None = None,
     costs: CostTable | None = None,
     quota: QuotaCounter | None = None,
+    budgets: Budgets | None = None,
     cacheable: CacheableTools | None = None,
     results: ResultCache | None = None,
     provenance: bool = False,
@@ -240,6 +243,7 @@ async def gateway_from_configs(
             limiter=limiter,
             costs=costs,
             quota=quota,
+            budgets=budgets,
             cacheable=cacheable,
             results=results,
             provenance=provenance,
@@ -452,6 +456,43 @@ def build_approval_store(
     if settings.approval_store_shared:
         return RedisApprovalStore.from_url(settings.approval_store_url)
     return InMemoryApprovalStore(max_pending=settings.approval_max_pending)
+
+
+def build_budgets(settings: GatewaySettings) -> RedisBudgets | None:
+    """The shared keeper of rate-limit and quota state, when one is configured.
+
+    ``None`` when `ACP_BUDGET_STORE_URL` is empty — the in-memory limiter and
+    quota are built instead, as before — and also when it is set but neither
+    budget is enabled, because a store with nothing to charge is a connection
+    held for no reason. Returned unpinged, like the approval store, so the
+    assembly can be asserted without a Redis; `gateway_from_settings` pings
+    it before it serves (ADR 0067).
+    """
+    if not settings.budget_store_shared:
+        return None
+    if not (settings.rate_limit_enabled or settings.quota_enabled):
+        logger.warning(
+            "budget.store_unused",
+            extra={
+                "reason": "ACP_BUDGET_STORE_URL is set and neither budget is enabled",
+                "consequence": "nothing is charged; the store is not opened",
+            },
+        )
+        return None
+    logger.info(
+        "budget.shared",
+        extra={
+            "rate_limit": settings.rate_limit_enabled,
+            "quota": settings.quota_enabled,
+        },
+    )
+    return RedisBudgets.from_url(
+        settings.budget_store_url,
+        capacity=settings.rate_limit_capacity if settings.rate_limit_enabled else None,
+        refill_per_second=settings.rate_limit_refill_per_second,
+        limit=settings.quota_limit if settings.quota_enabled else None,
+        window_seconds=settings.quota_window_seconds,
+    )
 
 
 def build_firewall(settings: GatewaySettings) -> Firewall | None:
@@ -949,12 +990,16 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         tenant_policy_dir=settings.tenant_policy_dir,
         tenants=tenants,
     )
+    # The budgets live in one of two places. With a shared store, the keeper
+    # is the store and the in-memory limiter and quota are not built at all —
+    # a bucket in this process would be a second, unshared budget.
+    budgets = build_budgets(settings)
     limiter = (
         RateLimiter(
             capacity=settings.rate_limit_capacity,
             refill_per_second=settings.rate_limit_refill_per_second,
         )
-        if settings.rate_limit_enabled
+        if settings.rate_limit_enabled and budgets is None
         else None
     )
     costs = load_costs(settings.cost_file) if settings.cost_file is not None else None
@@ -978,7 +1023,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             limit=settings.quota_limit,
             window_seconds=settings.quota_window_seconds,
         )
-        if settings.quota_enabled
+        if settings.quota_enabled and budgets is None
         else None
     )
     firewall = build_firewall(settings)
@@ -988,6 +1033,8 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         # call, where the caller would wait out a TTL for a decision that was
         # never stored.
         await approvals.ping()
+    if budgets is not None:
+        await budgets.ping()
     # The trace console's hub. Built unconditionally and cheap when nobody is
     # watching — an empty subscriber list and a 50-event ring. Whether the console is
     # *reachable* is decided by `console_routes`, which needs the operator
@@ -1021,6 +1068,7 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
             limiter=limiter,
             costs=costs,
             quota=quota,
+            budgets=budgets,
             cacheable=cacheable,
             results=results,
             provenance=settings.provenance_framing_enabled,
@@ -1038,6 +1086,8 @@ async def gateway_from_settings(settings: GatewaySettings) -> AsyncIterator[Star
         await store.aclose()
         if isinstance(approvals, RedisApprovalStore):
             await approvals.aclose()
+        if budgets is not None:
+            await budgets.aclose()
         if exchanger is not None:
             await exchanger.aclose()
         if validator is not None:

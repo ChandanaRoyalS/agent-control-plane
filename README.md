@@ -209,6 +209,8 @@ somebody looking for gaps.
   reaches the model, and only the policy stands between it and the call.
 - **Pending approvals live in memory unless `ACP_APPROVAL_STORE_URL` is set**;
   by default a restart loses them and a second replica cannot see them.
+- **Rate limits and quotas are per process unless `ACP_BUDGET_STORE_URL` is
+  set**; by default every replica hands out its own burst and its own quota.
 
 ## Roadmap
 

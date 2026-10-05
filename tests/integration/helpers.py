@@ -34,6 +34,9 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
+import httpx2
+from mcp.client import Client
+from mcp.client.streamable_http import streamable_http_client
 from starlette.applications import Starlette
 
 from acp.gateway import UpstreamRegistry, build_app
@@ -332,3 +335,45 @@ async def authenticated_gateway(
         for client in upstreams:
             await stack.enter_async_context(client)
         yield await stack.enter_async_context(gateway_client(app, token=token))
+
+
+# ---------------------------------------------------------------------------
+# The gateway, driven by a client this project did not write (ADR 0072)
+# ---------------------------------------------------------------------------
+
+OFFICIAL_URL = "http://127.0.0.1/mcp"
+"""Loopback, because the SDK server's DNS-rebinding guard checks the Host."""
+
+
+@contextlib.asynccontextmanager
+async def official_client(
+    keypair: Keypair,
+    *,
+    token: str | None,
+    mode: str = "auto",
+    rounds: int = 10,
+    **gateway: Any,
+) -> AsyncIterator[Client]:
+    """The gateway assembled as a deployment assembles it, and the SDK's client
+    connected to it. ``**gateway`` reaches `build_app`."""
+    upstreams = mock_clients()
+    app = build_app(UpstreamRegistry(upstreams), validator=validator_for(keypair), **gateway)
+    app.add_middleware(AuthenticationMiddleware, validator=validator_for(keypair))
+    headers = {"authorization": f"Bearer {token}"} if token is not None else {}
+    async with contextlib.AsyncExitStack() as stack:
+        for upstream in upstreams:
+            await stack.enter_async_context(upstream)
+        await stack.enter_async_context(app.router.lifespan_context(app))
+        http = await stack.enter_async_context(
+            httpx2.AsyncClient(
+                transport=httpx2.ASGITransport(app=app),
+                base_url="http://127.0.0.1",
+                headers=headers,
+            )
+        )
+        client = Client(
+            streamable_http_client(OFFICIAL_URL, http_client=http),
+            mode=mode,
+            input_required_max_rounds=rounds,
+        )
+        yield await stack.enter_async_context(client)

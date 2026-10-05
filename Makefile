@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 .PHONY: help install check fmt lint types test cov clean image up down logs smoke \
-        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check eval-descriptions eval-external eval-actions eval-hf-detector eval-classifier load-record
+        identity-smoke token idp-reset probe-resource probe-cimd prove-passthrough prove-cache prove-refusal prove-predispatch corpus eval eval-check eval-descriptions eval-external eval-actions eval-hf-detector eval-classifier load-record \
+        attack-demo attack-demo-enforce model-demo model-demo-record
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -147,6 +148,13 @@ attack-demo-enforce:  ## The same demo with the firewall withholding, not just l
 	-uv run python scripts/attack_demo.py
 	@echo "Restoring the default (report) ..."
 	@docker compose up -d --wait gateway >/dev/null 2>&1
+
+model-demo:  ## A local model as the agent, one trial per path (needs Ollama; ACP_DEMO_MODEL=llama3.2)
+	uv run python scripts/record_model_demo.py
+
+model-demo-record:  ## Ten seeded trials per path, every transcript in docs/demo/model/, README rows regenerated
+	@echo "Twenty agent runs on a local model. Several minutes on a laptop."
+	uv run python scripts/record_model_demo.py --record
 
 .PHONY: surface surface-capture release-notes
 

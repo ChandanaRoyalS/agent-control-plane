@@ -33,33 +33,25 @@ raises, not against a body this suite parsed.
 
 from __future__ import annotations
 
-import contextlib
 import json
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-import httpx2
 import pytest
-from mcp.client import Client, InputRequiredRoundsExceededError
-from mcp.client.streamable_http import streamable_http_client
+from mcp.client import InputRequiredRoundsExceededError
 from mcp.shared.exceptions import MCPError
 from mcp.types import InputRequiredResult, TextContent
 
 from acp import __version__
 from acp.approvals import InMemoryApprovalStore
 from acp.audit import AuditLog, FileAuditSink
-from acp.gateway import UpstreamRegistry, build_app
-from acp.identity import AuthenticationMiddleware
 from acp.policy import Effect, Policy, Rule
 
 from ..tokens import Keypair, claims
-from .helpers import mock_clients, validator_for
+from .helpers import official_client
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
-
-URL = "http://127.0.0.1/mcp"
-"""Loopback, because the SDK server's DNS-rebinding guard checks the Host."""
 
 RUNBOOK = "runbooks/incident-2291.md"
 PAYROLL = "hr/compensation-2026.md"
@@ -87,40 +79,6 @@ POLICY = Policy(
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
-
-
-@contextlib.asynccontextmanager
-async def official_client(
-    keypair: Keypair,
-    *,
-    token: str | None,
-    mode: str = "auto",
-    rounds: int = 10,
-    **gateway: Any,
-) -> AsyncIterator[Client]:
-    """The gateway assembled as a deployment assembles it, and the SDK's client
-    connected to it. ``**gateway`` reaches `build_app`."""
-    upstreams = mock_clients()
-    app = build_app(UpstreamRegistry(upstreams), validator=validator_for(keypair), **gateway)
-    app.add_middleware(AuthenticationMiddleware, validator=validator_for(keypair))
-    headers = {"authorization": f"Bearer {token}"} if token is not None else {}
-    async with contextlib.AsyncExitStack() as stack:
-        for upstream in upstreams:
-            await stack.enter_async_context(upstream)
-        await stack.enter_async_context(app.router.lifespan_context(app))
-        http = await stack.enter_async_context(
-            httpx2.AsyncClient(
-                transport=httpx2.ASGITransport(app=app),
-                base_url="http://127.0.0.1",
-                headers=headers,
-            )
-        )
-        client = Client(
-            streamable_http_client(URL, http_client=http),
-            mode=mode,
-            input_required_max_rounds=rounds,
-        )
-        yield await stack.enter_async_context(client)
 
 
 def text(result: Any) -> str:

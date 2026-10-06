@@ -75,7 +75,7 @@ docker compose down
 ```
 
 The released image is built for `linux/amd64` and `linux/arm64` and runs as uid 10001:
-`docker pull ghcr.io/chandanaroyals/agent-control-plane:2.2.1`. The MCP
+`docker pull ghcr.io/chandanaroyals/agent-control-plane:2.3.0`. The MCP
 endpoint is on `:8080`; health, metrics and the live decision console on
 `:9090`; traces at <http://localhost:16686>.
 

@@ -223,6 +223,7 @@ async def _audit_screening(
     if audit is None or not findings:
         return
     learned = [f.evidence for f in findings if f.detector == LEARNED_DETECTOR]
+    score = inspection.learned_score
     await _chain(
         audit,
         AuditCategory.FIREWALL,
@@ -239,6 +240,7 @@ async def _audit_screening(
             # 0 for a flagged-but-served document, the common case (ADR 0039).
             "trigger_count": len(inspection.triggers),
             "detectors": sorted({f.detector for f in findings}),
+            **({"learned_score": round(score, 3)} if score is not None else {}),
             **({"learned": learned[0]} if learned else {}),
         },
     )

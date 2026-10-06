@@ -123,6 +123,13 @@ class Inspection:
     triggers: tuple[Finding, ...] = ()
     """Findings that crossed the bar; in report mode, what would have been withheld."""
 
+    learned_score: float | None = None
+    """The learned classifier's score for this result, when one is attached (ADR 0076).
+
+    Kept whether or not it crossed a threshold, so a record can say the classifier
+    looked and what it thought; the score is gateway-written, never document text.
+    """
+
     @property
     def cacheable(self) -> bool:
         """Whether this result may be cached: not refused and not truncated.
@@ -270,14 +277,20 @@ class Firewall:
         # Text blocks only; resource links are a known gap (ADR 0037).
         texts = [block.text for block in result.content if block.text is not None]
         screening = screener.screen_all(texts)
-        learned = self._learned_finding(texts)
+        score, learned = self._learned_finding(texts)
         if learned is not None:
             screening = replace(screening, findings=(*screening.findings, learned))
         triggers = triggers_for(screening, also=self._also)
 
         if not (triggers and self._enforce):
             self._record(tool, screening, decision=_verdict(screening, triggers), triggers=triggers)
-            return Inspection(result=result, screening=screening, refused=False, triggers=triggers)
+            return Inspection(
+                result=result,
+                screening=screening,
+                refused=False,
+                triggers=triggers,
+                learned_score=score,
+            )
 
         incident = secrets.token_hex(INCIDENT_BYTES)
         self._record(tool, screening, decision="refused", incident=incident, triggers=triggers)
@@ -287,21 +300,22 @@ class Firewall:
             refused=True,
             incident=incident,
             triggers=triggers,
+            learned_score=score,
         )
 
-    def _learned_finding(self, texts: Sequence[str]) -> Finding | None:
-        """The learned classifier's finding on the screened text, if it crosses a threshold.
+    def _learned_finding(self, texts: Sequence[str]) -> tuple[float | None, Finding | None]:
+        """The learned classifier's score, and its finding if that crosses a threshold.
 
         Scores what the patterns saw (the first ``max_chars``); a longer result is
         already a trigger. Its evidence is the score, never document text.
         """
         model = self._learned
         if model is None or not texts:
-            return None
+            return None, None
         score = model.score("\n".join(texts)[: self._max_chars])
         if score < model.threshold:
-            return None
-        return Finding(
+            return score, None
+        return score, Finding(
             detector=LEARNED_NAME,
             family=Family.PLAIN_ASSERTION,
             confidence=(Confidence.HIGH if score >= model.enforce_threshold else Confidence.MEDIUM),

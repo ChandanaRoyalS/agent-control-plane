@@ -349,20 +349,31 @@ def report_screenings(found: list[dict[str, Any]]) -> None:
         emit(f"      findings    {detail.get('finding_count')}")
         emit(f"      TRIGGERS    {detail.get('trigger_count')}   <- what could withhold")
         learned = detail.get("learned")
+        score = detail.get("learned_score")
         if learned:
             emit(f"      LEARNED CLASSIFIER  {learned}")
+        elif score is not None:
+            emit(f"      LEARNED CLASSIFIER  score {score}: below its report threshold")
     emit()
     emit("  `findings` is what the detectors noticed. `triggers` is how many of")
     emit("  those came from a detector permitted to act. When findings are high")
     emit("  and triggers are zero, THE FIREWALL SAW IT AND WAS NOT ALLOWED TO")
     emit("  STOP IT — which is a measurement decision, not a bug.")
-    if any((r.get("detail") or {}).get("learned") for r in found):
+    details = [r.get("detail") or {} for r in found]
+    if any(d.get("learned") for d in details):
         emit()
         emit("  The learned classifier's line is its score against two thresholds:")
         emit("  at or above the first it reports, at or above the second it would")
         emit("  withhold under ACP_FIREWALL_LEARNED=enforce. In `report` it is")
         emit("  counted, so a deployment can see what enforcing would cost before")
         emit("  choosing it.")
+    elif any(d.get("learned_score") is not None for d in details):
+        emit()
+        emit("  The learned classifier looked at this document and saw nothing: its")
+        emit("  score is far below the 0.464 at which it reports. This attack names")
+        emit("  tools and chains two calls; it does not read like an instruction, and")
+        emit("  the classifier learned instructions. It catches 3 of this project's")
+        emit("  37 attacks (ADR 0080). The patterns are the detector for this one.")
 
 
 def report_outcomes(direct: list[str], through: list[str]) -> None:

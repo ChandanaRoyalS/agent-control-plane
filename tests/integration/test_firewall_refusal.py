@@ -461,3 +461,23 @@ def test_the_screening_record_names_its_detectors_and_the_learned_score(
     assert "learned_classifier" in detail["detectors"]
     assert detail["learned"].startswith("score ")
     assert "advertisement" not in json.dumps(entry.record)
+
+
+def test_a_screening_record_carries_the_learned_score_even_below_threshold(
+    keypair: Keypair,
+) -> None:
+    """A reader can tell the classifier looked and what it thought, so a miss is
+    recorded as a miss rather than as silence."""
+    sink = MemoryAuditSink()
+    firewall = Firewall(enforce=False, learned=load_model(), learned_enforces=False)
+    bland_but_flagged = f"Quarterly notes.{RLO} nothing instruction-shaped here"
+
+    conversation(
+        PoisonUpstream(bland_but_flagged), keypair, firewall=firewall, audit=AuditLog(sink)
+    )
+
+    [entry] = [e for e in sink.entries if e.record["category"] == "firewall"]
+    detail = entry.record["detail"]
+    assert "learned_classifier" not in detail["detectors"]
+    assert 0.0 <= detail["learned_score"] < load_model().threshold
+    assert "learned" not in detail

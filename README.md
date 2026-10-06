@@ -7,7 +7,7 @@ calls for a human, and records every decision in a hash-chained log.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~2,300 tests · 95% branch coverage · 79 decision records ·
+**~2,300 tests · 95% branch coverage · 80 decision records ·
 20 hand-picked breakages, each caught by the test meant to catch it**
 
 ## Why
@@ -56,6 +56,14 @@ of the internal benign corpus (the linear model 0.9%) and catches 2.7% of the
 internal attacks (8.1%). It costs about 30 ms per thousand characters on a CPU and
 is not on the request path
 ([ADR 0077](docs/decisions/0077-a-transformer-fixed-before-it-is-trained.md)).
+
+Retraining the linear model with [AgentDojo](https://github.com/ethz-spylab/agentdojo)'s
+attacks added, under a rule fixed before training, caught the same 3 of this
+project's 37 attacks and withheld more of its benign documents, so the gateway's
+model is unchanged. Scoring both models on AgentDojo's sealed tool outputs found
+that the current one withholds 7 of 30 clean ones (23%): ordinary emails that ask
+the reader to do something
+([ADR 0080](docs/decisions/0080-more-attacks-did-not-move-the-ones-that-matter.md)).
 
 ## Quickstart
 
@@ -222,8 +230,8 @@ The full threat model is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 - **The firewall does not stop polite or reworded injections.** It withholds
   only a bidirectional override, a base64 run that decodes to an instruction,
   and a result too long to screen whole, unless you opt into the learned
-  classifier, which withholds most polite ones and about 2% of benign
-  documents. Character-level disguises defeat both (evasion corpus v1, ADR 0075).
+  classifier, which withholds most polite ones, 2% of BIPIA's clean documents
+  and 23% of AgentDojo's clean tool outputs (ADR 0080). Character-level disguises defeat both (evasion corpus v1, ADR 0075).
 - **Attacks split across two documents** pass: screening sees one result at a
   time.
 - **The only model that can withhold is linear**, over character n-grams, and
@@ -241,7 +249,7 @@ The full threat model is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 ## What I would do with another month
 
-1. **Train on more than one source of attacks.** Both learned models learned BIPIA's style: the transformer catches 92% of its held-out attacks and 3% of this project's own ([ADR 0077](docs/decisions/0077-a-transformer-fixed-before-it-is-trained.md)).
+1. **Train on benign text shaped like tool outputs.** More attacks did not help; the classifier's errors are polite requests in ordinary emails and notices ([ADR 0080](docs/decisions/0080-more-attacks-did-not-move-the-ones-that-matter.md)).
 2. **Grow the evasion corpus** with paraphrase and translation, which need a model to generate.
 3. **Record the model demo on more models and tasks.**
 4. **Keep the audit signing key in a KMS**, so the gateway can sign without ever holding the key.

@@ -1,0 +1,975 @@
+{
+ "v1": {
+  "sha256": "0ced9b2feee0dbafe8793b2f6d921475888763d61010d9fae9ac94738068138b",
+  "threshold": 0.46409772,
+  "enforce_threshold": 0.77619998,
+  "report_only": [
+   {
+    "set": "internal_benign",
+    "kind": "benign",
+    "learned": {
+     "hits": 7,
+     "total": 106,
+     "rate": 0.066,
+     "low": 0.0189,
+     "high": 0.1132
+    },
+    "learned_enforce": {
+     "hits": 1,
+     "total": 106,
+     "rate": 0.0094,
+     "low": 0.0,
+     "high": 0.0283
+    },
+    "patterns": {
+     "hits": 23,
+     "total": 106,
+     "rate": 0.217,
+     "low": 0.1415,
+     "high": 0.2925
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 106,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "internal_attacks",
+    "kind": "attacks",
+    "learned": {
+     "hits": 5,
+     "total": 37,
+     "rate": 0.1351,
+     "low": 0.027,
+     "high": 0.2432
+    },
+    "learned_enforce": {
+     "hits": 3,
+     "total": 37,
+     "rate": 0.0811,
+     "low": 0.0,
+     "high": 0.1892
+    },
+    "patterns": {
+     "hits": 21,
+     "total": 37,
+     "rate": 0.5676,
+     "low": 0.4054,
+     "high": 0.7297
+    },
+    "withheld": {
+     "hits": 5,
+     "total": 37,
+     "rate": 0.1351,
+     "low": 0.0541,
+     "high": 0.2432
+    }
+   }
+  ],
+  "agentdojo_sealed": [
+   {
+    "set": "agentdojo_test",
+    "kind": "attacks",
+    "learned": {
+     "hits": 439,
+     "total": 500,
+     "rate": 0.878,
+     "low": 0.7728,
+     "high": 0.9526
+    },
+    "learned_enforce": {
+     "hits": 381,
+     "total": 500,
+     "rate": 0.762,
+     "low": 0.637,
+     "high": 0.8796
+    },
+    "patterns": {
+     "hits": 172,
+     "total": 500,
+     "rate": 0.344,
+     "low": 0.2,
+     "high": 0.581
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 500,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test",
+    "kind": "benign",
+    "learned": {
+     "hits": 11,
+     "total": 30,
+     "rate": 0.3667,
+     "low": 0.2,
+     "high": 0.5333
+    },
+    "learned_enforce": {
+     "hits": 7,
+     "total": 30,
+     "rate": 0.2333,
+     "low": 0.1,
+     "high": 0.4
+    },
+    "patterns": {
+     "hits": 3,
+     "total": 30,
+     "rate": 0.1,
+     "low": 0.0,
+     "high": 0.2
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 30,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test/direct",
+    "kind": "attacks",
+    "learned": {
+     "hits": 75,
+     "total": 100,
+     "rate": 0.75,
+     "low": 0.5422,
+     "high": 0.9035
+    },
+    "learned_enforce": {
+     "hits": 57,
+     "total": 100,
+     "rate": 0.57,
+     "low": 0.3626,
+     "high": 0.7706
+    },
+    "patterns": {
+     "hits": 18,
+     "total": 100,
+     "rate": 0.18,
+     "low": 0.0,
+     "high": 0.4762
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 100,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test/ignore_previous",
+    "kind": "attacks",
+    "learned": {
+     "hits": 89,
+     "total": 100,
+     "rate": 0.89,
+     "low": 0.7568,
+     "high": 0.9669
+    },
+    "learned_enforce": {
+     "hits": 77,
+     "total": 100,
+     "rate": 0.77,
+     "low": 0.5825,
+     "high": 0.9048
+    },
+    "patterns": {
+     "hits": 18,
+     "total": 100,
+     "rate": 0.18,
+     "low": 0.0,
+     "high": 0.4762
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 100,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test/important_instructions",
+    "kind": "attacks",
+    "learned": {
+     "hits": 100,
+     "total": 100,
+     "rate": 1.0,
+     "low": null,
+     "high": null
+    },
+    "learned_enforce": {
+     "hits": 98,
+     "total": 100,
+     "rate": 0.98,
+     "low": 0.9593,
+     "high": 1.0
+    },
+    "patterns": {
+     "hits": 18,
+     "total": 100,
+     "rate": 0.18,
+     "low": 0.0,
+     "high": 0.48
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 100,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test/injecagent",
+    "kind": "attacks",
+    "learned": {
+     "hits": 99,
+     "total": 100,
+     "rate": 0.99,
+     "low": 0.9709,
+     "high": 1.0
+    },
+    "learned_enforce": {
+     "hits": 94,
+     "total": 100,
+     "rate": 0.94,
+     "low": 0.8873,
+     "high": 0.98
+    },
+    "patterns": {
+     "hits": 100,
+     "total": 100,
+     "rate": 1.0,
+     "low": null,
+     "high": null
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 100,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test/system_message",
+    "kind": "attacks",
+    "learned": {
+     "hits": 76,
+     "total": 100,
+     "rate": 0.76,
+     "low": 0.5625,
+     "high": 0.904
+    },
+    "learned_enforce": {
+     "hits": 55,
+     "total": 100,
+     "rate": 0.55,
+     "low": 0.3398,
+     "high": 0.7636
+    },
+    "patterns": {
+     "hits": 18,
+     "total": 100,
+     "rate": 0.18,
+     "low": 0.0,
+     "high": 0.4762
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 100,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   }
+  ]
+ },
+ "v2": {
+  "sha256": "6872e057599b0872f76bcb17de0a222427f5a03a5eeae0dfb574b4563a401bb6",
+  "meta": {
+   "C": 8.0,
+   "features": 244,
+   "window": 1500,
+   "stride": 1200,
+   "target_fpr": 0.01,
+   "validation": {
+    "recall": 0.9517,
+    "fpr": 0.0089
+   },
+   "validation_enforce": {
+    "recall": 0.944,
+    "fpr": 0.0
+   },
+   "train_documents": 3722,
+   "validation_documents": 854,
+   "train_digest": "16270ecdbdbebe383dc07b0793130f6a938cbf5a5e25d403656283385b89af61",
+   "validation_digest": "543813e88676384066bcbc2d462dc871af9a04017592bef903ded37c2e2fd17e",
+   "sklearn": "1.9.1",
+   "data_version": 2
+  },
+  "threshold": 0.61221889,
+  "enforce_threshold": 0.70578341,
+  "report_only": [
+   {
+    "set": "internal_benign",
+    "kind": "benign",
+    "learned": {
+     "hits": 8,
+     "total": 106,
+     "rate": 0.0755,
+     "low": 0.0283,
+     "high": 0.1321
+    },
+    "learned_enforce": {
+     "hits": 5,
+     "total": 106,
+     "rate": 0.0472,
+     "low": 0.0094,
+     "high": 0.0943
+    },
+    "patterns": {
+     "hits": 23,
+     "total": 106,
+     "rate": 0.217,
+     "low": 0.1415,
+     "high": 0.2925
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 106,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "internal_attacks",
+    "kind": "attacks",
+    "learned": {
+     "hits": 5,
+     "total": 37,
+     "rate": 0.1351,
+     "low": 0.027,
+     "high": 0.2432
+    },
+    "learned_enforce": {
+     "hits": 3,
+     "total": 37,
+     "rate": 0.0811,
+     "low": 0.0,
+     "high": 0.1892
+    },
+    "patterns": {
+     "hits": 21,
+     "total": 37,
+     "rate": 0.5676,
+     "low": 0.4054,
+     "high": 0.7297
+    },
+    "withheld": {
+     "hits": 5,
+     "total": 37,
+     "rate": 0.1351,
+     "low": 0.0541,
+     "high": 0.2432
+    }
+   }
+  ],
+  "agentdojo_sealed": [
+   {
+    "set": "agentdojo_test",
+    "kind": "attacks",
+    "learned": {
+     "hits": 489,
+     "total": 500,
+     "rate": 0.978,
+     "low": 0.9505,
+     "high": 1.0
+    },
+    "learned_enforce": {
+     "hits": 482,
+     "total": 500,
+     "rate": 0.964,
+     "low": 0.9235,
+     "high": 0.9925
+    },
+    "patterns": {
+     "hits": 172,
+     "total": 500,
+     "rate": 0.344,
+     "low": 0.2,
+     "high": 0.581
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 500,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test",
+    "kind": "benign",
+    "learned": {
+     "hits": 2,
+     "total": 30,
+     "rate": 0.0667,
+     "low": 0.0,
+     "high": 0.1667
+    },
+    "learned_enforce": {
+     "hits": 2,
+     "total": 30,
+     "rate": 0.0667,
+     "low": 0.0,
+     "high": 0.1667
+    },
+    "patterns": {
+     "hits": 3,
+     "total": 30,
+     "rate": 0.1,
+     "low": 0.0,
+     "high": 0.2
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 30,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test/direct",
+    "kind": "attacks",
+    "learned": {
+     "hits": 93,
+     "total": 100,
+     "rate": 0.93,
+     "low": 0.8372,
+     "high": 1.0
+    },
+    "learned_enforce": {
+     "hits": 91,
+     "total": 100,
+     "rate": 0.91,
+     "low": 0.8088,
+     "high": 0.9813
+    },
+    "patterns": {
+     "hits": 18,
+     "total": 100,
+     "rate": 0.18,
+     "low": 0.0,
+     "high": 0.4762
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 100,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test/ignore_previous",
+    "kind": "attacks",
+    "learned": {
+     "hits": 100,
+     "total": 100,
+     "rate": 1.0,
+     "low": null,
+     "high": null
+    },
+    "learned_enforce": {
+     "hits": 99,
+     "total": 100,
+     "rate": 0.99,
+     "low": 0.9709,
+     "high": 1.0
+    },
+    "patterns": {
+     "hits": 18,
+     "total": 100,
+     "rate": 0.18,
+     "low": 0.0,
+     "high": 0.48
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 100,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test/important_instructions",
+    "kind": "attacks",
+    "learned": {
+     "hits": 100,
+     "total": 100,
+     "rate": 1.0,
+     "low": null,
+     "high": null
+    },
+    "learned_enforce": {
+     "hits": 100,
+     "total": 100,
+     "rate": 1.0,
+     "low": null,
+     "high": null
+    },
+    "patterns": {
+     "hits": 18,
+     "total": 100,
+     "rate": 0.18,
+     "low": 0.0,
+     "high": 0.4757
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 100,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test/injecagent",
+    "kind": "attacks",
+    "learned": {
+     "hits": 100,
+     "total": 100,
+     "rate": 1.0,
+     "low": null,
+     "high": null
+    },
+    "learned_enforce": {
+     "hits": 100,
+     "total": 100,
+     "rate": 1.0,
+     "low": null,
+     "high": null
+    },
+    "patterns": {
+     "hits": 100,
+     "total": 100,
+     "rate": 1.0,
+     "low": null,
+     "high": null
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 100,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "agentdojo_test/system_message",
+    "kind": "attacks",
+    "learned": {
+     "hits": 96,
+     "total": 100,
+     "rate": 0.96,
+     "low": 0.901,
+     "high": 1.0
+    },
+    "learned_enforce": {
+     "hits": 92,
+     "total": 100,
+     "rate": 0.92,
+     "low": 0.8286,
+     "high": 0.9813
+    },
+    "patterns": {
+     "hits": 18,
+     "total": 100,
+     "rate": 0.18,
+     "low": 0.0,
+     "high": 0.4762
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 100,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   }
+  ],
+  "bipia_and_evasion_third_look": [
+   {
+    "set": "bipia_test",
+    "kind": "attacks",
+    "learned": {
+     "hits": 343,
+     "total": 500,
+     "rate": 0.686,
+     "low": 0.62,
+     "high": 0.75
+    },
+    "learned_enforce": {
+     "hits": 313,
+     "total": 500,
+     "rate": 0.626,
+     "low": 0.562,
+     "high": 0.692
+    },
+    "patterns": {
+     "hits": 97,
+     "total": 500,
+     "rate": 0.194,
+     "low": 0.128,
+     "high": 0.26
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 500,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "bipia_test",
+    "kind": "benign",
+    "learned": {
+     "hits": 8,
+     "total": 200,
+     "rate": 0.04,
+     "low": 0.015,
+     "high": 0.07
+    },
+    "learned_enforce": {
+     "hits": 4,
+     "total": 200,
+     "rate": 0.02,
+     "low": 0.005,
+     "high": 0.04
+    },
+    "patterns": {
+     "hits": 3,
+     "total": 200,
+     "rate": 0.015,
+     "low": 0.0,
+     "high": 0.035
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 200,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "evasion_v1",
+    "kind": "attacks",
+    "learned": {
+     "hits": 169,
+     "total": 500,
+     "rate": 0.338,
+     "low": 0.3,
+     "high": 0.374
+    },
+    "learned_enforce": {
+     "hits": 147,
+     "total": 500,
+     "rate": 0.294,
+     "low": 0.26,
+     "high": 0.33
+    },
+    "patterns": {
+     "hits": 105,
+     "total": 500,
+     "rate": 0.21,
+     "low": 0.18,
+     "high": 0.24
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 500,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "evasion_v1/alternating_case",
+    "kind": "attacks",
+    "learned": {
+     "hits": 53,
+     "total": 71,
+     "rate": 0.7465,
+     "low": 0.6338,
+     "high": 0.8451
+    },
+    "learned_enforce": {
+     "hits": 45,
+     "total": 71,
+     "rate": 0.6338,
+     "low": 0.5211,
+     "high": 0.7465
+    },
+    "patterns": {
+     "hits": 14,
+     "total": 71,
+     "rate": 0.1972,
+     "low": 0.1127,
+     "high": 0.2958
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 71,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "evasion_v1/base64_split",
+    "kind": "attacks",
+    "learned": {
+     "hits": 0,
+     "total": 71,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    },
+    "learned_enforce": {
+     "hits": 0,
+     "total": 71,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    },
+    "patterns": {
+     "hits": 2,
+     "total": 71,
+     "rate": 0.0282,
+     "low": 0.0,
+     "high": 0.0704
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 71,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "evasion_v1/homoglyph",
+    "kind": "attacks",
+    "learned": {
+     "hits": 3,
+     "total": 72,
+     "rate": 0.0417,
+     "low": 0.0,
+     "high": 0.0972
+    },
+    "learned_enforce": {
+     "hits": 1,
+     "total": 72,
+     "rate": 0.0139,
+     "low": 0.0,
+     "high": 0.0417
+    },
+    "patterns": {
+     "hits": 1,
+     "total": 72,
+     "rate": 0.0139,
+     "low": 0.0,
+     "high": 0.0417
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 72,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "evasion_v1/leet",
+    "kind": "attacks",
+    "learned": {
+     "hits": 4,
+     "total": 71,
+     "rate": 0.0563,
+     "low": 0.0141,
+     "high": 0.1127
+    },
+    "learned_enforce": {
+     "hits": 1,
+     "total": 71,
+     "rate": 0.0141,
+     "low": 0.0,
+     "high": 0.0423
+    },
+    "patterns": {
+     "hits": 2,
+     "total": 71,
+     "rate": 0.0282,
+     "low": 0.0,
+     "high": 0.0704
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 71,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "evasion_v1/reworded_override",
+    "kind": "attacks",
+    "learned": {
+     "hits": 55,
+     "total": 71,
+     "rate": 0.7746,
+     "low": 0.6761,
+     "high": 0.8732
+    },
+    "learned_enforce": {
+     "hits": 52,
+     "total": 71,
+     "rate": 0.7324,
+     "low": 0.6197,
+     "high": 0.831
+    },
+    "patterns": {
+     "hits": 13,
+     "total": 71,
+     "rate": 0.1831,
+     "low": 0.0986,
+     "high": 0.2817
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 71,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "evasion_v1/spaced",
+    "kind": "attacks",
+    "learned": {
+     "hits": 3,
+     "total": 72,
+     "rate": 0.0417,
+     "low": 0.0,
+     "high": 0.0972
+    },
+    "learned_enforce": {
+     "hits": 1,
+     "total": 72,
+     "rate": 0.0139,
+     "low": 0.0,
+     "high": 0.0417
+    },
+    "patterns": {
+     "hits": 1,
+     "total": 72,
+     "rate": 0.0139,
+     "low": 0.0,
+     "high": 0.0417
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 72,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   },
+   {
+    "set": "evasion_v1/zero_width",
+    "kind": "attacks",
+    "learned": {
+     "hits": 51,
+     "total": 72,
+     "rate": 0.7083,
+     "low": 0.5972,
+     "high": 0.8056
+    },
+    "learned_enforce": {
+     "hits": 47,
+     "total": 72,
+     "rate": 0.6528,
+     "low": 0.5417,
+     "high": 0.7639
+    },
+    "patterns": {
+     "hits": 72,
+     "total": 72,
+     "rate": 1.0,
+     "low": null,
+     "high": null
+    },
+    "withheld": {
+     "hits": 0,
+     "total": 72,
+     "rate": 0.0,
+     "low": null,
+     "high": null
+    }
+   }
+  ]
+ },
+ "rule": {
+  "more_internal_attacks_caught": false,
+  "no_more_internal_benign_withheld": false,
+  "no_more_bipia_clean_withheld": true,
+  "internal_attacks": [
+   [
+    3,
+    37
+   ],
+   [
+    3,
+    37
+   ]
+  ],
+  "internal_benign": [
+   [
+    1,
+    106
+   ],
+   [
+    5,
+    106
+   ]
+  ],
+  "bipia_clean": [
+   [
+    4,
+    200
+   ],
+   [
+    4,
+    200
+   ]
+  ],
+  "replace": false
+ }
+}

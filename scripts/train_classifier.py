@@ -19,6 +19,7 @@ import json
 import math
 import sys
 from collections import Counter
+from pathlib import Path
 
 import numpy as np
 import sklearn
@@ -76,8 +77,8 @@ def validation_scores(
     return benign, attacks
 
 
-def train() -> dict[str, object]:
-    data = assemble()
+def train(data_version: int = 1) -> dict[str, object]:
+    data = assemble(data_version=data_version)
     train_set, validation = list(data.train), list(data.validation)
     labelled = labelled_windows(train_set)
     rows = [features(t) for t in labelled.texts]
@@ -130,6 +131,8 @@ def train() -> dict[str, object]:
             "train_digest": data_digest(train_set),
             "validation_digest": data_digest(validation),
             "sklearn": sklearn.__version__,
+            # Only recorded from version 2 on, so the version-1 model file is unchanged.
+            **({"data_version": data_version} if data_version != 1 else {}),
         },
         "weights": dict(sorted(model.weights.items())),
     }
@@ -138,10 +141,18 @@ def train() -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__ and __doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="refit and compare, write nothing")
+    parser.add_argument(
+        "--data-version",
+        type=int,
+        default=None,
+        help="training data version (default: the committed model's)",
+    )
+    parser.add_argument("--out", type=Path, default=MODEL_PATH, help="where to write the model")
     args = parser.parse_args()
-    fitted = train()
+    committed = from_json(json.loads(MODEL_PATH.read_text(encoding="utf-8")))
+    version = args.data_version or int(committed.meta.get("data_version", 1))
+    fitted = train(version)
     if args.check:
-        committed = from_json(json.loads(MODEL_PATH.read_text(encoding="utf-8")))
         refit = from_json(fitted)
         same = (
             committed.weights.keys() == refit.weights.keys()
@@ -151,9 +162,9 @@ def main() -> int:
         )
         print("The committed model matches a refit." if same else "FAILED: the refit differs.")
         return 0 if same else 1
-    MODEL_PATH.write_text(json.dumps(fitted, indent=0, sort_keys=False) + "\n", encoding="utf-8")
+    args.out.write_text(json.dumps(fitted, indent=0, sort_keys=False) + "\n", encoding="utf-8")
     meta = fitted["meta"]
-    print(f"Wrote {MODEL_PATH.name}: {meta}", file=sys.stderr)  # type: ignore[index]
+    print(f"Wrote {args.out}: {meta}", file=sys.stderr)  # type: ignore[index]
     return 0
 
 

@@ -119,6 +119,7 @@ If you have ten minutes and want the ones that carry the most weight:
 | [0076](0076-the-learned-classifier-withholds-only-by-choice.md) | the learned classifier runs in report mode by default and withholds only when `ACP_FIREWALL_LEARNED` and `ACP_FIREWALL_MODE` are both `enforce`: it misses ADR 0039's zero-benign bar (2% of clean BIPIA), so withholding is an operator's measured choice, not a default |
 | [0077](0077-a-transformer-fixed-before-it-is-trained.md) | a small transformer on the linear model's exact splits, with base model, hyperparameters, threshold rules and the bar it must clear fixed before training; one run: 92% of BIPIA's held-out attacks at 1% clean flagged (bar met), but worse than the linear model on this project's own documents, so not served |
 | [0078](0078-one-key-signs-one-chain.md) | audit entries can be signed with Ed25519: the private key is a mounted secret, the public key is committed so `verify` requires signatures, and one key signs one file from its first entry, so enabling or rotating starts a new file; it stops a writer without the key, not the key holder or truncation |
+| [0079](0079-a-second-source-of-attacks.md) | AgentDojo imported as data version 2 (tool results with planted goals, one goal in three sealed, its own attack template never trained on), and the rule a model trained on it must meet to replace the gateway's, fixed before training: more internal attacks caught, no more internal or BIPIA clean documents withheld |
 
 ## Approvals, audit, tenancy
 

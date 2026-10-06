@@ -7,7 +7,7 @@ calls for a human, and records every decision in a hash-chained log.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~2,300 tests · 95% branch coverage · 78 decision records ·
+**~2,300 tests · 95% branch coverage · 79 decision records ·
 20 hand-picked breakages, each caught by the test meant to catch it**
 
 ## Why

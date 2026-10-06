@@ -29,6 +29,7 @@ from acp.budget.charge import Budgets, LocalBudgets
 from acp.exceptions import ACPError, ApprovalUnsupportedError, PolicyDeniedError
 from acp.firewall import Firewall, Inspection, frame
 from acp.firewall.catalogue import CatalogueInspection
+from acp.firewall.learned import DETECTOR_NAME as LEARNED_DETECTOR
 from acp.gateway.converters import to_input_required, to_mcp_call_tool_result, to_mcp_tool
 from acp.gateway.naming import upstream_of
 from acp.gateway.registry import Catalogue, UpstreamRegistry
@@ -214,11 +215,15 @@ async def _audit_screening(
 ) -> None:
     """Chain a screening finding, if any; clean results are counted by metrics only.
 
-    Records families and confidences, never the matched text (ADR 0038).
+    Records families, confidences and detector names, never the matched text
+    (ADR 0038). The learned classifier's evidence is its score and thresholds,
+    gateway-written text, so it is recorded too (ADR 0076).
     """
     findings = inspection.screening.findings
     if audit is None or not findings:
         return
+    learned = [f.evidence for f in findings if f.detector == LEARNED_DETECTOR]
+    score = inspection.learned_score
     await _chain(
         audit,
         AuditCategory.FIREWALL,
@@ -234,6 +239,9 @@ async def _audit_screening(
             "finding_count": len(findings),
             # 0 for a flagged-but-served document, the common case (ADR 0039).
             "trigger_count": len(inspection.triggers),
+            "detectors": sorted({f.detector for f in findings}),
+            **({"learned_score": round(score, 3)} if score is not None else {}),
+            **({"learned": learned[0]} if learned else {}),
         },
     )
 

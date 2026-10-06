@@ -7,7 +7,7 @@ calls for a human, and records every decision in a hash-chained log.
 [![CI](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/ChandanaRoyalS/agent-control-plane/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/ChandanaRoyalS/agent-control-plane?label=release)](https://github.com/ChandanaRoyalS/agent-control-plane/releases/latest)
 
-**~2,300 tests · 95% branch coverage · 80 decision records ·
+**~2,400 tests · 95% branch coverage · 80 decision records ·
 20 hand-picked breakages, each caught by the test meant to catch it**
 
 ## Why
@@ -123,7 +123,7 @@ flowchart LR
         BU["budget<br/><i>rate · quota · cost</i>"]
         CA["result cache<br/><i>keyed per principal</i>"]
         EX["credential exchange<br/><i>RFC 8693</i>"]
-        FW["screen + fence<br/><i>injection firewall</i>"]
+        FW["screen + fence<br/><i>patterns + learned classifier</i>"]
         AU --> PD --> PO --> AP --> BU --> CA --> EX
         EX --> FW
     end
@@ -131,7 +131,7 @@ flowchart LR
     G -->|"scoped token<br/>never the agent's"| U1["upstream A"]
     G --> U2["upstream B"]
     U1 -.->|"result"| FW
-    G ==>|"every decision"| CH[("hash-chained<br/>audit log")]
+    G ==>|"every decision"| CH[("hash-chained,<br/>optionally signed<br/>audit log")]
     OP["operator :9090"] -->|"approve · watch"| G
     CH --> V["acp audit verify"]
 ```
@@ -218,6 +218,8 @@ make up / make down # the composed stack
 make eval           # firewall on the internal corpus, false positives first
 make eval-external  # firewall on InjecAgent
 make eval-actions   # policy on InjecAgent's tool calls
+make train          # refit the learned classifier; CI fails if the weights drift
+make eval-learned   # the classifier beside the patterns, on the open sets
 make overhead       # gateway cost, with its configuration printed
 ```
 

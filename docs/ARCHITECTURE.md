@@ -1,7 +1,7 @@
 # Architecture
 
 How the system behaves. **[`decisions/`](decisions/README.md) is why it behaves
-that way** — 59 of them, indexed and grouped.
+that way** — 80 of them, indexed and grouped.
 
 Start with the request path below. It is nine stages, and two of their positions
 in that order are load-bearing enough that moving them would be a vulnerability
@@ -27,8 +27,8 @@ vulnerability rather than a refactor.
 | 5 | **budget** | charge a weighted cost | **after** authorization: a denied call must not spend, and charging a call we would refuse is wasted work |
 | 6 | **result cache** | serve a repeat read from memory | 🔴 **inside** the policy check, not outside. Everywhere else caching is outermost because a hit should cost nothing; here that instinct is a vulnerability — a cache consulted before authorization serves a caller what the policy would have refused ([0035](decisions/0035-a-result-cache-key-that-cannot-serve-the-wrong-person.md)) |
 | 7 | **credential exchange** | mint a token for one upstream | the caller's token never travels; the exchange is the only module that touches it ([0019](decisions/0019-mint-a-credential-per-call-and-hold-none.md)) |
-| 8 | **screen and fence** | withhold, or label as retrieved data | on the way *back*, because the threat arrives in the result rather than the request ([0037](decisions/0037-tell-the-model-where-the-text-came-from.md), [0038](decisions/0038-refuse-loudly-and-never-quote-the-payload.md)) |
-| 9 | **audit** | write it down, or refuse the call | fail-closed: a call this gateway cannot record does not happen ([0050](decisions/0050-an-audit-record-is-not-a-log-line.md)) |
+| 8 | **screen and fence** | withhold, or label as retrieved data | on the way *back*, because the threat arrives in the result rather than the request ([0037](decisions/0037-tell-the-model-where-the-text-came-from.md), [0038](decisions/0038-refuse-loudly-and-never-quote-the-payload.md)). Pattern detectors withhold on three narrow findings ([0069](decisions/0069-the-unexamined-tail-is-the-trigger.md)); a learned classifier scores every result and withholds only when an operator opts in ([0076](decisions/0076-the-learned-classifier-withholds-only-by-choice.md)) |
+| 9 | **audit** | write it down, or refuse the call | fail-closed: a call this gateway cannot record does not happen ([0050](decisions/0050-an-audit-record-is-not-a-log-line.md)); with a key, every entry is signed, so a writer without it cannot rewrite the chain ([0078](decisions/0078-one-key-signs-one-chain.md)) |
 
 ## Two listeners, and why that is the control
 
@@ -56,13 +56,13 @@ rather than calling an address unreachable
 | `acp.policy` | a pure evaluator, the enforcement backstop, catalogue filtering, the pre-dispatch check and the simulator — all calling one `evaluate` ([0030](decisions/0030-one-evaluator-two-paths.md)) |
 | `acp.budget` | token bucket, cost table, quota counter, and the tenant-qualified account they all key on |
 | `acp.results` | the per-principal result cache and its opt-in table |
-| `acp.firewall` | detectors, confidence, the enforcement bar, provenance framing and the refusal notice |
-| `acp.corpus` | the benign and adversarial corpora, the held-out split, and the harness that scores them |
+| `acp.firewall` | detectors, confidence, the enforcement bar, provenance framing, the refusal notice, and the learned classifier scored in pure Python from committed weights ([0075](decisions/0075-a-learned-classifier-measured-once.md)) |
+| `acp.corpus` | the benign and adversarial corpora; InjecAgent, BIPIA and AgentDojo imported by fixed rules with their held-out halves sealed; the classifier's training splits; and the harnesses that score them once ([0074](decisions/0074-the-classifiers-data-before-the-classifier.md), [0079](decisions/0079-a-second-source-of-attacks.md)) |
 | `acp.approvals` | the store, the fingerprint that binds an approval to a call, and the operator channel |
-| `acp.audit` | the hash chain, the sink, the writer that fails closed, and the checkpoint |
+| `acp.audit` | the hash chain, the sink, the writer that fails closed, the checkpoint, and Ed25519 signing with one key per chain file ([0078](decisions/0078-one-key-signs-one-chain.md)) |
 | `acp.console` | the trace console, streaming the chain rather than a copy of it |
 | `acp.observability` | structured logging, metrics, tracing and the semantic conventions |
-| `acp.demo` | the credulous agent the attack demo drives |
+| `acp.demo` | the scripted agent the attack demo drives, and the local-model agent that decides its own calls ([0073](decisions/0073-a-model-decides-the-calls.md)) |
 
 **Decisions live in a module the sandbox can test; wiring lives in the one it
 cannot.** That split is why `policy/evaluate.py`, `firewall/decision.py`,
@@ -77,10 +77,16 @@ fails if the test written to catch that break does not
 
 | harness | breakages | what it establishes |
 |---|---|---|
-| `prove-cache` | 4 | dropping tenant, subject, actor or arguments from the result-cache key is caught |
-| `prove-refusal` | 6 | the enforcement bar, the no-quoting rule, and the detector demotions all hold |
+| `prove-cache` | 5 | dropping tenant, subject, actor or arguments from the result-cache key is caught |
+| `prove-refusal` | 7 | the enforcement bar, the no-quoting rule, and the detector demotions all hold |
 | `prove-passthrough` | 3 | the caller's token cannot reach an upstream by header, log or envelope |
-| `prove-predispatch` | search + 5 | 655,448 re-checks with **zero** false refusals, plus three broken readings the search catches |
+| `prove-predispatch` | search + 5 | 655,448 re-checks with **zero** false refusals, three broken readings the search catches, and two header bugs the tests catch |
+
+Three more checks hold the measured claims still: CI refits the learned classifier
+from the committed corpora and fails if the weights differ; the public surface
+(`ACP_*` settings, commands, audit fields) is a committed snapshot a test compares
+against ([0058](decisions/0058-a-version-is-a-promise-about-a-surface.md)); and
+every sealed evaluation result names the sha256 of the model it was scored with.
 
 A test that cannot fail is a test that proves nothing, and a harness that has
 never been shown to fail is an assertion about a harness.

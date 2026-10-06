@@ -156,6 +156,17 @@ BEATS: Final = (
         "warn",
     ),
     Beat(
+        "LEARNED CLASSIFIER",
+        "The learned classifier scored it 0.03 and saw nothing. It learned instructions; "
+        "this attack is two tool calls.",
+        "warn",
+    ),
+    Beat(
+        "Entry signing is",
+        "The chain is unsigned here, on purpose: a private key is yours to make, not to clone.",
+        "info",
+    ),
+    Beat(
         "UNEXPLAINABLE",
         "The direct path left no record at all. Nobody could reconstruct it.",
         "bad",
@@ -538,12 +549,15 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
   <div class="finding">
     <p><strong>The firewall detected it, at high confidence, and was not allowed
     to stop it.</strong>
-    Findings, but zero triggers. Only two detectors are permitted to withhold a result, and the
+    Three findings, zero triggers. Only two detectors are permitted to withhold a result, and the
     list is short because it was measured: those two produced zero findings across 106 ordinary
     documents. The detector that caught this one flags roughly one benign document in five, and
-    a control that eats real documents is a control somebody switches off. The learned
-    classifier scores the same text and reports what it would have withheld, so a deployment
-    can count the cost of enforcing it before choosing to.</p>
+    a control that eats real documents is a control somebody switches off.</p>
+    <p><strong>The learned classifier looked at the same text and saw nothing</strong>: a score
+    of 0.03 against a report threshold of 0.46. It catches 64% of BIPIA's polite injections and
+    3 of this project's own 37 attacks, because this attack is not an instruction. It names two
+    tools and chains them. A model trained on instruction text does not see that; the pattern
+    detectors do. Two detectors with different blind spots is the argument for keeping both.</p>
     <p>So three layers looked at this attack. <strong>Screening saw it and was measured into
     silence. Provenance framing labelled it and travelled with the payload</strong> &mdash; the
     agent carried the fenced text forward, so the fence did not stop the leak.

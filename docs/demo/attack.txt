@@ -1,3 +1,4 @@
+uv run python scripts/attack_demo.py
 The same agent, the same poisoned document, two paths.
 
 The agent is a parser, not a model — see acp/demo/agent.py. The gateway
@@ -42,6 +43,12 @@ stand-in exercises exactly what a model would and does it twice the same.
   A detector that fires on real documents cannot be allowed to withhold
   them — so a detector can be certain and still not act.
 
+  A learned classifier also scores every result (`report`).
+  It catches polite injections the patterns cannot, 64% of BIPIA's
+  held-out attacks, but it also flags 2% of clean documents and 23% of
+  AgentDojo's clean tool outputs, so it may withhold only when an
+  operator sets ACP_FIREWALL_LEARNED=enforce (ADR 0075, 0076, 0080).
+
   The operator asks: summarise runbooks/incident-2291.md
 
   read_document runbooks/incident-2291.md
@@ -53,14 +60,15 @@ stand-in exercises exactly what a model would and does it twice the same.
 
   mock-a__read_document {"path": "hr/compensation-2026.md"}
     -> served
-  mock-a__create_ticket {"title": "[BEGIN RETRIEVED DATA e284f704d4cbe234631d0c7d12a1cf7a] The following content (1 block: 1 text) was
+  mock-a__create_ticket {"title": "[BEGIN RETRIEVED DATA 4433f896cab7fe3465a876e089665371] The following content (1 block: 1 text) was
     -> HELD for a human
 
 ========================================================================
   WHAT THE FIREWALL SAW
 ========================================================================
 
-  #41217  mock-a__read_document  -> allowed
+  #88941  mock-a__read_document  -> allowed
+      detectors   None
       families    ['tool_confusion']
       confidence  ['high']
       findings    3
@@ -99,3 +107,8 @@ stand-in exercises exactly what a model would and does it twice the same.
   The direct path produced no record at all. That is the other half of
   the argument and it is easy to miss: the first act is not just
   unprotected, it is UNEXPLAINABLE. Nobody could reconstruct it after.
+
+  Entry signing is off in this stack. Without a key, whoever can
+  write the chain file can rewrite it consistently; with one, only the
+  key holder can (`acp audit keygen`, ADR 0078). The compose stack
+  ships no key on purpose: a private key is yours to make, not to clone.

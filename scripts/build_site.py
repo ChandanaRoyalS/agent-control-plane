@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -208,14 +209,32 @@ def measured() -> str:
             39,
         ),
         ("75% / 38%", "recall and precision on the family this attack belongs to", 47),
-        ("2.14&times;", "of throughput is what durability costs, measured", 53),
-        (
-            "12.6&times;",
-            "p95 on a path with no disk write &mdash; a defect a load harness found",
-            53,
-        ),
         overhead_tile(),
         ("20", "deliberate breakages, caught by the tests written to catch them", 23),
+        (
+            "595 / 595",
+            "InjecAgent attacks with their &ldquo;ignore previous instructions&rdquo; prefix "
+            "caught &mdash; and 0 of 595 once the prefix is removed",
+            64,
+        ),
+        (
+            "64%",
+            "of BIPIA's held-out polite injections the learned classifier would withhold, "
+            "where the patterns withhold none; 2% of clean contexts flagged",
+            75,
+        ),
+        (
+            "23%",
+            "of AgentDojo's clean tool outputs the classifier withholds &mdash; why "
+            "enforcing it is opt-in",
+            80,
+        ),
+        (
+            "2 of 10 &rarr; 0",
+            "trials in which a local model (qwen2.5:7b) leaked the payroll table, directly "
+            "and then through the gateway",
+            73,
+        ),
     )
     return "\n".join(
         f'      <a class="tile" href="{adr(number)}">'
@@ -271,6 +290,18 @@ def subsystems() -> str:
             [36, 37, 38, 39, 47, 69],
         ),
         (
+            "Learned classifier",
+            "A model on the enforcement path, scored once on data nobody here wrote,\n"
+            "            and allowed to withhold only by an operator's choice.",
+            [
+                "Logistic regression over character n-grams, 193 weights, pure Python",
+                "Thresholds chosen on validation; sealed sets scored once, then spent",
+                "In report mode by default; two settings to withhold",
+                "A transformer and a retrain both measured, both failed their bar",
+            ],
+            [74, 75, 76, 77, 80],
+        ),
+        (
             "Approvals",
             "An agent cannot approve its own call because it cannot address\n"
             "            the thing that approves calls.",
@@ -289,8 +320,9 @@ def subsystems() -> str:
                 "What it does not detect is asserted as a passing test",
                 "A tenant comes from the registration that verified the token",
                 "One writer per chain, enforced at the file",
+                "Ed25519 signatures when a key is mounted; one key signs one file",
             ],
-            [50, 51, 70],
+            [50, 51, 70, 78],
         ),
         (
             "Performance",
@@ -327,6 +359,10 @@ LIMITS: Final = (
     "One identity provider per tenant. Many tenants behind one issuer is a declared non-goal.",
     "The audit chain does not detect tail truncation. An external anchor does,\n"
     "    and that limit is asserted as a passing test.",
+    "The chain is signed only if you give it a key. Whoever holds the key, including\n"
+    "    the running gateway, can still rewrite what it signed.",
+    "The learned classifier learned BIPIA's style. It catches 3 of this project's own 37\n"
+    "    attacks and flags 23% of AgentDojo's clean tool outputs.",
     "No audit log rotation. The chain file grows without bound.",
     "The result cache and the credential cache are in-process. Two replicas do not share them.",
 )
@@ -472,7 +508,7 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
   <div>
     <span class="pill">MCP gateway</span>
     <span class="pill">v2.3.0</span>
-    <span class="pill">~2,200 tests</span>
+    <span class="pill">%%TESTS%%</span>
   </div>
   <h1>An AI agent reads a document. The document tells it to do something else.</h1>
   <p class="deck">This is the security boundary that sits in between &mdash; it decides what an
@@ -502,10 +538,12 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
   <div class="finding">
     <p><strong>The firewall detected it, at high confidence, and was not allowed
     to stop it.</strong>
-    Three findings, zero triggers. Only two detectors are permitted to withhold a result, and the
+    Findings, but zero triggers. Only two detectors are permitted to withhold a result, and the
     list is short because it was measured: those two produced zero findings across 106 ordinary
     documents. The detector that caught this one flags roughly one benign document in five, and
-    a control that eats real documents is a control somebody switches off.</p>
+    a control that eats real documents is a control somebody switches off. The learned
+    classifier scores the same text and reports what it would have withheld, so a deployment
+    can count the cost of enforcing it before choosing to.</p>
     <p>So three layers looked at this attack. <strong>Screening saw it and was measured into
     silence. Provenance framing labelled it and travelled with the payload</strong> &mdash; the
     agent carried the fenced text forward, so the fence did not stop the leak.
@@ -561,7 +599,8 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
 cd agent-control-plane
 docker compose up -d --wait
 make attack-demo        # the transcript above, on your machine
-make audit-verify       # walk the chain it just wrote</pre>
+make audit-verify       # walk the chain it just wrote
+make model-demo         # a local model as the agent (needs Ollama)</pre>
   <p class="note">Or pull the published image, pinned:
   <code>docker pull %%IMAGE%%</code></p>
 </section>
@@ -697,6 +736,15 @@ make audit-verify       # walk the chain it just wrote</pre>
 """
 
 
+def test_count() -> str:
+    """The README's own figure (``~2,400 tests``), so the page and the README agree."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    match = re.search(r"\*\*(~[\d,]+ tests)", readme)
+    if match is None:
+        raise SystemExit("README.md no longer states a test count. NOTHING HAS BEEN WRITTEN.")
+    return match.group(1)
+
+
 def adr_count() -> int:
     """Counted from the directory, because a hand-typed count was already wrong once."""
     decisions = (ROOT / "docs" / "decisions").glob("[0-9][0-9][0-9][0-9]-*.md")
@@ -745,6 +793,7 @@ def build() -> str:
     page = page.replace("%%REPO%%", REPO)
     page = page.replace("%%IMAGE%%", IMAGE)
     page = page.replace("%%ADRS%%", str(adr_count()))
+    page = page.replace("%%TESTS%%", test_count())
     page = page.replace("%%ADR57%%", adr_link(57, "the demo"))
     page = page.replace("%%ADR50%%", adr_link(50, "ADR 0050"))
     page = page.replace("%%TRACE%%", render_trace(records))

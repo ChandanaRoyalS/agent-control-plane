@@ -74,7 +74,7 @@ HELD = frozenset(
 )
 
 
-def firewall_mode() -> str:
+def gateway_env() -> dict[str, str]:
     """What the *running* gateway was told, not what the compose file says.
 
     The two disagree the moment anybody sets the variable on the command line,
@@ -93,10 +93,23 @@ def firewall_mode() -> str:
         )
         entries = json.loads(completed.stdout) if completed.returncode == 0 else []
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        return "unknown"
+        return {}
     if not isinstance(entries, list):
-        return "unknown"
-    return parse_env([e for e in entries if isinstance(e, str)]).get("ACP_FIREWALL_MODE", "off")
+        return {}
+    return parse_env([e for e in entries if isinstance(e, str)])
+
+
+def firewall_mode() -> str:
+    return gateway_env().get("ACP_FIREWALL_MODE", "off")
+
+
+def learned_mode() -> str:
+    """The learned classifier's setting; `report` is the default (ADR 0076)."""
+    return gateway_env().get("ACP_FIREWALL_LEARNED", "report")
+
+
+def signing() -> str:
+    return "on" if gateway_env().get("ACP_AUDIT_SIGNING_KEY_FILE") else "off"
 
 
 def audit_position() -> int:
@@ -299,6 +312,12 @@ def main() -> int:
         emit("  A detector that fires on real documents cannot be allowed to withhold")
         emit("  them — so a detector can be certain and still not act.")
         emit()
+        emit(f"  A learned classifier also scores every result (`{learned_mode()}`).")
+        emit("  It catches polite injections the patterns cannot, 64% of BIPIA's")
+        emit("  held-out attacks, but it also flags 2% of clean documents and 23% of")
+        emit("  AgentDojo's clean tool outputs, so it may withhold only when an")
+        emit("  operator sets ACP_FIREWALL_LEARNED=enforce (ADR 0075, 0076, 0080).")
+        emit()
         before = audit_position()
         try:
             bearer = token_for("alice")
@@ -324,15 +343,26 @@ def report_screenings(found: list[dict[str, Any]]) -> None:
     for record in found:
         detail = record.get("detail") or {}
         emit(f"  #{record.get('seq')}  {record.get('tool')}  -> {record.get('outcome')}")
+        emit(f"      detectors   {detail.get('detectors')}")
         emit(f"      families    {detail.get('families')}")
         emit(f"      confidence  {detail.get('confidences')}")
         emit(f"      findings    {detail.get('finding_count')}")
         emit(f"      TRIGGERS    {detail.get('trigger_count')}   <- what could withhold")
+        learned = detail.get("learned")
+        if learned:
+            emit(f"      LEARNED CLASSIFIER  {learned}")
     emit()
     emit("  `findings` is what the detectors noticed. `triggers` is how many of")
     emit("  those came from a detector permitted to act. When findings are high")
     emit("  and triggers are zero, THE FIREWALL SAW IT AND WAS NOT ALLOWED TO")
     emit("  STOP IT — which is a measurement decision, not a bug.")
+    if any((r.get("detail") or {}).get("learned") for r in found):
+        emit()
+        emit("  The learned classifier's line is its score against two thresholds:")
+        emit("  at or above the first it reports, at or above the second it would")
+        emit("  withhold under ACP_FIREWALL_LEARNED=enforce. In `report` it is")
+        emit("  counted, so a deployment can see what enforcing would cost before")
+        emit("  choosing it.")
 
 
 def report_outcomes(direct: list[str], through: list[str]) -> None:
@@ -360,6 +390,11 @@ def report_outcomes(direct: list[str], through: list[str]) -> None:
     emit("  The direct path produced no record at all. That is the other half of")
     emit("  the argument and it is easy to miss: the first act is not just")
     emit("  unprotected, it is UNEXPLAINABLE. Nobody could reconstruct it after.")
+    emit()
+    emit(f"  Entry signing is {signing()} in this stack. Without a key, whoever can")
+    emit("  write the chain file can rewrite it consistently; with one, only the")
+    emit("  key holder can (`acp audit keygen`, ADR 0078). The compose stack")
+    emit("  ships no key on purpose: a private key is yours to make, not to clone.")
 
 
 if __name__ == "__main__":

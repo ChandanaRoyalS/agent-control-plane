@@ -134,7 +134,7 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
   <div>
     <span class="pill">MCP gateway</span>
     <span class="pill">v2.3.0</span>
-    <span class="pill">~2,200 tests</span>
+    <span class="pill">~2,300 tests</span>
   </div>
   <h1>An AI agent reads a document. The document tells it to do something else.</h1>
   <p class="deck">This is the security boundary that sits in between &mdash; it decides what an
@@ -164,10 +164,12 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
   <div class="finding">
     <p><strong>The firewall detected it, at high confidence, and was not allowed
     to stop it.</strong>
-    Three findings, zero triggers. Only two detectors are permitted to withhold a result, and the
+    Findings, but zero triggers. Only two detectors are permitted to withhold a result, and the
     list is short because it was measured: those two produced zero findings across 106 ordinary
     documents. The detector that caught this one flags roughly one benign document in five, and
-    a control that eats real documents is a control somebody switches off.</p>
+    a control that eats real documents is a control somebody switches off. The learned
+    classifier scores the same text and reports what it would have withheld, so a deployment
+    can count the cost of enforcing it before choosing to.</p>
     <p>So three layers looked at this attack. <strong>Screening saw it and was measured into
     silence. Provenance framing labelled it and travelled with the payload</strong> &mdash; the
     agent carried the fenced text forward, so the fence did not stop the leak.
@@ -206,10 +208,12 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
   <div class="grid">
       <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md"><span class="figure">0 of 106</span><span class="caption">benign documents withheld &mdash; the set the blocking detectors were chosen on</span></a>
       <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0047-a-baseline-not-a-threshold.md"><span class="figure">75% / 38%</span><span class="caption">recall and precision on the family this attack belongs to</span></a>
-      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">2.14&times;</span><span class="caption">of throughput is what durability costs, measured</span></a>
-      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0053-durability-is-a-trade-blocking-the-loop-is-a-bug.md"><span class="figure">12.6&times;</span><span class="caption">p95 on a path with no disk write &mdash; a defect a load harness found</span></a>
       <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0054-an-overhead-number-is-meaningless-without-its-switch-settings.md"><span class="figure">2.5&times;</span><span class="caption">a direct call on a cache miss, recorded 2026-10-04 with its switch settings</span></a>
       <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0023-prove-the-invariant-and-prove-the-proof.md"><span class="figure">20</span><span class="caption">deliberate breakages, caught by the tests written to catch them</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0064-held-out-v2-scored-once.md"><span class="figure">595 / 595</span><span class="caption">InjecAgent attacks with their &ldquo;ignore previous instructions&rdquo; prefix caught &mdash; and 0 of 595 once the prefix is removed</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0075-a-learned-classifier-measured-once.md"><span class="figure">64%</span><span class="caption">of BIPIA's held-out polite injections the learned classifier would withhold, where the patterns withhold none; 2% of clean contexts flagged</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0080-more-attacks-did-not-move-the-ones-that-matter.md"><span class="figure">23%</span><span class="caption">of AgentDojo's clean tool outputs the classifier withholds &mdash; why enforcing it is opt-in</span></a>
+      <a class="tile" href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0073-a-model-decides-the-calls.md"><span class="figure">2 of 10 &rarr; 0</span><span class="caption">trials in which a local model (qwen2.5:7b) leaked the payroll table, directly and then through the gateway</span></a>
   </div>
   <p class="note">Every figure links to the decision record that produced it, including the two
   that record a prediction the author got wrong.</p>
@@ -243,6 +247,13 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
         <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0036-detect-before-deciding-and-count-the-false-positives.md">0036</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0037-tell-the-model-where-the-text-came-from.md">0037</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0038-refuse-loudly-and-never-quote-the-payload.md">0038</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0039-the-benign-corpus-and-the-two-detectors-it-demoted.md">0039</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0047-a-baseline-not-a-threshold.md">0047</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0069-the-unexamined-tail-is-the-trigger.md">0069</a></p>
       </article>
       <article class="card">
+        <h3>Learned classifier</h3>
+        <p class="claim">A model on the enforcement path, scored once on data nobody here wrote,
+            and allowed to withhold only by an operator's choice.</p>
+        <ul><li>Logistic regression over character n-grams, 193 weights, pure Python</li><li>Thresholds chosen on validation; sealed sets scored once, then spent</li><li>In report mode by default; two settings to withhold</li><li>A transformer and a retrain both measured, both failed their bar</li></ul>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0074-the-classifiers-data-before-the-classifier.md">0074</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0075-a-learned-classifier-measured-once.md">0075</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0076-the-learned-classifier-withholds-only-by-choice.md">0076</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0077-a-transformer-fixed-before-it-is-trained.md">0077</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0080-more-attacks-did-not-move-the-ones-that-matter.md">0080</a></p>
+      </article>
+      <article class="card">
         <h3>Approvals</h3>
         <p class="claim">An agent cannot approve its own call because it cannot address
             the thing that approves calls.</p>
@@ -252,8 +263,8 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
       <article class="card">
         <h3>Audit</h3>
         <p class="claim">A call this gateway cannot record does not happen.</p>
-        <ul><li>A hash chain, verified against an anchor the gateway cannot reach</li><li>What it does not detect is asserted as a passing test</li><li>A tenant comes from the registration that verified the token</li><li>One writer per chain, enforced at the file</li></ul>
-        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0050-an-audit-record-is-not-a-log-line.md">0050</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0051-a-tenant-is-an-issuer-not-a-claim.md">0051</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0070-the-fleet-release-made-true.md">0070</a></p>
+        <ul><li>A hash chain, verified against an anchor the gateway cannot reach</li><li>What it does not detect is asserted as a passing test</li><li>A tenant comes from the registration that verified the token</li><li>One writer per chain, enforced at the file</li><li>Ed25519 signatures when a key is mounted; one key signs one file</li></ul>
+        <p class="adrs"><a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0050-an-audit-record-is-not-a-log-line.md">0050</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0051-a-tenant-is-an-issuer-not-a-claim.md">0051</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0070-the-fleet-release-made-true.md">0070</a> <a href="https://github.com/ChandanaRoyalS/agent-control-plane/blob/main/docs/decisions/0078-one-key-signs-one-chain.md">0078</a></p>
       </article>
       <article class="card">
         <h3>Performance</h3>
@@ -275,6 +286,10 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
     <li>One identity provider per tenant. Many tenants behind one issuer is a declared non-goal.</li>
     <li>The audit chain does not detect tail truncation. An external anchor does,
     and that limit is asserted as a passing test.</li>
+    <li>The chain is signed only if you give it a key. Whoever holds the key, including
+    the running gateway, can still rewrite what it signed.</li>
+    <li>The learned classifier learned BIPIA's style. It catches 3 of this project's own 37
+    attacks and flags 23% of AgentDojo's clean tool outputs.</li>
     <li>No audit log rotation. The chain file grows without bound.</li>
     <li>The result cache and the credential cache are in-process. Two replicas do not share them.</li>
   </ul>
@@ -286,7 +301,8 @@ footer{border-top:1px solid var(--line);color:var(--dim);font-size:13px;
 cd agent-control-plane
 docker compose up -d --wait
 make attack-demo        # the transcript above, on your machine
-make audit-verify       # walk the chain it just wrote</pre>
+make audit-verify       # walk the chain it just wrote
+make model-demo         # a local model as the agent (needs Ollama)</pre>
   <p class="note">Or pull the published image, pinned:
   <code>docker pull ghcr.io/chandanaroyals/agent-control-plane:2.3.0</code></p>
 </section>

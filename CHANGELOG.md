@@ -15,6 +15,22 @@ without somebody accepting the change.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-05
+
+The last two items from the external review's follow-ups. Audit entries can be
+signed, so a writer without the key can no longer rewrite the chain
+([ADR 0078](docs/decisions/0078-one-key-signs-one-chain.md)). And AgentDojo was
+added as a second source of attacks under a rule fixed before training; the
+retrained classifier failed it, so the gateway's model is unchanged, and the
+current model's false-positive rate on tool-shaped text is now measured and
+documented ([ADR 0079](docs/decisions/0079-a-second-source-of-attacks.md),
+[ADR 0080](docs/decisions/0080-more-attacks-did-not-move-the-ones-that-matter.md)).
+
+**Minor** under ADR 0058: one new setting (`ACP_AUDIT_SIGNING_KEY_FILE`), one new
+command (`acp audit keygen`) and one new option (`acp audit verify --public-key`);
+no default changed. A committed `config/audit-signing.pub` makes `verify` require
+signatures.
+
 ### Added
 
 - AgentDojo as a second source of attacks (ADR 0079): 1,698 tool-result
@@ -30,14 +46,6 @@ without somebody accepting the change.
   with the candidate's weights. `scripts/train_classifier.py` takes
   `--data-version` and `--out`; `scripts/compare_learned.py` scores both models
   once and applies the rule.
-
-### Documented
-
-- The learned classifier's enforce threshold withholds 23% [10–40] of AgentDojo's
-  clean tool outputs: ordinary emails that ask the reader to do something. The
-  setting's documentation, `.env.example` and ADR 0076 now say so beside the 2%
-  measured on BIPIA.
-
 - Signed audit entries (ADR 0078). `ACP_AUDIT_SIGNING_KEY_FILE` names an
   Ed25519 private key; each entry then carries `sig` and `kid`, and
   `acp audit verify --public-key` (default `config/audit-signing.pub`, when it
@@ -48,6 +56,10 @@ without somebody accepting the change.
 
 ### Changed
 
+- The learned classifier's enforce threshold withholds 23% [10–40] of AgentDojo's
+  clean tool outputs: ordinary emails that ask the reader to do something. The
+  setting's documentation, `.env.example` and ADR 0076 now say so beside the 2%
+  measured on BIPIA.
 - CI and the release workflow use the current major version of every action
   (`actions/checkout@v7`, `astral-sh/setup-uv@v7`, `actions/upload-artifact@v7`,
   `docker/build-push-action@v7` and `login`, `setup-buildx`, `setup-qemu` at
@@ -711,7 +723,8 @@ Stated here rather than left to be discovered:
   [`docs/decisions/README.md`](docs/decisions/README.md).
 - 1,898 tests, 94% coverage, `mypy --strict` clean.
 
-[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v2.2.1...HEAD
+[Unreleased]: https://github.com/ChandanaRoyalS/agent-control-plane/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.3.0
 [2.2.1]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.2.1
 [2.2.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.2.0
 [2.1.0]: https://github.com/ChandanaRoyalS/agent-control-plane/releases/tag/v2.1.0

@@ -114,3 +114,17 @@ def test_the_transformer_record_is_the_preregistered_run_on_the_same_splits() ->
     assert record["model"]["validation_digest"] == linear.meta["validation_digest"]
     assert record["sealed"], "the sealed sets have not been scored"
     assert record["sealed_on"] == record["model"]["weights_sha256"]
+
+
+V2 = default_root() / "learned" / "v2-comparison.json"
+
+
+def test_the_v2_comparison_names_the_committed_model_and_kept_it() -> None:
+    """ADR 0080: the candidate failed ADR 0079's rule, so the gateway's model is v1."""
+    record = json.loads(V2.read_text(encoding="utf-8"))
+    candidate = default_root() / "learned" / "v2-candidate.json"
+
+    assert record["v1"]["sha256"] == hashlib.sha256(MODEL_PATH.read_bytes()).hexdigest()
+    assert record["v2"]["sha256"] == hashlib.sha256(candidate.read_bytes()).hexdigest()
+    assert record["rule"]["replace"] is False
+    assert "data_version" not in load_model().meta

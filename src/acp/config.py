@@ -202,7 +202,8 @@ class GatewaySettings(BaseSettings):
     ``report`` (the default) scores every result and logs a finding, HIGH where
     ``enforce`` would withhold. ``enforce`` lets that HIGH finding withhold, and
     only when ``firewall_mode`` is also ``enforce``: it withheld 2% of clean
-    BIPIA test documents, so it is never on by default. ``off`` skips the cost
+    BIPIA test documents and 23% of AgentDojo's clean tool outputs (ADR 0080),
+    so it is never on by default. ``off`` skips the cost
     (about a millisecond per thousand characters).
     """
 

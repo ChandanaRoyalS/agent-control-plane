@@ -120,6 +120,7 @@ If you have ten minutes and want the ones that carry the most weight:
 | [0077](0077-a-transformer-fixed-before-it-is-trained.md) | a small transformer on the linear model's exact splits, with base model, hyperparameters, threshold rules and the bar it must clear fixed before training; one run: 92% of BIPIA's held-out attacks at 1% clean flagged (bar met), but worse than the linear model on this project's own documents, so not served |
 | [0078](0078-one-key-signs-one-chain.md) | audit entries can be signed with Ed25519: the private key is a mounted secret, the public key is committed so `verify` requires signatures, and one key signs one file from its first entry, so enabling or rotating starts a new file; it stops a writer without the key, not the key holder or truncation |
 | [0079](0079-a-second-source-of-attacks.md) | AgentDojo imported as data version 2 (tool results with planted goals, one goal in three sealed, its own attack template never trained on), and the rule a model trained on it must meet to replace the gateway's, fixed before training: more internal attacks caught, no more internal or BIPIA clean documents withheld |
+| [0080](0080-more-attacks-did-not-move-the-ones-that-matter.md) | the model retrained with AgentDojo failed ADR 0079's rule (same 3 of 37 internal attacks, 5 internal benign withheld against 1), so the gateway's model is unchanged; scoring found the current model withholds 23% of AgentDojo's clean tool outputs |
 
 ## Approvals, audit, tenancy
 

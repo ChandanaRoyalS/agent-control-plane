@@ -24,6 +24,19 @@ without somebody accepting the change.
   `assemble(data_version=2)` adds it; version 1, what the committed model was
   trained on, stays the default. ADR 0079 also fixes, before training, the rule a
   model trained on it must meet to replace the gateway's.
+- The result (ADR 0080): a model retrained with AgentDojo caught the same 3 of 37
+  internal attacks and withheld 5 internal benign documents against 1, so it did
+  not replace the gateway's model. Recorded in `corpus/learned/v2-comparison.json`
+  with the candidate's weights. `scripts/train_classifier.py` takes
+  `--data-version` and `--out`; `scripts/compare_learned.py` scores both models
+  once and applies the rule.
+
+### Documented
+
+- The learned classifier's enforce threshold withholds 23% [10–40] of AgentDojo's
+  clean tool outputs: ordinary emails that ask the reader to do something. The
+  setting's documentation, `.env.example` and ADR 0076 now say so beside the 2%
+  measured on BIPIA.
 
 - Signed audit entries (ADR 0078). `ACP_AUDIT_SIGNING_KEY_FILE` names an
   Ed25519 private key; each entry then carries `sig` and `kid`, and

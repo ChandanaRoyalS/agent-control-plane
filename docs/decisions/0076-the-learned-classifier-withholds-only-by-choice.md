@@ -68,6 +68,11 @@ so a missing or corrupt model file fails at startup, not on a call. The startup
 line `firewall.enabled` names the learned mode, its thresholds, and
 `learned_classifier` among the enforceable detectors when it is.
 
+**Amended by ADR 0080.** On AgentDojo's clean tool outputs, a set neither model was
+trained on, the enforce threshold withheld 7 of 30 (23% [10–40]): ordinary emails and
+a notice that ask the reader to do something. Point 2 above is the reason this is
+opt-in; the published range now includes that number.
+
 ## Consequences
 
 - With the default configuration every result now costs the scoring time. The
